@@ -13,7 +13,7 @@ This code explores the effect of what is removed on the amount of overloads/isla
 
 ```{r}
 
-packages <- c("tidyverse", "igraph","readr","readxl", "broom", "zoo", "stringr","foreach", "doMC",  "xtable", "geomnet", "ggnetwork", "rlang", "animation", "ggridges", "poweRlaw", "Rtsne", "caret", "ranger", "xtable", "broom", "modelr", "yardstick", "sf", "rgdal", "foreach", "doMC")
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "zoo", "stringr","foreach", "doMC",  "xtable", "geomnet", "ggnetwork", "rlang", "animation", "ggridges", "poweRlaw", "Rtsne", "caret", "ranger", "xtable", "broom", "modelr", "yardstick", "sf", "rgdal", "ggtern")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -25,8 +25,6 @@ sapply(packages, library, character.only = TRUE)
 lapply(packages, library, character.only = TRUE)
 library(PowerGridNetworking)
 
-select <- dplyr::select
-
 #Set up file system to read the correct folders this switches between aws and windows mode
 
 basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
@@ -35,15 +33,18 @@ datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
 FiguresFolder <- file.path(LatexFolder, "Figures")
 TablesFolder <- file.path(LatexFolder, "Tables")
 MatricesFolder <- file.path(LatexFolder, "Matrices")
-#Functions <-"/home/jonno/Create_ETYS_network/Functions"
 Tariff <- file.path(basewd,"Tariff and Transport")
-PLwd <- "/media/jonno/Seagate Expansion Drive/Innoculation"
-Saved_Sims <- file.path(PLwd, "Saved_Sims")
-Deletion_Order_Folder <-  file.path(PLwd, "DeletionOrder") #Only one of the deletion order folders is needed. Either Nodes or Edges
-Deletion_Order_Folder <- file.path(PLwd, "DeletionOrder_Nodes")
-StratAttackWd <- "/media/jonno/Seagate Expansion Drive/ProportionalLoading/StratAttack"
+#PLwd <- "/media/jonno/Seagate Expansion Drive/Innoculation"
+Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
 
-source("/home/jonno/Create_ETYS_network/SubCode/LoadData2.R")
+
+#Load necessary datasets and great the base powergrid network
+source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
+
+#Load some other useful functions
+list.files("/home/jonno/Useful_PhD__R_Functions", pattern = ".R", full.names = T) %>%
+  walk(~source(.x))
+
 
 
 #FOr NetSci
@@ -52,118 +53,14 @@ source("/home/jonno/Create_ETYS_network/SubCode/LoadData2.R")
 
 #Create the Attack Orders
 ```{r}
-#Set the path to a large enough storage
-setwd(PLwd)
+
 
 #Ensure there is powerflow
-g <- PowerFlow(gbase, "FECK40")
+g <- PowerFlow(gbase, "FECK")
 
 g %>%
   simplify(., remove.multiple = T, remove.loops = T) %>% 
     plot(.,vertex.size=.8, edge.arrow.size=.4, vertex.label=NA)
-
-NetworkStats(g) %>%
-  xtable() %>% print(type = "latex", file = file.path(FiguresFolder, "NetworkStats.txt"))
-
-AttackRounds <- 1000
-
-#Create a reproducible attack order
-seed<- 1589
-filename <- "DeleteOrders100.rds"
-if(file.exists(filename)){
-  DeleteOrders <- readRDS(filename)
-} else {
-set.seed(seed)
-DeleteOrders <- MultiAttackOrder(gbase, 100)  
-saveRDS(DeleteOrders, filename)
-}
-
-```
-
-#Set alpha colour gradient
-```{r}
-  AlphaGrad <-scale_colour_gradientn(colors = c("red",   "limegreen"),
-                          breaks = c(1,2,7,20,50),
-                          trans = "log",
-                          values = scales::rescale((c(0, 6, 7, 20, 50))),
-                          name = expression(alpha*" level")) #"Alpha value"
-```
-
-
-
-
-#remove keep Load/gen from targets
-
-```{r}
-#This includes trans1 but doesn't mention that.
-#It needs to be explicitly used in the function or betterstill replaced with g
-SelectiveDelete <- function(DeleteOrders, filterCond){
-
-  TransferNodes <- 1:nrow(DeleteOrders) %>% map_df(~{
-
-  test <- DeleteOrders[.x,-1] %>% 
-  gather(key = Target, value = Node) %>%
-  left_join(., trans1 %>% select(Node = Bus.Name, NetGen = BusTransferB), by = "Node") %>%#smaller than 0 is demand larger is gen
-  filter(!!filterCond) %>%
-  select(-NetGen) %>%
-    mutate(Target = 1:n()) %>% #Renumber the nodes so there are no NA values where certain nodes have been removed
-  spread(key = Target, value = Node) %>%
-    set_names(paste0("Target_", names(.))) #Add back in the word "Target"
-  
-}) %>%
-  mutate(SimulationID = paste0("Simulation_ID_", 1:nrow(DeleteOrders))) %>%
-    select(SimulationID, everything() )
-  
-  
-}
-
-
-TransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen == 0))
-GenNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen > 0))
-LoadNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen < 0))
-NonTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen != 0))
-GenTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen >= 0))
-LoadTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen <= 0))
-```
-
-
-```{r}
-
-list("TransferNodes", "GenNodes", "LoadNodes", "NonTransferNodes", "GenTransferNodes", "LoadTransferNodes") %>%
-  walk(~{
-    
-  setwd(Saved_Sims)
-
-  folder <-.x
-  print(folder)
-
-    if(!file.exists(folder)){
-      dir.create(folder)
-    }
-
-  DeleteOrders <- get(.x)
-#   
-#   n <- 6
-# 
-# groups <- split(1:nrow(DeleteOrders), sort(rep_len(1:n, length(1:nrow(DeleteOrders)))))
-# 
-# registerDoMC(n)
-# foreach (i = 1:n) %dopar% {
-# 
-#  SaveMultiAttacks(g, DeleteOrders[groups[[i]],], folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
-#   
-# }
-
-  
-  SaveMultiAttacks(g, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
-
-   
-  })
-
-
-
-
-
 
 ```
 
@@ -172,63 +69,121 @@ Get the round number that an edge was deleted.
 
 ```{r}
 
-FolderVect <- list.files(path = Saved_Sims) #folder where all the alpha FOLDERS are
-FileVect <- list.files(path = Deletion_Order_Folder) %>% gsub(".rds", "",.) #folder where all the deletion order FILES are
-new.type <- FolderVect[!(FolderVect %in% FileVect)] #The FOLDERS that are not present as FILES
 
-if(length(new.type)>0){
-file.path(Saved_Sims, new.type) %>%
-  walk( ~{
-    print(.x) #print name of folder where deletion order will be calculated
-    
-  Removeddf <- list.files(path = .x, full.names = TRUE) %>% #list the different network of network rds files present
-    map_df(~{
-        file <- .x
-        print(file)
-        read_rds(file) %>%
-          RoundTypeRemoved (.)  %>%
-          mutate(Sim = gsub(".rds", "",file) %>% basename)
-      }
-    ) %>%
-    group_by(Sim) %>%
-    mutate(RoundRemoved = ifelse(is.na(RoundRemoved), max(RoundRemoved), RoundRemoved),
-         alpha = basename(.x)) %>% 
-    ungroup
-
-  Removeddf %>%
-        write_rds(x = ., paste0(file.path(Deletion_Order_Folder,basename(.x)), ".rds"))
-  }
-  )
-
-} 
-  
 AllRemovedNodes <- list.files(Deletion_Order_Folder, full.names = TRUE) %>%
   map_df(~read_rds(.x))
 
 
-CleanNames <- function(df, TargetColumn, AlphaOrder){
-temp <- df  %>%
-  mutate_(temp1 = TargetColumn) %>%
- mutate(temp2 = temp1,
-          temp2 = temp1 %>%
-           str_replace_all(., "_", " ") %>%
-           str_extract_all(., "([0-9])+")%>% as.numeric(.)/100,
-temp3 = temp1 %>%
-  str_replace_all(., "_", " ") %>%
-  str_extract_all(., "([aA-zZ\\s])+", T) %>%
-  paste0(., ifelse(is.na(temp2), "", temp2)),
-        temp3 = temp3 %>% as.factor() %>%
-  fct_relevel(., AlphaOrder)
-) %>%
-  select(temp3)
-temp <-temp  %>% set_names(paste0(TargetColumn,"2")) 
- 
-temp <- bind_cols(df, temp)
-return(temp)
-}
+OverloadType <- list.files(Deletion_Order_Folder, 
+           pattern = "RandomAttack_", 
+           full.names = TRUE) %>%
+  map_df(~{
+    print(.x)
+    list.files(.x, full.names = T) %>%
+      map_df(~{
+        readRDS(.x) %>%
+          #filter(type == "Edge") %>%
+          group_by(Name, RemovalType, type) %>%
+          summarise(counts = n()) %>%
+          spread(key = RemovalType, value = counts, fill = 0) 
+      })
+    
+  }) %>%
+  group_by(Name, type) %>%
+  summarise_all(sum)
+
+  
+  OverloadType %>%
+    filter(type == "Node") %>%
+  ggtern(aes(Islanded,  Targeted, Overloaded)) + 
+    geom_point() +
+    ggtitle("Ternary plot of the different failure types")
+  
+LongProb <-    OverloadType %>%
+    filter(type == "Edge") %>%
+  select(-type) %>%
+    gather(key = FailureType, value = value, -Name) %>% 
+    mutate(value = value/10000) 
+  
+  LongProb %>%
+    ggplot(aes(x = value, colour = FailureType)) + 
+    geom_density() +
+    labs(title = "Probability density of edge failure type", x = "Proability of failure")
+    
+
+Mapdf <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(LongProb, by = c("Link"="Name"))
+  left_join(LongProb, by = c("Node"="Name"))
+  
+#using the actual value as well as the rank is interesting, but you need to change the midpoint value
+Mapdf %>%
+  filter(!is.na(value)) %>%
+  group_by(FailureType) %>%
+  mutate(rank = ntile(value, 100)) %>%
+  ungroup %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(colour = rank, group = Link)) + 
+   facet_grid(PositionType~FailureType) +
+   scale_colour_gradient2(low = "blue",mid = "black", high = "red", midpoint = 50)
+
+Mapdf %>%
+  filter(!is.na(value)) %>%
+  group_by(FailureType) %>%
+  mutate(rank = ntile(value, 100)) %>%
+  ungroup %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+    geom_line(aes(group = Link)) +
+  geom_point(aes(colour = rank)) + 
+   facet_grid(PositionType~FailureType) +
+   scale_colour_gradient2(low = "blue",mid = "black", high = "red", midpoint = 50)
+
+```
+
+What is the relationship between centrality and e-centrality and loss mode
+```{r}
+
+  ElecCen1 <- ElectricalCentrality(g)
+  
+   StratAttackVect <-  c(AttackOrderNames(g, degree),
+                         AttackOrderNames(g, EntropicDegree, Scale = TRUE),
+                         AttackOrderNames(g, EntropicDegree,  value = "PowerFlow", Scale = TRUE),
+                         ElecCen1$NodeEC %>% arrange(-NodeEC) %>% .$Bus.Name,
+                         AttackOrderNames(g, betweenness)) 
+   
+   
+test   <- tibble(degree = degree(g), 
+   EntropicDeg = EntropicDegree(g, Scale = T), 
+   EntropicPower = EntropicDegree(g,  value = "PowerFlow", Scale = TRUE),
+   ElecCen = ElecCen1$NodeEC$NodeEC,
+   Cent = betweenness(g, normalized = T)
+   ) %>%
+     mutate_all(~{ifelse(is.finite(.), ., 0)}) %>%
+  mutate(Name = get.vertex.attribute(g, "name")) %>%
+  left_join(OverloadType %>% filter(type =="Node")) %>%
+  select(-Name,-type) %>%
+  filter(complete.cases(.))
+   
+
+#Degree correlates strongly with centrality
+#Degree and centrality are both negatively corellated with Islanding and positively corellated with targetting
+#there is only a very weak negative corellation between overloading and degree
+cor(test)
+
+test2 <- ElecCen1$EdgeEC %>%
+  rename(Name = Edgename) %>%
+  left_join(OverloadType %>% filter(type == "Edge")) %>%
+  left_join(tibble(Name = get.edge.attribute(g, "name"), Centrality = edge_betweenness(g, directed = F))) %>%
+filter(complete.cases(.))
+
+
+test2 %>%
+  select(-Name, -type) %>%
+  cor
+
 
 
 ```
+
 
 ```{r}
  LossFractionByRound <- AllRemovedNodes %>%
@@ -311,564 +266,6 @@ Loss3 %>%
    facet_wrap(type~RemovalType, scales = "free_y") +
     theme(legend.position = "none", 
         axis.text.x = element_text(angle = 45, hjust = 1)) 
-
-
-```
-
-
-
-
-#Make a really large number of random attacks
-
-```{r}
-AttackRounds<- 1000
-
-#Create a reproducible attack order
-seed<- 1589
-filename <- "DeleteOrders10k.rds"
-if(file.exists(filename)){
-  DeleteOrders <- readRDS(filename)
-} else {
-set.seed(seed)
-DeleteOrders <- MultiAttackOrder(gbase, 10000)  
-saveRDS(DeleteOrders, file.path(PLwd, filename))
-}
-
-```
-
-
-
-```{r}
-folder <- "Random_Attacks"
-
-  if(!file.exists(folder)){
-    dir.create(folder)
-  }
-
-SaveMultiAttacks(g, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
-```
-
-
-##Multicore attacks
-
-This doesn't work but I don't understand why
-
-```{r}
-library(foreach)
-library(doMC)
-
-folder <- "Random_Attacks"
-
-  if(!file.exists(folder)){
-    dir.create(folder)
-  }
-
-
-n <- 4
-
-groups <- split(1:nrow(DeleteOrders), sort(rep_len(1:n, length(1:nrow(DeleteOrders)))))
-
-registerDoMC(n)
-foreach (i = 1:n) %dopar% {
-
- SaveMultiAttacks(g, DeleteOrders[groups[[i]],], folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
-  
-}
-```
-
-
-
-
-
-#Scramble node function
-```{r}
-
-
-
-```
-
-
-
-```{r}
-
-seed<- 1589
-filename <- "DeleteOrders100.rds"
-if(file.exists(filename)){
-  DeleteOrders <- readRDS(filename)
-} else {
-set.seed(seed)
-DeleteOrders <- MultiAttackOrder(gbase, 100)  
-saveRDS(DeleteOrders, filename)
-}
-
-#Make simulations order
-NewFunctionOrder <- NodeCharacteristiceScrambler(gbase, 100)
-  
-```
-
-##Generate Stategies
-```{r}
-
-
-
-
-```
-
-#Simaulate attacks using strategies
-```{r}
-setwd(file.path(PLwd, "Scramble", "Strategy"))
-
-for(n in 1:(ncol(NewFunctionOrder)-1)){
- 
- Sim_Order<- NewFunctionOrder  %>% select(-1) %>% pull(n)
-  
-  g <- ReOrderGraph(gbase, Sim_Order)
-  #calculate Flow
-  g <- PowerFlow(g, "FECK40")
-  #Make edges proportional to flow
-  g<- Proportional_Load(g, alpha = 5)
-  
-  folder <- paste0("Order_", n)
-  
-    if(!file.exists(folder)){
-      dir.create(folder)
-    }
-  
-  StratAttackVect <- CreateStrategyAttackDf(g)
-
-SaveMultiAttacks(g,  StratAttackVect, folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
-}
-
-```
-
-#Extract data for scrambles
-
-
-```{r}
-ExtractAttackStats("/media/jonno/Seagate Expansion Drive/Innoculation/Scramble/Strategy", file.path(PLwd, "Attack_Strategy_SummaryData"))
-
-
-AttackRoundData <- list.files(path = file.path("/media/jonno/Seagate Expansion Drive/ProportionalLoading","SummaryData"), 
-                              pattern = ".rds", 
-                              full.names = TRUE) %>%
-   map_df(~read_rds(.x)) %>%
-  filter(alpha == "alpha_value_500") %>%
-  mutate(Strategy = "RandomAttack",
-  PercNum = NodesAttacked/958) %>% 
-  group_by(NodesAttacked) %>%
-  mutate(rankblack = min_rank(-Blackout),
-         rankGC = min_rank(GCfract)) %>%
-  ungroup %>%
-  SummariseMonteCarlo %>%
-  mutate(PercNum = NodesAttacked/958)
-
-
-AttackStratRoundData <- list.files(path = file.path(PLwd,"Attack_Strategy_SummaryData"), 
-                              pattern = ".rds", 
-                              full.names = TRUE) %>%
-   map_df(~read_rds(.x)) %>%
-  mutate(Strategy = case_when(
-    simulationID == "1" ~"Degree" ,
-    simulationID == "2" ~"EntDeg_LinkLimit",
-    simulationID == "3" ~"EntDeg_PowerFlow",
-    simulationID == "4" ~"Elec_Centrality",
-    TRUE ~ "Centrality"
-  ),
-  simulationID = alpha %>%
-           str_replace_all(., "_", " ") %>%
-           str_extract_all(., "([0-9])+")%>% as.numeric(.),
-  PercNum = NodesAttacked/958) %>% 
-  group_by(NodesAttacked, alpha) %>%
-  mutate(rankblack = min_rank(-Blackout),
-         rankGC = min_rank(GCfract)) %>%
-  ungroup
-
-
-SummaryofGC<- AttackStratRoundData %>%
-  SummariseMonteCarlo %>%
-  mutate(PercNum = NodesAttacked/958) %>%
-  bind_rows(AttackRoundData)
-
- NodeCollapse <- rbind(SummaryofGC %>%
-  select(PercNum, mean, Strategy, GC05, GC95, sd, NodesAttacked) %>% mutate(type = "Giant componant size reduction"),
-SummaryofGC %>% 
-  select(PercNum, mPGfract, Strategy, PG05, PG95, sdPGfract, NodesAttacked) %>% 
-  mutate(type = "Blackout size") %>%
-  rename(mean = mPGfract, GC05 = PG05, GC95 = PG95, sd = sdPGfract)
-) %>% mutate(Target = "Node") 
-
-test <- NodeCollapse %>% #need to remove infinte values 
-    filter(is.finite(mean), PercNum < 0.5)  
-
-
-#This shows that the strategy attack on random orders is more aggressive than the random attack on the true order but not much more than that
- test %>% 
-  filter(Strategy != "RandomAttack")  %>%
-  ggplot(aes(x = PercNum, y =  mean, group = Strategy)) + 
-  geom_line(aes(colour = Strategy), show.legend = TRUE) +
-  geom_line(data =  test %>% 
-  filter(Strategy == "RandomAttack") , aes(colour = 'Real'), color = 'black', linetype ="longdash") +
-    facet_grid(~type)
-
-```
-
-#Plot the mean difference between strategies with random nodes and the true order
-```{r}
-
-
-AttackStratRoundData2 <- list.files(path = file.path("/media/jonno/Seagate Expansion Drive/ProportionalLoading","Attack_Strategy_SummaryData"), 
-                              pattern = ".rds", 
-                              full.names = TRUE) %>%
-   map_df(~read_rds(.x)) %>%
-  mutate(simulationID = case_when(
-    simulationID == "1" ~"Degree" ,
-    simulationID == "2" ~"EntDeg_LinkLimit",
-    simulationID == "3" ~"EntDeg_PowerFlow",
-    simulationID == "4" ~"Elec_Centrality",
-    TRUE ~ "Centrality"
-  ),
-  alpha1 = alpha %>%
-           str_replace_all(., "_", " ") %>%
-           str_extract_all(., "([0-9])+")%>% as.numeric(.)/100,
-alpha = alpha %>%
-  str_replace_all(., "_", " ") %>%
-  str_extract_all(., "([aA-zZ\\s])+", T) %>%
-  paste0(., ifelse(is.na(alpha1), "", alpha1)),
-  alpha = fct_relevel(alpha, "alpha value 5", after=2) %>%
-  fct_relevel(., "alpha value 2", after=2) %>%
-  fct_relevel(., "alpha value 1.5", after=2),
-  PercNum = NodesAttacked/958) %>% 
-  group_by(NodesAttacked, alpha) %>%
-  mutate(rankblack = min_rank(-Blackout),
-         rankGC = min_rank(GCfract)) %>%
-  ungroup %>%
-  filter(alpha == "alpha value 5") %>%
-  mutate(Strategy = simulationID, 
-         simulationID = 1)
-
-
-
-test <- NodeCollapse %>%
-  filter(type != "Giant componant size reduction") %>%
-  left_join(AttackStratRoundData2) %>%
-  mutate(meanDiff = mean -Blackout,
-         meanRatio = mean/Blackout)
-
-test %>%
-  filter(!is.na(MaxComp)) %>%
-   ggplot(aes(x = PercNum, y =  meanDiff, group = Strategy)) + 
-  geom_line(aes(colour = Strategy), show.legend = TRUE) +#
-  labs(title = "Mean difference from the True node function")
-
-#
-test %>%
-  filter(Strategy != "RandomAttack") %>%
-  select(PercNum, mean, Strategy, Blackout) %>%
-  gather(key = "type", value = "value", -Strategy, -PercNum) %>%
-  ggplot(aes(x = PercNum, y = value, colour = type)) + 
-  geom_line() + 
-  facet_wrap(~Strategy)
-
-
-test <- AttackStratRoundData %>%
-  mutate(type = "Scramble") %>%
-  bind_rows(., AttackStratRoundData2 %>% mutate(type = "Original",
-                                               simulationID = 1e6)) 
-
-#A lot of simulations go through a rapid network collapse after having a relatively linear period of growth
-test %>%
-#  select(PercNum, mean, Strategy, Blackout) %>%
-  ggplot(aes(x = PercNum, y = Blackout, colour = type, group = simulationID)) + 
-  geom_line() +
-  facet_wrap(~Strategy)+
-  labs(x = "Percentage of nodes Attacked", title = "Comparing scrambled networks with the real network using different strategies")
-
-#A density plot of the end point shows that there is a tendency to to collapse early
-test2 <- test %>%
-  group_by(simulationID, Strategy) %>%
-  summarise(NodesAttacked = max(NodesAttacked),
-            PercNum = max(PercNum))
-test2 %>%
-  ggplot(aes(x = NodesAttacked, colour = Strategy)) + geom_density()
-  
-
-test2 <- AttackStratRoundData %>%
-  left_join(., AttackStratRoundData2 %>% select(NodesAttacked, Strategy,  BlackoutTRUE = Blackout, GCTRUE = GCfract), by = c("NodesAttacked", "Strategy"))
-
-SimEval <- expand.grid(unique(test2$Strategy), unique(test2$simulationID)) %>%
-  map2_df(.x = .$Var1, .y = .$Var2, .f = ~{
-    
-  Temp <-  test2 %>%
-  filter(Strategy== .x, simulationID==.y) %>%
-    select(Blackout, BlackoutTRUE) %>% 
-    filter(complete.cases(.))
-  metrics(Temp, truth = BlackoutTRUE, estimate = Blackout) %>% 
-    select(metric = .metric, estimate = .estimate) %>%
-  #  spread(key = metric, value = estimate) %>%
-    mutate(Strategy = .x, SimulationID = .y)
-    
-  })
-
-
-#There is substantial difference between the strategies
-SimEval %>%
-  filter(metric != "mae") %>%
-  ggplot(aes(x = Strategy, y = estimate, fill = Strategy)) + geom_boxplot()+
-    facet_wrap(metric~., ncol = 1, scales = "free_y") +
-  theme(legend.position="none")
-
-```
-
-
-#Extract Scramble graph vulnerability metrics
-
-```{r}
-NewFunctionOrder <- NodeCharacteristiceScrambler(gbase, 100)
-
-StratScrambleVuln <- 1:100 %>% map_df(~{
- 
-  print(.x)
- Sim_Order<- NewFunctionOrder  %>% select(-1) %>% pull(.x)
-  
-  g <- ReOrderGraph(gbase, Sim_Order)
-  #calculate Flow
-  g <- PowerFlow(g, "FECK40")
-  #Make edges proportional to flow
-  g <- Proportional_Load(g, alpha = 5)
-
-  tibble(
-    Order = .x,
-    name = get.vertex.attribute(g, "name"),
-    #Elec_Centrality = ElectricalCentrality(g)$NodeEC,
-       Degree = degree(g),
-       Centrality  = betweenness(g, normalized = TRUE),
-       EntDeg_LinkLimit = EntropicDegree(g, Scale = TRUE),
-       EntDeg_PowerFlow = EntropicDegree(g, value = "PowerFlow", Scale = TRUE),
-    Generator = get.vertex.attribute(g, "Generation")>0 | get.vertex.attribute(gstandard, "Demand")<0,
-    Demand = get.vertex.attribute(g, "Demand")>0
-       ) %>%
-    left_join(.,  ElectricalCentrality(g)$NodeEC %>% 
-                rename(Elec_Centrality = NodeEC, name = Bus.Name))
-
-}) %>% mutate( Transfer = !(Generator |Demand),
-       NodeType = case_when(
-         Transfer ~ 1, #If transfer is true the node type is transfer
-         Demand ~ 2, #if case a is flase but Demand is TRUE then the type is DEmand
-         TRUE ~ 3
-       ))
-
-
-saveRDS(StratScrambleVuln, file.path(PLwd, "StratScrambleVuln.rds"))
-#readRDS(file.path(PLwd, "StratScrambleVuln.rds"))
-
-test <- StratScrambleVuln %>%
- select(GroupVar = Demand, Degree:EntDeg_PowerFlow, Elec_Centrality)
-
-test %>%
-  ggplot(aes(x = GroupVar, y = Elec_Centrality)) + geom_boxplot()
-
-2:ncol(test) %>% map_df(~{
-  
-  Temp <- test %>%
-  select(GroupVar, target = .x) %>%
-  filter(is.finite(target))
-  
-  
-  Temp %>%
-  group_by(GroupVar) %>%
-  summarise(counts = n(),
-            mean = mean(target),
-            median = median(target),
-            sd = sd(target)) %>%
-    mutate(
-      SignifDiff = t.test(Temp$target[Temp$GroupVar], Temp$target[!Temp$GroupVar])$p.value<0.05,
-      type = names(test)[.x])
-})
-
-
-test2 <- t.test(Temp$target[Temp$GroupVar], Temp$target[!Temp$GroupVar])
-
- gstandard <- PowerFlow(gbase, "FECK40")
-
- StandardVuln <- tibble(
-    Order = 1e5,
-    name = get.vertex.attribute(gstandard, "name"),
-    #Elec_Centrality = ElectricalCentrality(gstandard)$NodeEC,
-       Degree = degree(gstandard),
-       Centrality  = betweenness(gstandard, normalized = TRUE),
-       EntDeg_LinkLimit = EntropicDegree(gstandard, Scale = TRUE),
-       EntDeg_PowerFlow = EntropicDegree(gstandard, value = "PowerFlow", Scale = TRUE),
-    Generator = get.vertex.attribute(gstandard, "Generation")>0 | get.vertex.attribute(gstandard, "Demand")<0,
-    Demand = get.vertex.attribute(gstandard, "Demand")>0,
-    Transfer = !(Generator |Demand),
-       NodeType = case_when(
-         Transfer ~ 1, #If transfer is true the node type is transfer
-         Demand ~ 2, #if case a is flase but Demand is TRUE then the type is DEmand
-         TRUE ~ 3
-       )) %>%
-    left_join(.,  ElectricalCentrality(gstandard)$NodeEC %>% 
-                rename(Elec_Centrality = NodeEC, name = Bus.Name))
- 
- 
-test <- StandardVuln %>% mutate(Real = 1) %>%
-  bind_rows(StratScrambleVuln%>% mutate(Real = 0)) %>%
-  mutate_all(function(Var){ifelse(is.finite(Var), Var, 0)}) %>%
- select(NodeType, Degree:EntDeg_PowerFlow, Elec_Centrality, Real) %>%
-  gather(key = "Metric", value = "value", -NodeType, -Real) %>%
-  mutate( NodeType = case_when(
-        NodeType== 1 ~ "Transfer", #If transfer is true the node type is transfer
-        NodeType== 2 ~"Demand", #if case a is flase but Demand is TRUE then the type is DEmand
-         TRUE ~ "Generator"
-       ))
-
-
-#How the real and synthetic nodes vary
-#why is there any difference between synth nodetypes? shouldn't they all be the same?
-test %>%
- # filter(Metric == "Degree", Real==1) %>% 
-  ggplot(aes(x = NodeType, y = (value), fill = as.factor(Real))) + geom_boxplot() +
-  facet_wrap(~Metric, scales = "free_y" )
-
-test %>%
-  filter(Metric == "Degree") %>% 
-  group_by(NodeType,  Real) %>%
-  summarise(mean = mean(value)) %>%
-  spread(key = NodeType, value = mean)
-
-test %>%
-  mutate(Real = factor(Real)) %>%
-  filter(Metric == "EntDeg_PowerFlow") %>%
-  ggplot(aes(x = value, colour = Real)) + geom_density() +
-  facet_wrap(~Metric, scales = "free_x") +scale_x_log10()
- 
-```
-
-
-#Lost in scramble 
-
-The amount of edges and nodes that are lost are quite small so I am not that botheres about correcting for it.
-```{r}
-
-EdgesNodesScramble <- 1:100 %>% map_df(~{
- 
-  print(.x)
- Sim_Order <- NewFunctionOrder  %>% select(-1) %>% pull(.x)
-  
-  g <- ReOrderGraph(gbase, Sim_Order)
-  #calculate Flow
-  g <- PowerFlow(g, "FECK40")
-  #Make edges proportional to flow
-  g <- Proportional_Load(g, alpha = 5)
-  
-  UselessEdge <- (get.edge.attribute(g, "PowerFlow")==0)
-
-  print(get.edge.attribute(g, "name", index = (1:length(UselessEdge))[UselessEdge]) )
-  #Remove Edges that are not doing anything and then any islanded nodes.
-  #This is done before the simulation begins
-  g <- delete.edges(g, (1:length(UselessEdge))[UselessEdge]) %>%
-    BalencedGenDem(., "Demand", "Generation")
-
-  tibble(Edges = ecount(g),
-         Nodes = vcount(g),
-         components = components(g)$no,
-         Order = .x) 
-
-})
-
-
-
-EdgesNodesScramble %>%
-  ggplot(aes(x = Edges)) + geom_density()
-
-EdgesNodesScramble %>%
-  ggplot(aes(x = Nodes)) + geom_density()
-
-
-```
-
-#Model Nodes
-
-
-This section classifies nodes as Using transfer/Load/Gen
-```{r}
-
-#Creates 10 fold classification to predict the rol of each node as a binary classifier
- RangerPerf <-c("Generator", "Demand", "Transfer", "NodeType") %>% map_df(~{
- StandardVuln2 <- StandardVuln %>%
-  select(GroupVar = .x, Degree:EntDeg_LinkLimit) %>% #Using pure topology
-  #select(GroupVar = .x, Degree:EntDeg_PowerFlow, Elec_Centrality) %>% #using extended topo, e.g. cheating
-  mutate(GroupVar = GroupVar*1) %>%
-  mutate_all(function(Var){ifelse(is.finite(Var), Var, 0)})
-
-
-trainset <- StandardVuln2 %>%
-  filter(complete.cases(.)) 
-
-folds <- trainset %>%
-  select(GroupVar) %>%
-  KfoldIndex(., 10)
-
-test <- 1:10 %>% map_df(~{
-
-Mod <- ranger(data = trainset[folds !=.x,],  dependent.variable.name = "GroupVar", classification = TRUE)
-
-Preds<- predict(Mod, trainset[folds==.x,])
-
-ModConf <- confusionMatrix(factor(Preds$predictions, levels = c(1,0)), factor(trainset$GroupVar[folds==.x], levels = c(1,0)))
-
- ModPerf <- tibble(name = c(names(ModConf$overall),names(ModConf$byClass)), 
-                   value = c(ModConf$overall, ModConf$byClass), fold = .x)
-
- return(ModPerf)
-}) %>% spread(key = name, value = value) %>%
-  mutate(Type = .x)
-
-})
-
-
-RangerPerf %>%
-  ggplot(aes(x = Type, y = Accuracy-AccuracyNull)) + geom_boxplot()
-
-#these nodes are at the end of a thread but are neither generation or load... why?
-test <- StandardVuln %>%
-  filter(Transfer==TRUE, Degree==1) %>%
-  left_join(trans1 %>% select(name = Bus.Name, Generation = BusTransferB))
-
-#About 35% of the nodes at the end of a line that are transfer nodes are in fact small generators
-table(test$Generation==0)
-
-```
-
-
-```{r}
-
-TestOut <- c("Generator", "Demand", "Transfer") %>%
-  map_df(~{
-    
-StandardVuln %>%
-  rename(target = .x) %>%
-  group_by(Degree, target) %>%
-  summarise(counts = n()) %>%
-  mutate(target = ifelse(target, "true", "false")) %>%
-  spread(key = target, value = counts, fill = 0) %>%
-      ungroup %>%
-  mutate(PercOfNodes = true/(true+false),
-         PercofTot = true/sum(true),
-         cumsum = cumsum(PercofTot),
-         Type = .x)
-    
-  })
-
-TestOut %>%
-  group_by(Type) %>%
-  summarise(counts = sum(true))
-
-TestOut %>%
-  ggplot(aes(x = Degree, y = cumsum, colour = Type)) + geom_line()
-
-StandardVuln %>%
-  ggplot(aes(x = Degree)) + geom_histogram(binwidth = 1)
-
 
 
 ```

@@ -1,0 +1,169 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "7 January 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Looks at what happens when you innoculate a network
+
+#Setup Block
+
+```{r}
+
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "zoo", "stringr","foreach", "doMC",  "xtable", "geomnet", "ggnetwork", "rlang", "animation", "ggridges", "poweRlaw", "Rtsne", "caret", "ranger", "xtable", "broom", "modelr", "yardstick", "sf", "rgdal", "foreach", "doMC")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+
+sapply(packages, library, character.only = TRUE)
+
+
+lapply(packages, library, character.only = TRUE)
+library(PowerGridNetworking)
+
+select <- dplyr::select
+
+#Set up file system to read the correct folders this switches between aws and windows mode
+
+basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
+datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
+#LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Proportional Line Limits" 
+FiguresFolder <- file.path(LatexFolder, "Figures")
+TablesFolder <- file.path(LatexFolder, "Tables")
+MatricesFolder <- file.path(LatexFolder, "Matrices")
+#Functions <-"/home/jonno/Create_ETYS_network/Functions"
+Tariff <- file.path(basewd,"Tariff and Transport")
+PLwd <- "/media/jonno/Seagate Expansion Drive/Innoculation"
+Saved_Sims <- file.path(PLwd, "Saved_Sims")
+Deletion_Order_Folder <-  file.path(PLwd, "DeletionOrder") #Only one of the deletion order folders is needed. Either Nodes or Edges
+Deletion_Order_Folder <- file.path(PLwd, "DeletionOrder_Nodes")
+StratAttackWd <- "/media/jonno/Seagate Expansion Drive/ProportionalLoading/StratAttack"
+
+source("/home/jonno/Create_ETYS_network/SubCode/LoadData2.R")
+
+
+#FOr NetSci
+#FiguresFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/NetSci2018 Poster/Figures"
+```
+
+#Create the Attack Orders
+```{r}
+#Set the path to a large enough storage
+setwd(PLwd)
+
+#Ensure there is powerflow
+g <- PowerFlow(gbase, "FECK40")
+
+g %>%
+  simplify(., remove.multiple = T, remove.loops = T) %>% 
+    plot(.,vertex.size=.8, edge.arrow.size=.4, vertex.label=NA)
+
+NetworkStats(g) %>%
+  xtable() %>% print(type = "latex", file = file.path(FiguresFolder, "NetworkStats.txt"))
+
+AttackRounds <- 1000
+
+#Create a reproducible attack order
+seed<- 1589
+filename <- "DeleteOrders100.rds"
+if(file.exists(filename)){
+  DeleteOrders <- readRDS(filename)
+} else {
+set.seed(seed)
+DeleteOrders <- MultiAttackOrder(gbase, 100)  
+saveRDS(DeleteOrders, filename)
+}
+
+```
+
+#Set alpha colour gradient
+```{r}
+  AlphaGrad <-scale_colour_gradientn(colors = c("red",   "limegreen"),
+                          breaks = c(1,2,7,20,50),
+                          trans = "log",
+                          values = scales::rescale((c(0, 6, 7, 20, 50))),
+                          name = expression(alpha*" level")) #"Alpha value"
+```
+
+
+
+
+#remove keep Load/gen from targets
+
+```{r}
+#This includes trans1 but doesn't mention that.
+#It needs to be explicitly used in the function or betterstill replaced with g
+SelectiveDelete <- function(DeleteOrders, filterCond){
+
+  TransferNodes <- 1:nrow(DeleteOrders) %>% map_df(~{
+
+  test <- DeleteOrders[.x,-1] %>% 
+  gather(key = Target, value = Node) %>%
+  left_join(., trans1 %>% select(Node = Bus.Name, NetGen = BusTransferB), by = "Node") %>%#smaller than 0 is demand larger is gen
+  filter(!!filterCond) %>%
+  select(-NetGen) %>%
+    mutate(Target = 1:n()) %>% #Renumber the nodes so there are no NA values where certain nodes have been removed
+  spread(key = Target, value = Node) %>%
+    set_names(paste0("Target_", names(.))) #Add back in the word "Target"
+  
+}) %>%
+  mutate(SimulationID = paste0("Simulation_ID_", 1:nrow(DeleteOrders))) %>%
+    select(SimulationID, everything() )
+  
+  
+}
+
+
+TransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen == 0))
+GenNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen > 0))
+LoadNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen < 0))
+NonTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen != 0))
+GenTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen >= 0))
+LoadTransferNodes <- SelectiveDelete(DeleteOrders, filterCond = quo(NetGen <= 0))
+```
+
+#Delete innoclated nodes
+
+```{r}
+
+list("TransferNodes", "GenNodes", "LoadNodes", "NonTransferNodes", "GenTransferNodes", "LoadTransferNodes") %>%
+  walk(~{
+    
+  setwd(Saved_Sims)
+
+  folder <-.x
+  print(folder)
+
+    if(!file.exists(folder)){
+      dir.create(folder)
+    }
+
+  DeleteOrders <- get(.x)
+#   
+#   n <- 6
+# 
+# groups <- split(1:nrow(DeleteOrders), sort(rep_len(1:n, length(1:nrow(DeleteOrders)))))
+# 
+# registerDoMC(n)
+# foreach (i = 1:n) %dopar% {
+# 
+#  SaveMultiAttacks(g, DeleteOrders[groups[[i]],], folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
+#   
+# }
+
+  
+  SaveMultiAttacks(g, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T)
+
+   
+  })
+
+
+
+
+
+
+```
