@@ -13,7 +13,7 @@ This code explores the effect of what is removed on the amount of overloads/isla
 
 ```{r}
 
-packages <- c("tidyverse", "igraph","readr","readxl", "broom", "zoo", "stringr","foreach", "doMC",  "xtable", "geomnet", "ggnetwork", "rlang", "animation", "ggridges", "poweRlaw", "Rtsne", "caret", "ranger", "xtable", "broom", "modelr", "yardstick", "sf", "rgdal", "ggtern")
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "zoo", "stringr", "xtable", "geomnet", "ggnetwork", "rlang", "animation", "ggridges", "poweRlaw", "Rtsne", "caret", "ranger", "xtable",  "modelr", "yardstick", "sf", "rgdal", "ggtern")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -34,7 +34,7 @@ FiguresFolder <- file.path(LatexFolder, "Figures")
 TablesFolder <- file.path(LatexFolder, "Tables")
 MatricesFolder <- file.path(LatexFolder, "Matrices")
 Tariff <- file.path(basewd,"Tariff and Transport")
-#PLwd <- "/media/jonno/Seagate Expansion Drive/Innoculation"
+PLwd <- "/media/jonno/Seagate Expansion Drive/Overloads"
 Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
 
 
@@ -50,6 +50,15 @@ list.files("/home/jonno/Useful_PhD__R_Functions", pattern = ".R", full.names = T
 #FOr NetSci
 #FiguresFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/NetSci2018 Poster/Figures"
 ```
+
+```{r}
+  AlphaGrad <- scale_colour_gradientn(colors = c("red",   "limegreen"),
+                          breaks = c(1,2,7,20,50),
+                          trans = "log",
+                          values = scales::rescale((c(0, 6, 7, 20, 50))),
+                          name = expression(alpha*" level")) #"Alpha value"
+```
+
 
 #Create the Attack Orders
 ```{r}
@@ -103,54 +112,57 @@ LongProb <-    OverloadType %>%
     filter(type == "Edge") %>%
   select(-type) %>%
     gather(key = FailureType, value = value, -Name) %>% 
-    mutate(value = value/10000) 
+    mutate(Perc = value/10000) 
   
   LongProb %>%
-    ggplot(aes(x = value, colour = FailureType)) + 
+    ggplot(aes(x = Perc, colour = FailureType)) + 
     geom_density() +
     labs(title = "Probability density of edge failure type", x = "Proability of failure")
     
 
 Mapdf <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(LongProb, by = c("Link"="Name"))
-  left_join(LongProb, by = c("Node"="Name"))
   
 #using the actual value as well as the rank is interesting, but you need to change the midpoint value
 Mapdf %>%
-  filter(!is.na(value)) %>%
+  filter(!is.na(Perc)) %>%
   group_by(FailureType) %>%
-  mutate(rank = ntile(value, 100)) %>%
+  mutate(rank = ntile(Perc, 100)) %>%
   ungroup %>%
     ggplot(aes(x = Latitude, y = Longitude)) + 
   geom_line(aes(colour = rank, group = Link)) + 
    facet_grid(PositionType~FailureType) +
    scale_colour_gradient2(low = "blue",mid = "black", high = "red", midpoint = 50)
 
-Mapdf %>%
-  filter(!is.na(value)) %>%
-  group_by(FailureType) %>%
-  mutate(rank = ntile(value, 100)) %>%
-  ungroup %>%
-    ggplot(aes(x = Latitude, y = Longitude)) + 
-    geom_line(aes(group = Link)) +
-  geom_point(aes(colour = rank)) + 
-   facet_grid(PositionType~FailureType) +
-   scale_colour_gradient2(low = "blue",mid = "black", high = "red", midpoint = 50)
+
+#No relationship
+LongProb %>%
+  filter(FailureType!="Targeted") %>%
+  select(-value) %>%
+  spread(key = FailureType, value = Perc) %>%
+  ggplot(aes(x = Islanded, y = Overloaded)) + geom_point()
+
+#No relationship
+LongProb %>%
+  select(-Perc) %>%
+  spread(key = FailureType, value) %>%
+  mutate(ratio = Islanded/Overloaded) %>%
+ # filter(is.finite(ratio), ratio >0) %>%
+  ggplot(aes(x = Targeted, y = ratio)) + geom_point()
+
 
 ```
 
+
+#map Metrics
 What is the relationship between centrality and e-centrality and loss mode
 ```{r}
 
   ElecCen1 <- ElectricalCentrality(g)
-  
-   StratAttackVect <-  c(AttackOrderNames(g, degree),
-                         AttackOrderNames(g, EntropicDegree, Scale = TRUE),
-                         AttackOrderNames(g, EntropicDegree,  value = "PowerFlow", Scale = TRUE),
-                         ElecCen1$NodeEC %>% arrange(-NodeEC) %>% .$Bus.Name,
-                         AttackOrderNames(g, betweenness)) 
-   
-   
+
+ElecCen1$EdgeEC
+ElecCen1$NodeEC
+
 test   <- tibble(degree = degree(g), 
    EntropicDeg = EntropicDegree(g, Scale = T), 
    EntropicPower = EntropicDegree(g,  value = "PowerFlow", Scale = TRUE),
@@ -169,20 +181,764 @@ test   <- tibble(degree = degree(g),
 #there is only a very weak negative corellation between overloading and degree
 cor(test)
 
-test2 <- ElecCen1$EdgeEC %>%
+EdgeCharacteristics <- ElecCen1$EdgeEC %>%
   rename(Name = Edgename) %>%
   left_join(OverloadType %>% filter(type == "Edge")) %>%
-  left_join(tibble(Name = get.edge.attribute(g, "name"), Centrality = edge_betweenness(g, directed = F))) %>%
-filter(complete.cases(.))
+  left_join(tibble(Name = get.edge.attribute(g, "name"), 
+                   Centrality = edge_betweenness(g, directed = F),
+                   PowerFlow = abs(get.edge.attribute(g, "PowerFlow")),
+                   Link.Limit = get.edge.attribute(g, "Link.Limit"))) %>%
+filter(complete.cases(.)) %>%
+  mutate(LineLoad = Link.Limit/PowerFlow)
 
 
-test2 %>%
+EdgeCharacteristics %>%
   select(-Name, -type) %>%
-  cor
+  cor(.,method =  "spearman")
+
+
+EdgeCharacteristics %>%
+  ggplot(aes(x = ElectricalCentrality, y = Link.Limit)) + geom_point()
+
+
+MetricMap <- EdgeCharacteristics %>%
+  select(Link = Name, ElectricalCentrality, Centrality, PowerFlow, LineLoad) %>%
+  gather(key = metric, value = value, - Link) %>%
+  left_join(MakeMapDF(g, read_csv(file.path(basewd, "point.csv"))),. )
+
+
+MetricMap %>%
+  filter(!is.na(value)) %>%
+  group_by(metric) %>%
+  mutate(rank = ntile(value, 100)) %>%
+  ungroup %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(colour = rank, group = Link)) + 
+   facet_grid(PositionType~metric) +
+   scale_colour_gradient2(low = "blue",mid = "black", high = "red", midpoint = 50)
+
+```
+
+#Check model accuracy
+
+
+##create models
+```{r}
+AlphaOrder <- c("alpha value 1","alpha value 1.05","alpha value 1.1","alpha value 1.2","alpha value 1.5","alpha value 2" ,"alpha value 3","alpha value 5","alpha value 6","alpha value 7","alpha value 10","alpha value 15","alpha value 20","alpha value 50","Topological" ,"PF Model", "Volt PF Model")  
+
+
+ModelInputVars <- g %>% as_data_frame %>% left_join(.,  ElectricalCentrality(g)$EdgeEC %>% 
+                rename(Elec_Centrality = ElectricalCentrality, Link = Edgename)) %>%
+  mutate(absPF = abs(PowerFlow),
+         Voltage = as.factor(Voltage),
+         Centrality =log10(edge_betweenness(g)+1),
+         LengthQuart = ntile(Length, 4),
+         absPFQuart = ntile(absPF, 4),
+         LogLink.Limit = log10(Link.Limit)) 
+
+#Create set of formula to model line limits
+FormulaDF <- formulas(~LogLink.Limit, 
+         Voltage_Only = ~ Voltage,
+         VoltageLength = ~ Voltage + Length,
+         VoltElecCent = ~ Voltage + Elec_Centrality,
+         VoltPF = ~ Voltage + absPF,
+         PF_Only = ~ absPF ) %>%
+  tibble(formulas = .) %>%
+  mutate(names = names(formulas)) 
+
+#generate k=10 crossfold validated model
+models  <- 1:nrow(FormulaDF) %>% map_df(~{
+           print(.x)
+           form <- as.formula(FormulaDF %>% pull(formulas) %>% .[[.x]])
+    set.seed(1)
+    ModelInputVars %>%
+      filter(Link.Limit != 1e5) %>%
+      crossv_kfold(k = 10) %>%
+      #The log limit of the model is used to make it more normally distributed
+      mutate(model = map(train, ~lm(form, data = .)
+                         ),
+              Modelname= FormulaDF %>% pull(names) %>% .[[.x]])#,
+          #   ) 
+
+})
+
+
+
+
+
+#create predictions for each edge in the network
+predictions <- models %>%
+  unnest(map2(model, test, ~ augment(.x, newdata = .y))) %>%
+  mutate(.fitted = 10^.fitted) %>%
+  left_join(., OverloadType %>% filter(type == "Edge") %>% select(Link = Name, Overloaded)) %>%
+  mutate(Overloaded = Overloaded/1e4) %>%
+  filter(complete.cases(.))
+
+ModError <- unique(predictions$Modelname) %>% map_df(~{
+  predictions <-  predictions %>% filter(Modelname==.x)
+  metrics(predictions , Link.Limit, .fitted) %>% select(-.estimator) %>% spread(key = .metric, value = .estimate) %>%
+   bind_cols(tibble(MAPE = mean(abs(predictions$.fitted-predictions$Link.Limit)/predictions$Link.Limit))) %>%
+    mutate(Modelname = .x,
+           FailOnInit = sum(abs(predictions$.fitted) < abs(predictions$PowerFlow)),
+           WeightedRMSE = sqrt(sum((predictions$Overloaded*(predictions$Link.Limit-predictions$.fitted))^2)))
+  
+}) 
+
+alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50)
+#Include the alpha models
+ModError <-  alpha_vector %>% map_df(~{
+  print(.x)
+predictions <- as_data_frame(g) %>%
+  mutate(.fitted = PowerFlow*.x) %>%
+  left_join(., OverloadType %>% filter(type == "Edge") %>% select(Link = Name, Overloaded), by = "Link") %>%
+  mutate(Overloaded = Overloaded/1e4) %>%
+  filter(complete.cases(.))
+
+  metrics(predictions , Link.Limit, .fitted) %>% select(-.estimator) %>% spread(key = .metric, value = .estimate) %>%
+   bind_cols(tibble(MAPE = mean(abs(predictions$.fitted-predictions$Link.Limit)/predictions$Link.Limit))) %>%
+    mutate(Modelname = paste0("alpha_value_",.x*100),
+           FailOnInit = sum(abs(predictions$.fitted) < abs(predictions$PowerFlow)),
+           WeightedRMSE = sqrt(sum((predictions$Overloaded*(predictions$Link.Limit-predictions$.fitted))^2)))
+}) %>%
+  bind_rows(ModError) %>%
+  CleanNames(., TargetColumn = "Modelname", AlphaOrder)
 
 
 
 ```
+
+
+##This section compares line modell accruacy and collapse model accuracy
+```{r}
+AlphaOrder <- c("alpha value 1","alpha value 1.05","alpha value 1.1","alpha value 1.2","alpha value 1.5","alpha value 2" ,"alpha value 3","alpha value 5","alpha value 6","alpha value 7","alpha value 10","alpha value 15","alpha value 20","alpha value 50","Topological" ,"PF Model", "Volt PF Model")  
+
+DamageComp <- list.files(path = file.path("/media/jonno/Seagate Expansion Drive/ProportionalLoading",
+                                          "SummaryData"), 
+                              pattern = ".rds", 
+                              full.names = TRUE) %>%
+   map_df(~read_rds(.x)) %>%
+  mutate(GCfract = ifelse(is.finite(GCfract), GCfract, 1)) %>%
+  DamageComparison(., "Blackout", AlphaOrder) %>%
+  select(-SimulationID,-alpha) %>%
+  group_by(alpha2) %>%
+  summarise_all(funs(mean, median)) %>%
+  arrange(RMSE_mean) %>%
+  select(alpha = alpha2, contains("mean")) %>%
+  mutate(alpha = gsub("Model ", "", alpha))%>%
+  left_join(ModError, ., by = c("Modelname2"="alpha"))
+
+
+#The most accurate model in terms of collapse behaviour also has 1 of the lowest Line limit errors
+DamageComp %>%
+  filter(grepl("alpha", Modelname)) %>%
+  mutate(Modelname = gsub("alpha_value_", "", Modelname) %>% as.numeric %>%{./100}) %>%
+  ggplot(aes(x = rmse, y = RMSE_mean, colour = Modelname)) + geom_point() +
+    AlphaGrad
+
+#I think that I need to run each model as an individual variable and as a pair
+#makes 15 models overall
+DamageComp %>%
+  filter(!grepl("alpha", Modelname)) %>%
+  ggplot(aes(x = rmse, y = RMSE_mean, colour = Modelname)) + geom_point() 
+
+DamageComp %>%
+    filter(!grepl("alpha", Modelname)) %>%
+  ggplot(aes(x = WeightedRMSE, y =RMSE_mean, colour = Modelname )) + geom_point()
+
+```
+
+#Round removed is there a difference?
+
+
+Do some nodes/edges get targeted later or fail early is there a pattern?
+```{r}
+
+
+
+testrank <- list.files(Deletion_Order_Folder, 
+           pattern = "RandomAttack_", 
+           full.names = TRUE) %>%
+  map_df(~{
+    print(.x)
+    list.files(.x, full.names = T) %>%
+      map_df(~{
+        readRDS(.x)
+      })
+    
+  })
+
+
+testrank2 <- testrank %>%
+  group_by(Name, RemovalType, type) %>%
+  summarise(mean = mean(RoundRemoved),
+            median = median(RoundRemoved),
+            sd = sd(RoundRemoved),
+            counts = n())
+
+OveralFailurePoint <- testrank %>%
+  group_by(Name, type) %>%
+  summarise(Totmean = mean(RoundRemoved),
+            Totmedian = median(RoundRemoved),
+            Totsd = sd(RoundRemoved)) %>%
+  left_join(as_data_frame(g) %>%
+  select(Name = Link, from, to), by = "Name"
+) %>%
+  mutate(from = ifelse(is.na(from), Name, from),
+         to = ifelse(is.na(to), Name, to))
+
+
+
+VertexMetaData2 <- VertexMetaData %>%
+  mutate(NodeType = case_when(
+    BalencedPower>0 ~"Generator",
+    BalencedPower< 0~"Demand",
+    TRUE ~ "Transfer"
+  ),
+  NodeType2 = case_when(
+    Demand>0 & Generation>0 ~"Hybrid",
+    TRUE ~ NodeType
+  )) %>% select(Name, NodeType, NodeType2, BalencedPower)
+
+VertexMetaData2 %>%
+  group_by(NodeType) %>%
+  summarise(count = n())
+
+VertexMetaData2 %>%
+  group_by(NodeType2) %>%
+  summarise(count = n())
+
+
+ OverloadType %>%
+    gather(key = RemovalType, value = value, -Name, -type) %>%
+  left_join(OveralFailurePoint) %>%
+   mutate(value = value/1e4) %>%
+   filter(value !=0, type == "Node") %>% 
+   left_join(VertexMetaData2) %>%
+  ggplot(aes(x = Totmean, y = value, colour = NodeType2)) + geom_point() +
+  facet_grid(~ RemovalType)
+ 
+ 
+  OveralFailurePoint <- OverloadType %>%
+    gather(key = RemovalType, value = value, -Name, -type) %>%
+  left_join(OveralFailurePoint) %>%
+   mutate(value = value/1e4) %>%
+   left_join(VertexMetaData2 %>% select(Name, NodeTypefrom = NodeType2), by = c("from"="Name")) %>%
+   left_join(VertexMetaData2 %>% select(Name, NodeTypeto = NodeType2), by = c("to"="Name")) %>%
+    mutate(NodeType = case_when(
+      NodeTypefrom == NodeTypeto ~ NodeTypefrom,
+      NodeTypefrom =="Transfer" ~NodeTypeto,
+      NodeTypeto =="Transfer" ~ NodeTypefrom,
+      TRUE ~ "Hybrid"
+    )) 
+  
+  OveralFailurePoint %>%
+    filter(RemovalType=="Targeted") %>%
+    group_by(type, NodeType) %>%
+    summarise(counts = n())%>%
+    spread(key = type, value = counts)
+  
+  OveralFailurePoint %>%
+      ggplot(aes(x = Totmean, y = value, colour = NodeType)) + geom_point() +
+  facet_grid(type~ RemovalType)
+ 
+  OveralFailurePoint %>%
+    ggplot(aes(x = NodeType, y = Totmean, fill = NodeType)) +
+    geom_boxplot() +
+    facet_grid(type ~RemovalType)+
+    theme(axis.text.x = element_blank())
+
+
+testrank2 %>%
+  ggplot(aes( x = mean, colour = RemovalType)) + 
+  geom_density() +
+  facet_wrap(~type)
+
+#Islanding occurs early and with a lower standard deviation, this is unsurprising as it is when the power demand is high and so lines are more likely to overload.
+#Targeting averages slightly later than the overloads, this is also expected as on average a line should be targeted in the middle of the attack.
+#islanding tends to occur later when the grid is fracturing. The standard deviation decreases the later the mean becomes as there is less ooptions to fail.
+#What other information do I need to know if nodes fail early or late?
+testrank2 %>%
+  ggplot(aes(x = mean, y = sd, colour = RemovalType)) + 
+  geom_point() +
+  facet_wrap(~type)
+
+
+
+testrank3 <- testrank %>% 
+  mutate(Rtype2 = ifelse(RemovalType == "Targeted", "Targeted", "Not Targeted" )) %>%
+  group_by(Name, Rtype2, type) %>%
+  summarise(mean = mean(RoundRemoved),
+            median = median(RoundRemoved),
+            sd = sd(RoundRemoved))
+
+
+DominantFailureMode <- testrank2 %>%
+  arrange(-counts) %>%
+  group_by(Name, type) %>%
+  summarise(DominantType = first(RemovalType)) %>%
+  mutate(DominantType2 = ifelse(DominantType=="Targeted", "Targeted", "Not Targeted")) %>%
+  left_join(., 
+            testrank2 %>%
+  arrange(-counts) %>%
+  filter(RemovalType != "Targeted") %>%
+  group_by(Name, type) %>%
+  summarise(DominantType3 = first(RemovalType)) 
+  )
+  
+  
+
+
+
+
+table(DominantFailureMode$DominantType, DominantFailureMode$type)
+
+#Nodes that are prone to islanding are on average targeted earlier becuase otherwise they have failed. Nodes that are not prone to islanding  are on average targeted later as they are usually the only ones left.
+#Edges that Overload all do so early but are targeted across most of the span. Edges that are islanded are similar to nodes. Edges that are targeted dominate as a single Node can cause the loss of a large number of edges.
+#This might just show that nodes that have power failure later... which is hardly a revelation
+testrank3 %>%
+  select(-median, -sd) %>%
+  spread(Rtype2, mean) %>%
+   left_join(DominantFailureMode, by = c("Name", "type")) %>%
+  ggplot(aes(x = Targeted, y = `Not Targeted`, colour = DominantType3))  + 
+    facet_wrap(~type)+
+  geom_point()
+
+
+testrank2 %>%
+  select(-median, -sd, -counts) %>%
+  filter(RemovalType !="Targeted") %>%
+  spread(RemovalType, mean, fill = 0) %>%
+   left_join(DominantFailureMode, by = c("Name", "type")) %>%
+  ggplot(aes(x = Islanded, y = Overloaded, colour = DominantType3))  + 
+    facet_wrap(~type)+
+  geom_point()
+
+
+ MetricMap %>%
+   filter(metric == "Centrality") %>%
+  left_join(DominantFailureMode %>% select(-type), by = c("Link"="Name")) %>%
+  filter(!is.na(value)) %>%
+  group_by(metric) %>%
+  mutate(rank = ntile(value, 100)) %>%
+  ungroup %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(colour = DominantType3, group = Link)) + 
+   facet_grid(~PositionType)
+
+
+```
+
+
+#Get change in failure metrics from and attack
+```{r}
+
+testAttack <- readRDS(file.path("/media/jonno/Seagate Expansion Drive/ProportionalLoading/Saved_Sims/Real_Limits",
+                                "Simulation_ID_19.rds"))
+
+#number of rounds in each attack
+testAttack %>%
+map_dbl(length) %>% {.>1} %>%which()
+
+test <- testAttack %>% flatten
+
+test[[100]] %>% components()
+
+TestECent <- (test[[100]])
+
+HowmanyOver <- testrank %>% #%>% filter(RemovalType=="Overloaded")
+  filter(type == "Edge") %>%
+  group_by(Sim) %>%
+  mutate(TotalRound = max(RoundRemoved, na.rm = T)) %>%
+  group_by(RemovalType, Sim) %>%
+  summarise(counts = n(),
+            TotalRound = first(TotalRound),
+            sd = sd(RoundRemoved)) %>%
+  ungroup
+
+#On average 74% of edges are lost to targeting.
+HowmanyOver %>%
+  group_by(RemovalType) %>%
+  summarise(max = max(counts),
+            min = min(counts),
+            mean = mean(counts),
+            median = median(counts))
+  
+HowmanyOver %>%
+  ggplot(aes(x = counts)) + geom_density() + 
+  facet_grid(~RemovalType, scales = "free_x")
+
+HowmanyOver %>%
+  ggplot(aes(x = TotalRound, y = counts, color = RemovalType )) +
+  geom_point()
+
+HowmanyOver %>%
+  spread(RemovalType, counts) %>%
+  select(-Sim) %>%
+  cor(., method = "spearman")
+
+#Overloads happend much closer together than islanding or targeting.
+#islanding is a linear process
+#Overloading occurs at a similar, point, poss becuase 
+HowmanyOver %>%
+  ggplot(aes(x = RemovalType, y = sd)) + geom_boxplot()
+
+
+
+```
+
+#Simultaneous failure
+```{r}
+
+SimultaneousFail <-unique(testrank$Sim) %>%
+  map_df(~{
+print(.x)
+test <- testrank %>%
+  filter(type == "Edge", Sim == .x)
+
+  test2 <- test %>%
+  select( RoundRemoved)%>% 
+  as.matrix() 
+rownames(test2) <-test$Name
+
+test2 %>% dist %>% as.matrix() %>% as.tibble %>%
+  mutate(Edge1 = names(.)) %>%
+  gather(key = Edge2, value = FailDistance, - Edge1) %>%
+  filter(Edge1!=Edge2, FailDistance == 0)
+}) %>%
+  group_by(Edge1, Edge2) %>%
+  summarise(counts = n()) %>%
+  mutate(Perc = counts/1e4)
+
+
+#saveRDS(SimultaneousFail, file.path(PLwd, "SimultaneousFail.rds"))
+
+SimultaneousFail <- readRDS(file.path(PLwd, "SimultaneousFail.rds"))
+
+#I am only interested in edges that do not share a common node
+#THis has Annoying doubles
+test <- str_split(SimultaneousFail$Edge2, pattern = "-", simplify = T) %>%
+  as.tibble() %>% rename(E2from = V1, E2to = V2) %>%
+  bind_cols(str_split(SimultaneousFail$Edge1, pattern = "-", simplify = T) %>%
+  as.tibble() %>% rename(E1from = V1, E1to = V2) ) %>%
+  mutate(Edge3 = paste(E2from,E2to, sep = "-")) %>%
+  bind_cols(SimultaneousFail,.) %>%
+#  mutate(Edg12 = Edge2, Edge21 = Edge1) %>%
+  left_join(., OverloadType %>% select(-type), by = c("Edge1"="Name")) %>%
+  left_join(., OverloadType %>% select(-type), by = c("Edge2"="Name")) %>%
+  filter(E1from != E2from, E1from != E2to, E1to !=E2from, E1to != E2to) %>%
+  ungroup
+
+
+gdist <-distances(g, weights = NA) 
+gdist <- gdist %>% as_tibble %>%
+  mutate(Nodes1 = rownames(gdist)) %>%
+  gather(key = Nodes2, value = distance, -Nodes1)
+
+MinDist <- test %>%
+select(E2from:E1to) %>%
+  left_join(gdist, by = c("E1from"="Nodes1", "E2from" = "Nodes2" )) %>%
+  left_join(gdist, by = c("E1from"="Nodes1", "E2to" = "Nodes2" )) %>%
+  left_join(gdist, by = c("E1to"="Nodes1", "E2from" = "Nodes2" )) %>%
+  left_join(gdist, by = c("E1to"="Nodes1", "E2to" = "Nodes2" )) %>%
+  rowwise() %>%
+  mutate(distance = min(distance.x, distance.y, distance.x.x, distance.y.y))
+
+test <- test %>%
+  bind_cols(., MinDist %>% select(distance))
+
+
+MaxJointFailProb <- bind_rows(test %>% select(Link = Edge1, Perc, counts, distance), 
+          test %>% select(Link = Edge2, Perc, counts, distance)) %>%
+  group_by(Link) %>%
+  arrange(-Perc) %>%
+    summarise(Perc = first(Perc),
+            counts = first(counts),
+            distance = first(distance)) %>%
+  left_join(OverloadType, by = c("Link" = "Name"))
+
+#This is obvious becuase generally the more a node is targeted the less it is failing with other nodes
+MaxJointFailProb %>%
+  ggplot(aes(x = Targeted, y = Perc)) + geom_point()
+cor(MaxJointFailProb$Targeted, MaxJointFailProb$Perc, method = "spearman")
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(MaxJointFailProb, by = c("Link")) %>%
+  filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(colour = Perc, group = Link), size=0.8) + 
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c()+
+  ggtitle("Line maximum joint failure probability for Line pairs that do not share a Node")
+
+```
+
+
+#High dimensional distance
+```{r}
+EucDist <- testrank %>%
+  filter(type == "Edge") %>%
+  select(Name, RoundRemoved, Sim) %>%
+  spread(key = Sim, value = RoundRemoved) 
+
+temp <- EucDist %>%
+  dist()
+
+
+test <- temp %>% as.matrix() 
+colnames(test) <- EucDist$Name
+test <- test %>% as.tibble %>% mutate(Edge1 = EucDist$Name) %>%
+  gather(key = Edge2, value = FailDistance, - Edge1) %>%
+  filter(Edge1!=Edge2)
+  
+ test <- str_split(test$Edge2, pattern = "-", simplify = T) %>%
+  as.tibble() %>% rename(E2from = V1, E2to = V2) %>%
+  bind_cols(str_split(test$Edge1, pattern = "-", simplify = T) %>%
+  as.tibble() %>% rename(E1from = V1, E1to = V2) ) %>%
+  mutate(Edge3 = paste(E2from,E2to, sep = "-")) %>%
+  bind_cols(test,.) %>%
+  filter(E1from != E2from, E1from != E2to, E1to !=E2from, E1to != E2to)
+ 
+ rm(temp)
+ 
+ 
+ MinJointFailDist <- bind_rows(test %>% select(Link = Edge1, FailDistance), 
+          test %>% select(Link = Edge2, FailDistance)) %>%
+  group_by(Link) %>%
+  arrange(FailDistance) %>%
+    summarise(FailDistance = first(FailDistance)
+              ) %>%
+  left_join(OverloadType, by = c("Link" = "Name"))
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(MinJointFailDist, by = c("Link")) %>%
+  filter(!is.na(FailDistance)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(colour = FailDistance, group = Link), size = 0.8) + 
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c()+
+  ggtitle("Line maximum joint failure probability for Line pairs that do not share a Node")
+
+
+#Very high corellation it doesn't matter which one you use
+left_join(MaxJointFailProb, MinJointFailDist) %>%
+  select(Perc, FailDistance) %>%
+cor(method = "spearman")
+
+left_join(MaxJointFailProb, MinJointFailDist) %>%
+  ggplot(aes(x = Perc, y = FailDistance)) + geom_point()
+
+```
+
+
+#Node Simu Fail
+
+the probabiity of two nodes failing at the same time
+```{r}
+SimultaneousNodeFail <-1:1e4 %>%
+  map_df(~{
+print(.x)
+test <- testrank %>%
+  filter(type == "Node", Sim == unique(testrank$Sim)[.x])
+
+  test2 <- test %>%
+  select( RoundRemoved)%>% 
+  as.matrix() 
+rownames(test2) <-test$Name
+
+test2 %>% dist %>% as.matrix() %>% as.tibble %>%
+  mutate(Node1 = names(.)) %>%
+  gather(key = Node2, value = FailDistance, - Edge1) %>%
+  filter(Node!=Node2, FailDistance == 0)
+})%>%
+  group_by(Node1, Node2) %>%
+  summarise(counts = n()) %>%
+  mutate(Perc = counts/1e4) %>%
+  ungroup
+
+#saveRDS(SimultaneousNodeFail, file.path(PLwd, "SimultaneousNodeFail.rds"))
+SimultaneousNodeFail <- readRDS( file.path(PLwd, "SimultaneousNodeFail.rds"))
+
+MaxJointFailProbNode <- SimultaneousNodeFail %>% select(Node = Node1, counts, Perc) %>%
+  bind_rows( SimultaneousNodeFail %>% select(Node = Node2, counts, Perc)) %>%
+  group_by(Node) %>%
+  summarise(counts = max(counts),
+            Perc = max(Perc)) %>%
+  left_join(OverloadType, by = c("Node" = "Name"))
+
+MaxJointFailProbNode %>%
+  select(Perc, Islanded:Targeted) %>%
+  cor
+
+#Very strong Node joint failure
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(MaxJointFailProbNode, by = c("Node")) %>%
+  filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =Perc)) +
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c()+
+  ggtitle("Node maximum joint failure probability")
+
+```
+
+
+#Node influence
+
+The amount of nodes a node takes out on average -done
+The number of edges that are overloaded by a node -done
+The total amount of power loss caused by a anode
+
+```{r}
+
+AttackRoundData <- list.files("/home/jonno/Dropbox/AWS_Simulation_Files/SummaryData", full.names = TRUE) %>% map_df(~{
+    print(.x)
+
+        readRDS(.x)
+
+    
+  })
+
+
+PowerLossDF <-AttackRoundData  %>%
+  rename(Sim = simulationID, RoundRemoved = NodesAttacked) %>%
+  mutate(Sim = paste0("Simulation_ID_", Sim)) %>%
+  group_by(Sim) %>%
+  mutate(PowerGenTM1 = lag(PowerGen),
+         PowerChange = PowerGen-PowerGenTM1) %>%
+  ungroup %>%
+  select(Sim, RoundRemoved, PowerChange)
+
+NodesLost <- testrank %>%
+  filter(RemovalType !="Targeted", type =="Node") %>%
+  group_by(RoundRemoved, Sim) %>% 
+  summarise(NodesLost = n())
+
+
+EdgeLoss<- testrank %>%
+  filter(RemovalType =="Overloaded", type =="Edge") %>%
+  group_by(RoundRemoved, Sim) %>% 
+  summarise(EdgesOverload = n())
+
+test2 <- testrank %>%
+   filter(RemovalType =="Targeted", type =="Node") %>%
+  select(-type, -RemovalType) %>%
+  left_join(NodesLost) %>%
+  left_join(EdgeLoss)  %>%
+  left_join(PowerLossDF) #Something wierd is going on with power loss. I need to take a closer look at the attack round data
+ #left_join(VertexMetaData %>% select(Name, BalencedPower)) %>%# these results are just wierd
+  #mutate(AdjPowerLoss = PowerLoss - abs(BalencedPower))
+
+InfluentialNodes <- testrank %>%
+   filter(RemovalType =="Targeted", type =="Node") %>%
+  select(-type, -RemovalType) %>%
+  left_join(NodesLost) %>%
+  left_join(EdgeLoss) %>%
+  left_join(PowerLossDF) %>%
+  group_by(Name) %>%
+  summarise(MeanNodes = mean(NodesLost, na.rm = TRUE),
+            MedianNodes = median(NodesLost, na.rm = T),
+            sdNodes = sd(NodesLost, na.rm = T),
+            NodeOccs = sum(!is.na(NodesLost)),
+            MeanEdgesOverloaded = mean(EdgesOverload, na.rm = T),
+            MedianEdgesOverloaded = median(EdgesOverload, na.rm = T),
+            sdEdgesOverloaded = sd(EdgesOverload, na.rm = T),
+            EdgeOccs = sum(!is.na(EdgesOverload)),
+            MeanPowerChange = mean(PowerChange, na.rm = T),
+            MedianPowerChange = median(PowerChange, na.rm = T),
+            sdPowerChange = sd(PowerChange, na.rm = T)) %>%
+  left_join(MaxJointFailProbNode %>% select(Name = Node, Perc)) %>%
+  left_join(VertexMetaData2)
+
+
+#Doesn't show any difference betweeen types.
+#Again suggests that e-topology is the important thing.
+InfluentialNodes %>%
+  ggplot(aes(x  = MeanNodes, color = NodeType2)) + geom_density()
+
+InfluentialNodes2 <- InfluentialNodes %>%
+  rename(target = EdgeOccs) %>%
+  mutate(MedianEdgesOverloaded = ifelse(target<100, NA, MedianEdgesOverloaded))
+  filter(target>100)
+
+
+InfluentialNodes2 %>%
+  ggplot(aes(x = MeanNodes, y = MeanEdgesOverloaded, color = Perc)) + geom_point()
+
+
+MapDFInfluence <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(InfluentialNodes2, by = c("Node"="Name"))
+
+MapDFInfluence %>%
+  filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(data = MapDFInfluence %>% filter(target>100), aes(colour =ntile(MedianEdgesOverloaded, 10) )) +
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c()+
+  ggtitle("Node maximum joint failure probability")
+
+
+#Attacks around london and the northern cities reduce power
+#But attacks around scotland increase power... whats that about?
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(InfluentialNodes, by = c("Node"="Name")) %>%
+  filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =ntile(abs(MeanPowerChange), 10) )) +
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c()+
+  ggtitle("Causes power change to grid on Removal")
+
+
+#Rank Influence metrics from 1 to 100 and find the euclidean dsitance from 0
+test <- InfluentialNodes %>%
+  ##Turn any nodes below the 1% threshold to zero
+  mutate(MedianNodes = ifelse(NodeOccs<100, 0, MedianNodes),
+         MedianPowerChange = ifelse(NodeOccs<100, 0, MedianPowerChange),
+         MedianEdgesOverloaded = ifelse(EdgeOccs<100, 0, MedianEdgesOverloaded)) %>%
+  select(Name, MedianNodes, MedianEdgesOverloaded, MedianPowerChange, NodeOccs) %>%
+  mutate(MedianPowerChange = abs(MedianPowerChange)) %>%
+  mutate_if(is.numeric, percent_rank) %>%
+  mutate(Dist = (MedianNodes^2+MedianEdgesOverloaded^2+MedianPowerChange^2)^(1/3),
+         PercMax = Dist/max(Dist),
+         Dist2 = sqrt(Dist^2+(NodeOccs/1e4)^2), #adjusting for amount of occurances.. basically not a lot of difference
+         Dist3 = Dist*(NodeOccs/1e4),
+         PercMax2 = Dist3/max(Dist3)) %>% # slightly more distrance here
+  left_join(VertexMetaData2)
+
+cor(select(test, Dist, Dist2, Dist3))
+
+test %>%
+  ggplot(aes(x = NodeType2, y = PercMax)) + geom_boxplot()
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(test, by = c("Node"="Name")) %>%
+  filter(!is.na(PercMax)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =PercMax2)) +
+   facet_grid(~PositionType) + 
+  #scale_colour_gradient2(low = "#8C510A",mid = "#F5F5F5", high = "#01665e", midpoint = 0.3)
+  scale_color_viridis_c() +
+  ggtitle("Combined influence metrics as a percentage of maximum")
+
+#Most nodes are of similar importance, a few nodes are very important
+#A substantial number of nodes are of very little importances generally.
+test %>%
+  ggplot(aes(x = PercMax)) + geom_density() +
+  labs(title = "Combined influence density plot")
+
+table(test$PercMax==0)
+
+```
+
 
 
 ```{r}
