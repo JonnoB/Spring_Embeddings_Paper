@@ -499,7 +499,7 @@ testrank3 %>%
   select(-median, -sd) %>%
   spread(Rtype2, mean) %>%
    left_join(DominantFailureMode, by = c("Name", "type")) %>%
-  ggplot(aes(x = Targeted, y = `Not Targeted`, colour = DominantType3))  + 
+  ggplot(aes(x = Targeted, y = `Not Targeted`, colour = DominantType2))  + 
     facet_wrap(~type)+
   geom_point()
 
@@ -661,6 +661,7 @@ MaxJointFailProb %>%
   ggplot(aes(x = Targeted, y = Perc)) + geom_point()
 cor(MaxJointFailProb$Targeted, MaxJointFailProb$Perc, method = "spearman")
 
+#The London region is by far the most sensitive to joint failure
 MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(MaxJointFailProb, by = c("Link")) %>%
   filter(!is.na(Perc)) %>%
@@ -675,6 +676,7 @@ MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
 
 
 #High dimensional distance
+These results are very similar to the joint failure results
 ```{r}
 EucDist <- testrank %>%
   filter(type == "Edge") %>%
@@ -862,8 +864,6 @@ InfluentialNodes %>%
 InfluentialNodes2 <- InfluentialNodes %>%
   rename(target = EdgeOccs) %>%
   mutate(MedianEdgesOverloaded = ifelse(target<100, NA, MedianEdgesOverloaded))
-  filter(target>100)
-
 
 InfluentialNodes2 %>%
   ggplot(aes(x = MeanNodes, y = MeanEdgesOverloaded, color = Perc)) + geom_point()
@@ -872,6 +872,7 @@ InfluentialNodes2 %>%
 MapDFInfluence <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(InfluentialNodes2, by = c("Node"="Name"))
 
+#Seldom targeted nodes are removed as they are just noise
 MapDFInfluence %>%
   filter(!is.na(Perc)) %>%
     ggplot(aes(x = Latitude, y = Longitude)) + 
@@ -898,7 +899,7 @@ MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
 
 
 #Rank Influence metrics from 1 to 100 and find the euclidean dsitance from 0
-test <- InfluentialNodes %>%
+MultiInfluence <- InfluentialNodes %>%
   ##Turn any nodes below the 1% threshold to zero
   mutate(MedianNodes = ifelse(NodeOccs<100, 0, MedianNodes),
          MedianPowerChange = ifelse(NodeOccs<100, 0, MedianPowerChange),
@@ -913,13 +914,14 @@ test <- InfluentialNodes %>%
          PercMax2 = Dist3/max(Dist3)) %>% # slightly more distrance here
   left_join(VertexMetaData2)
 
-cor(select(test, Dist, Dist2, Dist3))
+cor(select(MultiInfluence, Dist, Dist2, Dist3))
 
-test %>%
+#Hybrid nodes are most influential
+MultiInfluence %>%
   ggplot(aes(x = NodeType2, y = PercMax)) + geom_boxplot()
 
 MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
-  left_join(test, by = c("Node"="Name")) %>%
+  left_join(MultiInfluence, by = c("Node"="Name")) %>%
   filter(!is.na(PercMax)) %>%
     ggplot(aes(x = Latitude, y = Longitude)) + 
   geom_line(aes(group = Link), size = 0.8) + 
@@ -931,14 +933,318 @@ MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
 
 #Most nodes are of similar importance, a few nodes are very important
 #A substantial number of nodes are of very little importances generally.
-test %>%
+MultiInfluence %>%
   ggplot(aes(x = PercMax)) + geom_density() +
   labs(title = "Combined influence density plot")
 
-table(test$PercMax==0)
+table(MultiInfluence$PercMax==0)
 
 ```
 
+##Differnce in co-failure between Targeted/Islanded type Nodes
+
+```{r}
+NodeMeanFailProb <- SimultaneousNodeFail %>%
+  select(-Perc) %>%
+  spread(key = Node2, value = counts, fill = 0) %>%
+  gather(key = Node2, value = counts, -Node1) %>%
+  rename(Name = Node1) %>%
+    group_by(Name) %>%
+  summarise(mean = mean(counts),
+            max = max(counts)) %>%
+  mutate(Perc = mean/1e4) %>%
+  left_join(DominantFailureMode)
+
+
+EdgeMeanFailProb <- SimultaneousFail %>%
+  select(-Perc) %>%
+  spread(key = Edge2, value = counts, fill = 0) %>%
+  gather(key = Edge2, value = counts, -Edge1) %>%
+  rename(Name = Edge1) %>%
+    group_by(Name) %>%
+  summarise(mean = mean(counts),
+            max = max(counts)) %>%
+  mutate(Perc = mean/1e4) %>%
+  left_join(DominantFailureMode)
+
+
+bind_rows(NodeMeanFailProb, EdgeMeanFailProb) %>%
+  ggplot(aes(x = Perc, colour = type)) + geom_density()
+
+#Nodes who generally fail through islanding or overload have a significantly higher mean probability of failure with other nodes
+#They also have a higher maximum join probability of failure than nodes that are removed through targeting
+bind_rows(NodeMeanFailProb, EdgeMeanFailProb)  %>%
+  ggplot(aes(x = DominantType2, y = Perc, fill = DominantType2)) +geom_boxplot()+
+  facet_grid(~type)
+  
+
+GreaterThanX <- seq(0.1,0.8, 0.1) %>%
+  map_df(~{
+    
+    SimultaneousNodeFail %>%
+      mutate(Geq = Perc>.x) %>%
+      group_by(Node1) %>%
+      summarise(Geq = sum(Geq)) %>%
+      ungroup %>%
+      mutate(Perc = .x)
+  }) %>%
+  left_join(DominantFailureMode, by = c("Node1"= "Name")) %>%
+  group_by(Perc, DominantType2) %>%
+  summarise(mean = mean(Geq))
+
+GreaterThanX %>%
+  ggplot(aes(x = Perc, y = mean, colour = DominantType2)) + geom_line() +
+  labs(title = "Difference between average number of nodes with at least join failure probability")
+
+
+
+#Previosuly this showed the split between islanding and overloading now we show it in terms of mean joint failure probability
+#Higher joint probability means earlier removal as it has to be removed early or it will fail.
+testrank3 %>%
+  select(-median, -sd) %>%
+  spread(Rtype2, mean) %>%
+   left_join(DominantFailureMode, by = c("Name", "type")) %>%
+  #filter(type == "Node") %>%
+  left_join(bind_rows(NodeMeanFailProb, EdgeMeanFailProb)%>% select(Name, Perc, type) , by = c("Name", "type")) %>%
+ # left_join(VertexMetaData2) %>% filter(type == "Node") %>%
+  group_by(type) %>%
+  mutate(PercRank = percent_rank(Perc)) %>%
+  ggplot(aes(x = Targeted, y = `Not Targeted`, colour = PercRank))  + 
+ #   facet_wrap(~(Perc>0.01))+
+  facet_grid(~type)+
+  geom_point() +
+  #geom_point(aes(shape = NodeType2), size = 3)+
+   scale_color_viridis_c()
+
+testrank3 %>%
+  select(-median, -sd) %>%
+  spread(Rtype2, mean) %>%
+   left_join(DominantFailureMode, by = c("Name", "type")) %>%
+  #filter(type == "Node") %>%
+  left_join(MultiInfluence, by = c("Name")) %>%
+ filter(type == "Node") %>%
+  ggplot(aes(x = Targeted, y = `Not Targeted`, colour = PercMax))  + 
+  geom_point()+
+   scale_color_viridis_c()
+
+
+testrank3 %>%
+  select(-median, -sd) %>%
+  spread(Rtype2, mean) %>%
+   left_join(DominantFailureMode, by = c("Name", "type")) %>%
+  #filter(type == "Node") %>%
+  left_join(MultiInfluence, by = c("Name")) %>%
+ filter(type == "Node") %>%
+  ggplot(aes(x =PercMax, colour = DominantType2))  + 
+  geom_density()
+
+
+```
+
+#Co-failure graph
+
+##functions
+```{r}
+#The brackets just ensure all the code is run at once
+MakeNodeCommunity <-function(JointFailureProbg){
+  NodeCommunity <-tibble(Node = JointFailureProbg$names, membership = JointFailureProbg$membership) 
+
+CommunityRank <-NodeCommunity %>%
+  group_by(membership) %>%
+  summarise(size = n()) %>%
+  ungroup %>%
+   mutate(rank = rank(-size, ties.method = "random"))
+
+NodeCommunity %>%
+  left_join(CommunityRank) %>%
+  mutate( Community = case_when(
+      size>=20 ~ as.character(rank),
+      size>=10 ~ "medium",
+      TRUE ~ "small"
+    ),
+     Community2 = case_when(
+      size<20 & size>=10~ as.character(rank),
+      size>=20 ~ "Large",
+      TRUE ~ "small"
+    ))
+}
+
+
+IsSameCommunity <-function(Community1, Community2){
+  #uses the output of Make Node Community to find if two nodes share the same community using the different methods
+  
+  testmat <- matrix(rep(Community1 %>% pull(membership), nrow(Community1)),
+         ncol=nrow(Community1),
+         byrow=T)
+
+testmat2 <- matrix(rep(Community2 %>% pull(membership), nrow(Community2)),
+         ncol=nrow(Community2),
+         byrow=F)
+
+testmat3 <- testmat == testmat2
+#diag(testmat3) <- FALSE
+
+as_tibble(testmat3) %>%
+  set_names(Community1$Node) %>%
+  mutate(Node2 = Community2$Node) %>%
+  gather(key = Node1, value = SameFailureGroup, -Node2)
+}
+
+
+CommunityAdjacencyMat<- function(Community1){
+  #Creates a community adjacency matrix, where there is a 1 if nodes are in the same community 
+  #and a zero if they are not
+  testmat <- matrix(rep(Community1 %>% pull(membership), nrow(Community1)),
+         ncol=nrow(Community1),
+         byrow=T)
+
+testmat3 <- testmat == t(testmat)
+return(testmat3)
+  }
+
+IsSameCommunity2 <-function(Community1, Community2){
+  #uses the output of Make Node Community to find if two nodes share the same community using the different methods
+  
+  Community1 <- Community1 %>% full_join(Community2 %>% select(Node)) %>% arrange(Node)
+  Community2 <- Community2 %>% full_join(Community1 %>% select(Node)) %>% arrange(Node)
+  
+    CommAdjMat1 <- CommunityAdjacencyMat(Community1)
+    CommAdjMat1[is.na(CommAdjMat1)] <- FALSE
+    CommAdjMat2 <- CommunityAdjacencyMat(Community2)
+    CommAdjMat2[is.na(CommAdjMat2)] <- FALSE
+    
+    Jaccard <- 1:ncol(CommAdjMat1) %>% map_dbl(~{
+       A <- CommAdjMat1[,.x]
+       B <- CommAdjMat2[,.x]
+      
+      sum(A*B)/(sum(A)+sum(B)-sum(A*B))
+    })
+    
+    tibble(Jaccard = Jaccard, Node = Community1$Node)
+    
+    
+}
+
+Community1 <- tibble(Node = c("1", "2", "3", "4", "5", "6"), 
+                     membership = c(1,2, 1, 3, 1, 4)) %>% group_by(membership) %>%
+  mutate(size = n()) %>%
+  ungroup
+
+Community2 <- tibble(Node = c("1", "2", "3", "4", "5", "7"), 
+                     membership = c(1,1, 1, 2, 3, 3)) %>% group_by(membership) %>%
+  mutate(size = n()) %>%
+  ungroup
+
+
+Community1 %>% full_join(Community2 %>% select(Node)) %>% mutate_if(is.na,~{0})
+  
+```
+
+##Creat Graph
+```{r}
+DistDF <- SimultaneousNodeFail %>%
+  mutate(Perc2 = 1-Perc,
+    counts2 = 1e4-counts,
+         InvCounts = 1/counts)
+
+DistMat0 <- DistDF %>%
+  select(Node1, Node2, InvCounts) %>%
+  spread(key = Node2, value = InvCounts, fill = 1) 
+
+DistMat <- DistMat0 %>%
+  select(-Node1) %>%
+  as.matrix()
+
+JointFailureProbg <-DistDF %>%
+  select(Node1, Node2, weight = counts) %>%
+  filter(weight >=1000) %>% #only edges with at least 1000 occurrances aka 10%, I'm not sure on the rights and wrongs of a cut off. This is definately a case for the metric backbone. Doing this or not makes a substantial difference
+  graph_from_data_frame(directed = FALSE) %>% cluster_walktrap(.)
+
+
+
+FailureNodeCommunity <- MakeNodeCommunity(JointFailureProbg)
+TopoNodeCommunity <- DistDF %>%
+  select(Node1, Node2, weight = counts) %>%
+  #mutate(weight = 1-weight) %>%
+ # filter(weight >=1000) %>% #only edges with at least 1000 occurrances aka 10%
+  graph_from_data_frame(directed = FALSE) %>% set.edge.attribute(., "weight", value = 1) %>%
+cluster_walktrap(.) %>% MakeNodeCommunity()
+
+#I don't think electrical distance is working. It may be scrambling node names
+ElecDistCommunity <- ImpPTDF(g, "FECK")$Imp %>%
+  ElectricalDistance()%>%
+  as.tibble %>%
+  mutate(Node1 = names(.)) %>%
+  gather(key= Node2, value = Distance, -Node1) %>%
+  filter(Distance != 0) %>%
+  mutate(DistPerc = Distance/max(Distance),
+         weight = 1-DistPerc)
+
+test <- ElecDistCommunity %>%
+  select(Node1, Node2, weight) %>%
+  graph_from_data_frame(directed = FALSE) %>%
+cluster_walktrap(.) %>% MakeNodeCommunity()
+
+
+ElecDistCommunity %>%
+  ggplot(aes(x = weight))+ geom_density()
+
+
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(test) %>%
+  mutate(Community = ifelse(is.na(Community), "small", Community),
+         Community2 = ifelse(is.na(Community), "small", Community2)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =Community), size = 2) +
+   facet_grid(~PositionType)+
+   # scale_color_brewer(type = "qual")
+  scale_color_brewer(palette = "Set1")
+
+
+test <-  MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(FailureNodeCommunity) %>%
+    mutate(Community = ifelse(is.na(Community), "small", Community),
+         Community2 = ifelse(is.na(Community2), "small", Community2)) 
+  
+```
+
+Compare cluster simila  mutate(diff = size -Samerity
+```{r}
+
+CommSim <- IsSameCommunity2(FailureNodeCommunity, TopoNodeCommunity) %>%
+  left_join(FailureNodeCommunity, by = c("Node"= "Node")) %>%
+  group_by(membership) %>%
+  summarise(Jaccard = mean(Jaccard),
+            size = first(size),
+            rank = first(rank),
+            Community = first(Community))
+
+CommSim2 <- IsSameCommunity2(FailureNodeCommunity, test) %>%
+  left_join(FailureNodeCommunity, by = c("Node"= "Node")) %>%
+  group_by(membership) %>%
+  summarise(Jaccard = mean(Jaccard),
+            size = first(size),
+            rank = first(rank),
+            Community = first(Community))
+
+#It's a mess
+CommSim %>%
+  ggplot(aes(x = size, y = Jaccard))+ geom_point()
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(FailureNodeCommunity) %>%
+  left_join(CommSim) %>%
+  mutate(Community = ifelse(is.na(Community), "small", Community),
+         Community2 = ifelse(is.na(Community), "small", Community2)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =Jaccard), size = 2) +
+   facet_grid(~PositionType)+
+scale_colour_viridis_c()
+   
+```
 
 
 ```{r}
