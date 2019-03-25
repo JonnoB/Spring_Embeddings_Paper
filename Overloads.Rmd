@@ -55,6 +55,17 @@ source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
 list.files("/home/jonno/Useful_PhD__R_Functions", pattern = ".R", full.names = T) %>%
   walk(~source(.x))
 
+VertexMetaData2 <- VertexMetaData %>%
+  mutate(NodeType = case_when(
+    BalencedPower>0 ~"Generator",
+    BalencedPower< 0~"Demand",
+    TRUE ~ "Transfer"
+  ),
+  NodeType2 = case_when(
+    Demand>0 & Generation>0 ~"Hybrid",
+    TRUE ~ NodeType
+  )) %>% select(Name, NodeType, NodeType2, BalencedPower)
+
 ```
 
 #Set up Graph
@@ -132,10 +143,7 @@ ggsave(file.path(FiguresFolder, "LineRemovalRankMap.pdf"))
 What is the relationship between centrality and e-centrality and loss mode
 ```{r}
 
-  ElecCen1 <- ElectricalCentrality(g)
-
-ElecCen1$EdgeEC
-ElecCen1$NodeEC
+ElecCen1 <- ElectricalCentrality(g)
 
 test   <- tibble(degree = degree(g), 
    EntropicDeg = EntropicDegree(g, Scale = T), 
@@ -175,13 +183,10 @@ EdgeCharacteristics %>%
   ggplot(aes(x = ElectricalCentrality, y = Link.Limit)) + geom_point()
 
 
-MetricMap <- EdgeCharacteristics %>%
+ EdgeCharacteristics %>%
   select(Link = Name, ElectricalCentrality, Centrality, PowerFlow, LineLoad) %>%
   gather(key = metric, value = value, - Link) %>%
-  left_join(MakeMapDF(g, read_csv(file.path(basewd, "point.csv"))),. )
-
-
-MetricMap %>%
+  left_join(MakeMapDF(g, read_csv(file.path(basewd, "point.csv"))),. )%>%
   filter(!is.na(value)) %>%
   group_by(metric) %>%
   mutate(rank = ntile(value, 100)) %>%
@@ -197,6 +202,8 @@ ggsave(file.path(FiguresFolder, "MetricMap.pdf"))
 
 #Check model accuracy
 
+This isn't very interesting at the moment eventhough it was the inspiration for all the work.
+Will leave for now but may delete later
 
 ##create models
 ```{r}
@@ -325,7 +332,6 @@ DamageComp %>%
 
 #Round removed is there a difference?
 
-
 Do some nodes/edges get targeted later or fail early is there a pattern?
 ```{r}
 
@@ -362,26 +368,6 @@ OveralFailurePoint <- testrank %>%
   mutate(from = ifelse(is.na(from), Name, from),
          to = ifelse(is.na(to), Name, to))
 
-
-
-VertexMetaData2 <- VertexMetaData %>%
-  mutate(NodeType = case_when(
-    BalencedPower>0 ~"Generator",
-    BalencedPower< 0~"Demand",
-    TRUE ~ "Transfer"
-  ),
-  NodeType2 = case_when(
-    Demand>0 & Generation>0 ~"Hybrid",
-    TRUE ~ NodeType
-  )) %>% select(Name, NodeType, NodeType2, BalencedPower)
-
-VertexMetaData2 %>%
-  group_by(NodeType) %>%
-  summarise(count = n())
-
-VertexMetaData2 %>%
-  group_by(NodeType2) %>%
-  summarise(count = n())
 
 
  OverloadType %>%
@@ -787,6 +773,12 @@ AttackRoundData <- list.files("/home/jonno/Dropbox/AWS_Simulation_Files/SummaryD
   })
 
 
+
+
+test2 <- AttackRoundData %>%
+  filter(simulationID==5689)
+ggplot(test2, aes(x = NodesAttacked, y = PowerGen)) + geom_line()
+
 PowerLossDF <-AttackRoundData  %>%
   rename(Sim = simulationID, RoundRemoved = NodesAttacked) %>%
   mutate(Sim = paste0("Simulation_ID_", Sim)) %>%
@@ -1080,9 +1072,11 @@ testrank3 %>%
 #Co-failure graph
 
 ##functions
+Add these to the useful autoload folder
+Possibly make folder a package
 ```{r}
 #The brackets just ensure all the code is run at once
-MakeNodeCommunity <-function(JointFailureProbg){
+MakeNodeCommunity <-function(JointFailureProbg, large = 20, medium = 10){
   NodeCommunity <-tibble(Node = JointFailureProbg$names, membership = JointFailureProbg$membership) 
 
 CommunityRank <-NodeCommunity %>%
@@ -1094,13 +1088,13 @@ CommunityRank <-NodeCommunity %>%
 NodeCommunity %>%
   left_join(CommunityRank) %>%
   mutate( Community = case_when(
-      size>=20 ~ as.character(rank),
-      size>=10 ~ "medium",
+      size>=large ~ as.character(rank),
+      size>=medium ~ "medium",
       TRUE ~ "small"
     ),
      Community2 = case_when(
-      size<20 & size>=10~ as.character(rank),
-      size>=20 ~ "Large",
+      size<large & size>=medium~ as.character(rank),
+      size>=large ~ "Large",
       TRUE ~ "small"
     ))
 }
@@ -1198,7 +1192,7 @@ cluster_infomap()%>% MakeNodeCommunity()
 
 #Direction in Electrical distance is arguably meaningless as electricty flows over all available paths
 #I don't think electrical distance is working. It may be scrambling node names
-ElecDistCommunity <- ImpPTDF(g, "FECK")$Imp %>%
+ElecDistCommunity <- ImpPTDF(g, SlackRef)$Imp %>%
   ElectricalDistance() %>%
   as.tibble %>%
   mutate(Node1 = names(.)) %>%
@@ -1210,27 +1204,21 @@ ElecDistCommunity <- ImpPTDF(g, "FECK")$Imp %>%
          LinkType2 = paste(Node2, Node1, sep ="-")) #%>%
  # filter(LinkType1 %in% get.edge.attribute(g, "name")get.edge.attribute(g, "name")) #totally not helpful
 
-
-AdmitTopology <- ImpPTDF(g, "CRSS")$Imp %>% solve(.) 
-
-AdmitTopology <- tibble(from = rownames(AdmitTopology)) %>% 
-  bind_cols(as_tibble(AdmitTopology)) %>%
-  gather(key = to, value = Admittance,-from) %>%
-  mutate(Admittance = abs(Admittance)) #This is an utter mess
-
-
-TopoNodeCommunity2 <- as_data_frame(g) %>% as_tibble %>%
+AdmitTopology <-as_data_frame(g) %>% as_tibble %>%
   mutate(from2 = ifelse(PowerFlow>0, from, to),
          to2 = ifelse(PowerFlow>0, to, from),
          from = from2,
          to = to2,#this is so confusing I am keeping in the columns to make it easier to check back on
-         PowerFlow = abs(PowerFlow)) %>%
-  left_join(AdmitTopology)%>%
-  mutate(weight = Admittance) %>%
-  group_by(from) %>%
-  mutate(weight = weight/sum(weight)) %>%
-   graph_from_data_frame(directed = TRUE)  %>%
-cluster_walktrap()%>% MakeNodeCommunity()
+         weight = Y) %>%
+   graph_from_data_frame(directed = FALSE)  %>%
+cluster_walktrap() %>% MakeNodeCommunity(large = 9, medium = 5)
+
+
+test <-AdmitTopology %>%
+  group_by(membership) %>%
+  summarise(counts = n()) %>%
+  arrange(-counts)
+
 
 test <- ElecDistCommunity %>%
   select(Node1, Node2, Distance) %>%
@@ -1270,6 +1258,7 @@ ElecDistCommunity %>%
 
 ```
 
+
 ###Failure group map
 ```{r}
 MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
@@ -1282,7 +1271,7 @@ MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   geom_line(aes(group = Link), size = 0.8, arrow = arrow(angle = 15, length= unit(0.3, "cm"), type = "closed")) + 
   geom_point(#data = . %>% filter(Community != "small", Community != "medium"), #Keep only large clusters
              aes(colour =Community, shape = NodeType), size = 2) +
-   facet_grid(~PositionType)+
+   facet_grid(~PositionType) +
    # scale_color_brewer(type = "qual")
   scale_color_brewer(palette = "Set1") +
   labs(title = "Failure groups")
