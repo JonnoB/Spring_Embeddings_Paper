@@ -227,7 +227,7 @@ Calc_Damping_matrix<- function(EdgeNode, v_vect, kvect, mvect){
   Ften_mat<- 2*sqrt(kmat*mvect)*Vmat
   Ften_mat[!is.finite(Ften_mat)] <-0
   
-  return(abs(Ften_mat))
+  return((Ften_mat))
 }
 
 #MASS CAN'T BE ZERO!
@@ -250,7 +250,7 @@ NodeStatus2 <- NodeStatus %>%
          velocity = velocity(velocity, NodeStatus$acceleration, t, t + tstep),
          NetTension = Create_Tension_matrix(EdgeNode, z, kvect, dvect) %>% rowSums(),
          friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, mass) %>% rowMeans(), #velocity*10,
-         NetForce = force -NetTension -friction,
+         NetForce = force + NetTension - friction,
          acceleration = NetForce/mass,
          t = t + tstep)
   
@@ -277,8 +277,6 @@ FindStabilSystem <- function(NodeStatus, EdgeNode, kvect, dvect,  tstep, maxIter
        Calc_System_Dynamics(., EdgeNode, kvect, dvect, tstep, friction)
       
     NodeList[[n + 1]] <- temp
-      
- # print(paste("Iteration", n, "acceleration", sum(abs(temp$acceleration)), "velocity", sum(abs(temp$velocity))))
     
   }
   
@@ -290,7 +288,7 @@ FindStabilSystem <- function(NodeStatus, EdgeNode, kvect, dvect,  tstep, maxIter
 }
 
 
-test <-FindStabilSystem(NodeStatus, EdgeNode, kvect, dvect, tstep=0.1, maxIter = 2500, friction = 10) %>%
+test <-FindStabilSystem(NodeStatus, EdgeNode, kvect, dvect, tstep=0.1, maxIter = 200, friction = 10) %>%
   bind_rows()
 
 
@@ -307,6 +305,57 @@ test %>%
             NetForce = mean(abs(NetForce)),
             velocity = mean(abs(velocity))) %>%
   ggplot(aes(x = t, y =z )) + geom_line()
+
+test  %>%
+  mutate(node = factor(node)) %>%
+  ggplot(aes(x = t, y =z , colour = node)) + geom_line()
+
+test %>%
+  filter(t == max(t)) %>%
+  mutate(velocity = 0,
+         friction = 0,
+         NetForce = force + NetTension,
+         #acceleration2 = acceleration,
+         acceleration = NetForce/mass) %>% 
+  FindStabilSystem(., EdgeNode, kvect, dvect, tstep=0.001, maxIter = 500, friction = 10) %>%
+  bind_rows()  %>%
+  filter(t == max(t))
+
+
+test3 <- test %>%
+  filter(t == median(t)) %>%
+  
+
+Calc_System_Dynamics(test3, EdgeNode, kvect, dvect,  tstep = 0.1)
+Calc_Damping_matrix(EdgeNode, test3$velocity, kvect, rep(5,6) ) %>% rowSums()
+
+SmallNodeStatus <- tibble(node = 1:3, mass = 5, force = c(10,0,-10), z = 0, 
+       NetTension = 0, velocity = 0, 
+       friction = 0,
+       NetForce = force + NetTension +friction,
+       acceleration = NetForce/mass,
+       t = 0)
+
+Smalltest <-FindStabilSystem(SmallNodeStatus, SmallEdgeNode, Smallkvect, Smalldvect, tstep=0.01, maxIter = 1000, friction = 2) %>%
+  bind_rows()
+
+Create_Tension_matrix(SmallEdgeNode, smallzvect , Smallkvect, Smalldvect)
+
+Calc_Damping_matrix(SmallEdgeNode, Smalltest %>% filter(t == 1) %>% pull(velocity), Smallkvect, 
+                    Smalltest %>% filter(t == 1) %>% pull(mass))
+
+Smalltest %>%
+  group_by(t) %>%
+  summarise(z = mean(abs(z)),
+            NetForce = mean(abs(NetForce)),
+            velocity = mean(abs(velocity)),
+            acceleration = mean(abs(acceleration))) %>%
+  ggplot(aes(x = t, y =z )) + geom_line()
+
+
+Smalltest  %>%
+  mutate(node = factor(node)) %>%
+  ggplot(aes(x = t, y =z , colour = node)) + geom_line()
 
 ```
 
