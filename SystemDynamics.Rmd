@@ -12,6 +12,9 @@ editor_options:
 ```{r}
 library(tidyverse)
 
+list.files("/home/jonno/Useful_PhD__R_Functions", pattern = "Tension", full.names = T) %>%
+  walk(~source(.x))
+
 
 theta_force <- seq(0,pi/2, 0.05 )
 
@@ -63,7 +66,7 @@ test %>% arrange(min) %>% slice(1) %>% pull(z) %>% c(0,.,0) %>%
   geom_line()
 
 
-EdgeNode <- c(1,0,-1,0,0,0,
+EdgeNode <- c(1,-1,0,0,0,0,
               0,1,-1,0,0,0,
               0,0,0,1,-1,0,
               0,0,0,1,-1,0,
@@ -79,29 +82,19 @@ Link <- tibble(EdgeName = 1:7,
   C <- matrix(data = 0, nrow = nrow(Link), ncol = nrow(Link))
   diag(C) <- Link$distance
 
-t(EdgeNode) %*% C %*% EdgeNode
-
-#Weighted adjacency matrix
-Adj <- matrix(c(c(0,0,sqrt(2),0,0,0),
-                c(0,0,sqrt(2),0,0,0),
-                c(sqrt(2),sqrt(2),0,sqrt(2),0,0),
-                c(0,0,sqrt(2),0,sqrt(2),1),
-                c(0,0,0,sqrt(2),0,1),
-                c(0,0,0,1,1,0)
-                ), nrow = 6)
-
 #Injection vector of power put in and removed
 InjectionVect <- c(10,20,0,-20,10,-20)
 sum(InjectionVect)
 
 InjectMat <- diag(InjectionVect)
 
-abs(t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode)
 
 Adj <- (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) / (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) 
 diag(Adj) <-0
 Adj[!is.finite(Adj)] <-0
 Adj
+
+graph_from_adjacency_matrix(Adj, mode = "undirected") %>% plot
 
 Zvect <- c(1,2,0,-1,-2,-2)
 
@@ -109,47 +102,14 @@ HeightDiff <- t(Adj * Zvect) - (Adj * Zvect)
 D <- t(EdgeNode) %*% C %*% EdgeNode %>% abs
 diag(D) <-0
 
-t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode
-
-EdgeNode %*% diag(Zvect, nrow = length(Zvect)) %*% t(EdgeNode)
-
-C^2
-
-Tension <- function(dZ,k, D){
-  
-  k*(sqrt(dZ^2+ D^2)-D)*dZ/(sqrt(dZ^2+ D^2))
-  
-}
+# Tension <- function(dZ,k, D){
+#   
+#   k*(sqrt(dZ^2+ D^2)-D)*dZ/(sqrt(dZ^2+ D^2))
+#   
+# }
 
 kvect <- Link$k
 dvect <- Link$distance
-
-Create_Tension_matrix<- function(EdgeNode, zvect, kvect, dvect){
-  #EdgeNode <- The edgenode matrix 
-  #zvect the height of each node
-  #kvect the vector of spring stiffness for each edge
-  #dvect, the vector of horizontal distance between the springs.
-
-  #Creat the adjacency matrix
-  Adj <- (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) / (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) 
-  diag(Adj) <-0
-  Adj[!is.finite(Adj)] <-0
-  Adj
-  
-  Zmat <- Adj*zvect #The adjacency matrix weight by node height
-  dZmat <- Zmat- t(Zmat) #The difference in height between adjacent nodes
-  #Create the absolute K (spring stiffness) a and distance matrices
-  kmat <- t(EdgeNode) %*% diag(kvect, nrow = length(kvect)) %*% EdgeNode %>% abs 
-  Dmat <- t(EdgeNode) %*% diag(dvect, nrow = length(kvect)) %*% EdgeNode %>% abs
-  
-  Hmat <- sqrt(dZmat^2 + Dmat^2)
-  
-  Ften_mat<- kmat*(Hmat-Dmat)*dZmat/Hmat
-  Ften_mat[!is.finite(Ften_mat)] <-0
-  
-  return (Ften_mat)
-}
-
 
 SmallEdgeNode <- matrix(c(1,-1,0,
                    0,1,-1), nrow = 2, byrow = T)
@@ -162,20 +122,9 @@ Create_Tension_matrix(SmallEdgeNode, Smallzvect, Smallkvect, Smalldvect)
 Create_Tension_matrix(SmallEdgeNode, Smallzvect, Smallkvect, Smalldvect) %>%
   rowSums()
 
-Tension(3, 3, 1)
 
-Tension(-2,4, 1)
-
-
-3*(sqrt(10)-1)
-2*(sqrt(5)-1)
-
-3*(sqrt(10)-1)/sqrt(10)
-2*(sqrt(5)-1)/sqrt(5)
-
-
-3*3*(sqrt(10)-1)/sqrt(10)
-4*2*(sqrt(5)-1)/sqrt(5)
+Calc_Damping_matrix(SmallEdgeNode, 0, Smallkvect, 
+                    c(5,5,5))
 
 ```
 
@@ -208,48 +157,28 @@ distance <- function(z, v, a, t0, t1 ){
 
 
 
-Calc_Damping_matrix<- function(EdgeNode, v_vect, kvect, mvect){
-  #EdgeNode <- The edgenode matrix 
-  #zvect the height of each node
-  #kvect the vector of spring stiffness for each edge
-  #dvect, the vector of horizontal distance between the springs.
 
-  #Creat the adjacency matrix
-  Adj <- (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) / (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) 
-  diag(Adj) <-0
-  Adj[!is.finite(Adj)] <-0
-  Adj
-  
-  Vmat <- Adj*v_vect #The adjacency matrix weight by node height
-  #Create the absolute K (spring stiffness) a and distance matrices
-  kmat <- t(EdgeNode) %*% diag(kvect, nrow = length(kvect)) %*% EdgeNode %>% abs 
-  
-  Ften_mat<- 2*sqrt(kmat*mvect)*Vmat
-  Ften_mat[!is.finite(Ften_mat)] <-0
-  
-  return((Ften_mat))
-}
 
 #MASS CAN'T BE ZERO!
 
-NodeStatus <- tibble(node = 1:6, mass = 5, force = c(10,20,0,-20,10,-20), z = 0, 
+NodeStatus2 <- tibble(node = 1:6, mass = 5, force = c(10,20,0,-20,10,-20), z = 0, 
        NetTension = 0, velocity = 0, 
-       friction = 0.2*velocity,
-       NetForce = NetTension-force +friction,
+       friction = 0,
+       NetForce = NetTension + force - friction,
        acceleration = NetForce/mass,
        t = 0)
 
 
-Calc_Damping_matrix(EdgeNode, NodeStatus2$velocity, kvect, rep(5,6)) %>% rowSums()
+Calc_Damping_matrix(EdgeNode, NodeStatus$velocity, kvect, rep(5,6)) %>% rowSums()
 
 
-Calc_System_Dynamics <- function(NodeStatus, EdgeNode, kvect, dvect, tstep = 1, friction = 0.2){
+Calc_System_Dynamics <- function(NodeStatus, EdgeNode, kvect, dvect, tstep = 1, frctmultiplier = 1){
   
 NodeStatus2 <- NodeStatus %>%
   mutate(z = distance(z, velocity, acceleration, t0 = t, t1 = t + tstep),
-         velocity = velocity(velocity, NodeStatus$acceleration, t, t + tstep),
+         velocity = velocity(velocity, acceleration, t, t + tstep),
          NetTension = Create_Tension_matrix(EdgeNode, z, kvect, dvect) %>% rowSums(),
-         friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, mass) %>% rowMeans(), #velocity*10,
+         friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, mass) %>% rowMeans()*frctmultiplier, #velocity*10,
          NetForce = force + NetTension - friction,
          acceleration = NetForce/mass,
          t = t + tstep)
@@ -261,50 +190,68 @@ NodeStatus2 <- NodeStatus %>%
 }
 
 
-Calc_System_Dynamics(NodeStatus, EdgeNode, kvect, dvect,  tstep = 0.1)
+Calc_System_Dynamics(NodeStatus2, EdgeNode, kvect, dvect,  tstep = 0.1)
 
 
-FindStabilSystem <- function(NodeStatus, EdgeNode, kvect, dvect,  tstep, maxIter = 1000, friction = 0.2){
+
+
+
+FindStabilSystem2 <- function(NodeStatus, EdgeNode, kvect, dvect,  tstep, maxIter = 1000, frctmultiplier = 1){
   
+  NodeList <- NodeStatus
   
-  NodeList <- list(NodeStatus)
+  results <- as.list(rep(NA,maxIter))
   
   for(n in 1:maxIter){
     
     
    # print(NodeList[[n]])
-    temp <- NodeList[[n]] %>%
-       Calc_System_Dynamics(., EdgeNode, kvect, dvect, tstep, friction)
+    temp <- NodeList %>%
+       Calc_System_Dynamics(., EdgeNode, kvect, dvect, tstep, frctmultiplier)
       
-    NodeList[[n + 1]] <- temp
+  results[[n]] <- temp %>%
+  group_by(t) %>%
+  summarise(z = mean(abs(z)),
+            NetForce = mean(abs(NetForce)),
+            velocity = mean(abs(velocity)),
+            acceleration = mean(abs(acceleration))) %>%
+    ungroup
+    
+    NodeList <- temp
     
   }
   
   #Are all yhr accellerations below tolerance?
-  ProcessFinished<- sum(temp$acceleration<tol)==nrow(temp)
+  #ProcessFinished<- sum(temp$acceleration<tol)==nrow(temp)
 
-  return(NodeList)
+  Out<- results %>% bind_rows() %>%
+    list(., NodeList)
+  
+  names(Out) <- c("results", "NodeList")
+  
+  return(Out)
   
 }
 
 
-test <-FindStabilSystem(NodeStatus, EdgeNode, kvect, dvect, tstep=0.1, maxIter = 200, friction = 10) %>%
+test <-FindStabilSystem(NodeStatus2, EdgeNode, kvect, dvect, tstep=0.1, maxIter = 200, frctmultiplier = 1) %>%
   bind_rows()
 
 
 test2 <- test %>% filter(node == 3)
 
 
-ggplot(test2, aes(x = t, y = NetForce, colour = as.factor(node))) +
-  geom_point()
+ggplot(test2, aes(x = t, y = acceleration)) +
+  geom_line()
 
 
 test %>%
   group_by(t) %>%
   summarise(z = mean(abs(z)),
+            acceleration = mean(abs(acceleration)),
             NetForce = mean(abs(NetForce)),
             velocity = mean(abs(velocity))) %>%
-  ggplot(aes(x = t, y =z )) + geom_line()
+  ggplot(aes(x = t, y =acceleration )) + geom_line()
 
 test  %>%
   mutate(node = factor(node)) %>%
@@ -336,7 +283,7 @@ SmallNodeStatus <- tibble(node = 1:3, mass = 5, force = c(10,0,-10), z = 0,
        acceleration = NetForce/mass,
        t = 0)
 
-Smalltest <-FindStabilSystem(SmallNodeStatus, SmallEdgeNode, Smallkvect, Smalldvect, tstep=0.01, maxIter = 1000, friction = 2) %>%
+Smalltest <-FindStabilSystem(SmallNodeStatus, SmallEdgeNode, Smallkvect, Smalldvect, tstep=0.01, maxIter = 10000, frctmultiplier = 0.01) %>%
   bind_rows()
 
 Create_Tension_matrix(SmallEdgeNode, smallzvect , Smallkvect, Smalldvect)
@@ -357,5 +304,223 @@ Smalltest  %>%
   mutate(node = factor(node)) %>%
   ggplot(aes(x = t, y =z , colour = node)) + geom_line()
 
+```
+
+
+#Test real graph
+
+```{r}
+#Create Edge matrix from graph
+
+A <- as_data_frame(List_of_BiConComps[[147]]) %>% 
+  select(Link, from, to) %>% 
+  gather(key = type, Node, -Link) %>%
+  arrange(Node) %>%
+  mutate(value = ifelse(type =="from", 1, -1)) %>%
+  ungroup %>%
+  select(-type) %>%
+  spread(key = Node, value, fill = 0) %>%
+  arrange(Link)
+
+rowdat <- A$Link
+
+A <- A %>% select(-Link) %>%
+  as.matrix()
+
+rownames(rowdat)
+
+rm(rowdat)
+
+
+NodeStatus <- as_data_frame(List_of_BiConComps[[147]], what = "vertices") %>%
+  select(node = name, force = BalencedPower ) %>%
+  mutate(
+    z = 0,
+    mass = 2000,
+    NetTension = 0, velocity = 0, 
+       friction = 0,
+       NetForce = force + NetTension - friction,
+       acceleration = NetForce/mass,
+       t = 0) %>%
+  filter(!(node %in% deletenames))
+
+NodeStatus$force %>% sum
+
+testratio <- NodeStatus %>%
+  mutate(ratio = abs(force/mass))
+
+
+Link <- as_data_frame(g) %>%
+  mutate(EdgeName = Link, distance = 1/Y, alpha = Link.Limit/abs(PowerFlow),  k= 1000*(1-1/alpha)) %>% #arbitary k!
+  select(EdgeName, distance, k) 
+
+test <-FindStabilSystem(NodeStatus, A, Link$k, Link$distance, tstep= 0.5, maxIter = 2000, frctmultiplier = 1) %>%
+  bind_rows()
+
+test <-FindStabilSystem2(NodeStatus, A, Link$k, Link$distance, tstep= 0.5, maxIter = 2000, frctmultiplier = 1) 
+
+
+
+ test$results %>%
+  ggplot(aes(x = t, y =z)) + geom_line()
+
+test2 <- test$NodeList
+ 
+summtest <- test %>%
+  group_by(t) %>%
+  summarise(z = mean(abs(z)),
+            NetForce = mean(abs(NetForce)),
+            velocity = mean(abs(velocity)),
+            acceleration = mean(abs(acceleration))) 
+
+summtest %>%
+  ggplot(aes(x = t, y = z)) + geom_line()
+
+
+testnode <- test %>%
+  filter(node =="DUGR")
+
+testnode %>%
+  ggplot(aes(x = t, y = z )) + geom_line()
+
+
+finalround <- test %>%
+  filter(t == max(t))
+
+#k1e4 <- test
+#k10 <- test
+#k100Iter2k <- test
+
+test <- k1e4
+
+```
+
+#System dynamics MASS version
+
+This version gives mass equak to force apart from transition nodes that are given the median mass.
+
+```{r}
+
+#mass version
+Calc_System_Dynamics <- function(NodeStatus, EdgeNode, kvect, dvect, tstep = 1, frctmultiplier = 1){
+  
+NodeStatus2 <- NodeStatus %>%
+  mutate(z = distance(z, velocity, acceleration, t0 = t, t1 = t + tstep),
+         velocity = velocity(velocity, acceleration, t, t + tstep),
+         NetTension = Create_Tension_matrix(EdgeNode, z, kvect, dvect) %>% rowSums(),
+         friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, abs(mass)) %>% rowMeans()*frctmultiplier, #velocity*10,
+         NetForce = force + NetTension - friction,
+         acceleration = NetForce/abs(mass),
+         t = t + tstep)
+  
+  paste("acceleration", sum(abs(NodeStatus2$acceleration)), "velocity", sum(abs(NodeStatus2$velocity)))
+  
+  return(NodeStatus2)
+  
+}
+
+baseAcceleration <- 10
+
+NodeStatusMass <- as_data_frame(g, what = "vertices") %>%
+  select(node = name, mass = BalencedPower ) %>%
+  mutate(
+    z = 0,
+    basemass = -mass, #production is negative mass
+    mass =ifelse(basemass==0, median(basemass), basemass), #effective mass is the mean mass, it exerts no force on the system
+    force = mass*baseAcceleration,
+    NetTension = 0, velocity = 0, 
+       friction = 0,
+       NetForce = force + NetTension - friction,
+       acceleration = NetForce/abs(mass), #acceleration uses the effective mass for calculation
+       t = 0)
+
+
+NodeStatusMass %>%
+  filter(node %in% c("DUGR", "ARMO", "EDIN"))
+
+
+Link <- as_data_frame(g) %>%
+  mutate(EdgeName = Link, distance = 1/Y, alpha = Link.Limit/abs(PowerFlow),  k= 100*(1-1/alpha)) %>% #arbitary k!
+  select(EdgeName, distance, k) 
+
+test <-FindStabilSystem(NodeStatusMass, A, Link$k, Link$distance, tstep= 0.02, maxIter = 200, frctmultiplier = 1) %>%
+  bind_rows()
+
+
+
+testnode <- test %>%
+  #filter(node =="DUGR")
+  filter(node %in% c("DUGR", "ARMO", "EDIN"))
+
+testnode %>%
+  ggplot(aes(x = t, y = z )) + geom_line()
+
+
+```
+
+
+
+```{r}
+
+smallBi <- biconnected_components(graph_from_adjacency_matrix(Adj, mode = "undirected"))
+
+smallBi$components[[1]] %>% length
+  
+bigraph <- biconnected_components(g)
+
+bigraph %>% names
+
+NodesPerComponent <- bigraph$components %>%
+  map_dbl(~length(.x)) %>%
+  tibble(components = 1:length(.), counts = .)
+
+
+get_bicomp_power <- function(g, component_number){
+
+  DeleteNodes <- get.vertex.attribute(g, "name")[!get.vertex.attribute(g, "name") %in% V(g)$name[bigraph$components[[component_number]]]]
+
+  delete.vertices(g, DeleteNodes) %>% get.vertex.attribute(., "BalencedPower") %>% sum
+}
+
+
+BicompPower <- 1:length(bigraph$components) %>%
+  map_df(~{
+    
+    tibble(BiComp = .x, Power = get_bicomp_power(g, .x))
+    
+  })
+
+#create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
+
+
+
+List_of_BiConComps <- Create_balanced_blocks(g)
+
+
+List_of_BiConComps %>%
+  map_dbl(~{
+    
+    get.vertex.attribute(.x, "BalencedPower") %>% sum
+    
+  })
+
+
+List_of_BiConComps[[1]] %>% get.vertex.attribute(., "BalencedPower")
+
+StabilModels <- 1:length(List_of_BiConComps) %>% 
+  map(~{
+    print(.x)
+    
+    Out <- Find_network_balance(List_of_BiConComps[[.x]])
+    
+    print(Out$results)
+    return(Out)
+    
+    })
+
+test <- Find_network_balance(List_of_BiConComps[[1]])
+
+
+g <- List_of_BiConComps[[147]]
 ```
 
