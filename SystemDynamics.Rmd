@@ -169,112 +169,7 @@ NodeStatus2 <- tibble(node = 1:6, mass = 5, force = c(10,20,0,-20,10,-20), z = 0
        t = 0)
 
 
-Calc_Damping_matrix(EdgeNode, NodeStatus$velocity, kvect, rep(5,6)) %>% rowSums()
 
-
-Calc_System_Dynamics <- function(NodeStatus, EdgeNode, kvect, dvect, tstep = 1, frctmultiplier = 1){
-  
-NodeStatus2 <- NodeStatus %>%
-  mutate(z = distance(z, velocity, acceleration, t0 = t, t1 = t + tstep),
-         velocity = velocity(velocity, acceleration, t, t + tstep),
-         NetTension = Create_Tension_matrix(EdgeNode, z, kvect, dvect) %>% rowSums(),
-         friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, mass) %>% rowMeans()*frctmultiplier, #velocity*10,
-         NetForce = force + NetTension - friction,
-         acceleration = NetForce/mass,
-         t = t + tstep)
-  
-  paste("acceleration", sum(abs(NodeStatus2$acceleration)), "velocity", sum(abs(NodeStatus2$velocity)))
-  
-  return(NodeStatus2)
-  
-}
-
-
-Calc_System_Dynamics(NodeStatus2, EdgeNode, kvect, dvect,  tstep = 0.1)
-
-
-
-
-
-FindStabilSystem2 <- function(NodeStatus, EdgeNode, kvect, dvect,  tstep, maxIter = 1000, frctmultiplier = 1){
-  
-  NodeList <- NodeStatus
-  
-  results <- as.list(rep(NA,maxIter))
-  
-  for(n in 1:maxIter){
-    
-    
-   # print(NodeList[[n]])
-    temp <- NodeList %>%
-       Calc_System_Dynamics(., EdgeNode, kvect, dvect, tstep, frctmultiplier)
-      
-  results[[n]] <- temp %>%
-  group_by(t) %>%
-  summarise(z = mean(abs(z)),
-            NetForce = mean(abs(NetForce)),
-            velocity = mean(abs(velocity)),
-            acceleration = mean(abs(acceleration))) %>%
-    ungroup
-    
-    NodeList <- temp
-    
-  }
-  
-  #Are all yhr accellerations below tolerance?
-  #ProcessFinished<- sum(temp$acceleration<tol)==nrow(temp)
-
-  Out<- results %>% bind_rows() %>%
-    list(., NodeList)
-  
-  names(Out) <- c("results", "NodeList")
-  
-  return(Out)
-  
-}
-
-
-test <-FindStabilSystem(NodeStatus2, EdgeNode, kvect, dvect, tstep=0.1, maxIter = 200, frctmultiplier = 1) %>%
-  bind_rows()
-
-
-test2 <- test %>% filter(node == 3)
-
-
-ggplot(test2, aes(x = t, y = acceleration)) +
-  geom_line()
-
-
-test %>%
-  group_by(t) %>%
-  summarise(z = mean(abs(z)),
-            acceleration = mean(abs(acceleration)),
-            NetForce = mean(abs(NetForce)),
-            velocity = mean(abs(velocity))) %>%
-  ggplot(aes(x = t, y =acceleration )) + geom_line()
-
-test  %>%
-  mutate(node = factor(node)) %>%
-  ggplot(aes(x = t, y =z , colour = node)) + geom_line()
-
-test %>%
-  filter(t == max(t)) %>%
-  mutate(velocity = 0,
-         friction = 0,
-         NetForce = force + NetTension,
-         #acceleration2 = acceleration,
-         acceleration = NetForce/mass) %>% 
-  FindStabilSystem(., EdgeNode, kvect, dvect, tstep=0.001, maxIter = 500, friction = 10) %>%
-  bind_rows()  %>%
-  filter(t == max(t))
-
-
-test3 <- test %>%
-  filter(t == median(t)) %>%
-  
-
-Calc_System_Dynamics(test3, EdgeNode, kvect, dvect,  tstep = 0.1)
-Calc_Damping_matrix(EdgeNode, test3$velocity, kvect, rep(5,6) ) %>% rowSums()
 
 SmallNodeStatus <- tibble(node = 1:3, mass = 5, force = c(10,0,-10), z = 0, 
        NetTension = 0, velocity = 0, 
@@ -395,69 +290,6 @@ test <- k1e4
 
 ```
 
-#System dynamics MASS version
-
-This version gives mass equak to force apart from transition nodes that are given the median mass.
-
-```{r}
-
-#mass version
-Calc_System_Dynamics <- function(NodeStatus, EdgeNode, kvect, dvect, tstep = 1, frctmultiplier = 1){
-  
-NodeStatus2 <- NodeStatus %>%
-  mutate(z = distance(z, velocity, acceleration, t0 = t, t1 = t + tstep),
-         velocity = velocity(velocity, acceleration, t, t + tstep),
-         NetTension = Create_Tension_matrix(EdgeNode, z, kvect, dvect) %>% rowSums(),
-         friction = Calc_Damping_matrix(EdgeNode, velocity, kvect, abs(mass)) %>% rowMeans()*frctmultiplier, #velocity*10,
-         NetForce = force + NetTension - friction,
-         acceleration = NetForce/abs(mass),
-         t = t + tstep)
-  
-  paste("acceleration", sum(abs(NodeStatus2$acceleration)), "velocity", sum(abs(NodeStatus2$velocity)))
-  
-  return(NodeStatus2)
-  
-}
-
-baseAcceleration <- 10
-
-NodeStatusMass <- as_data_frame(g, what = "vertices") %>%
-  select(node = name, mass = BalencedPower ) %>%
-  mutate(
-    z = 0,
-    basemass = -mass, #production is negative mass
-    mass =ifelse(basemass==0, median(basemass), basemass), #effective mass is the mean mass, it exerts no force on the system
-    force = mass*baseAcceleration,
-    NetTension = 0, velocity = 0, 
-       friction = 0,
-       NetForce = force + NetTension - friction,
-       acceleration = NetForce/abs(mass), #acceleration uses the effective mass for calculation
-       t = 0)
-
-
-NodeStatusMass %>%
-  filter(node %in% c("DUGR", "ARMO", "EDIN"))
-
-
-Link <- as_data_frame(g) %>%
-  mutate(EdgeName = Link, distance = 1/Y, alpha = Link.Limit/abs(PowerFlow),  k= 100*(1-1/alpha)) %>% #arbitary k!
-  select(EdgeName, distance, k) 
-
-test <-FindStabilSystem(NodeStatusMass, A, Link$k, Link$distance, tstep= 0.02, maxIter = 200, frctmultiplier = 1) %>%
-  bind_rows()
-
-
-
-testnode <- test %>%
-  #filter(node =="DUGR")
-  filter(node %in% c("DUGR", "ARMO", "EDIN"))
-
-testnode %>%
-  ggplot(aes(x = t, y = z )) + geom_line()
-
-
-```
-
 
 
 ```{r}
@@ -496,31 +328,206 @@ BicompPower <- 1:length(bigraph$components) %>%
 
 List_of_BiConComps <- Create_balanced_blocks(g)
 
+#use the largest block to set the simulation parameters k and m.
+#k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, maxIter = 4000, kbase = 50, kdiff = 300, mass = 500)
 
-List_of_BiConComps %>%
-  map_dbl(~{
-    
-    get.vertex.attribute(.x, "BalencedPower") %>% sum
-    
-  })
+BlockNumbers <-(1:length(List_of_BiConComps))[-147]
 
-
-List_of_BiConComps[[1]] %>% get.vertex.attribute(., "BalencedPower")
-
-StabilModels <- 1:length(List_of_BiConComps) %>% 
+StabilModels <- BlockNumbers %>% 
   map(~{
-    print(.x)
     
-    Out <- Find_network_balance(List_of_BiConComps[[.x]])
+    Out <- Find_network_balance(List_of_BiConComps[[.x]], tstep = 0.1, tol = 1e-10, maxIter = 4000, kbase = 200, kdiff = 1000, mass = 500, verbose = FALSE)
     
-    print(Out$results)
+    print(paste("Block" ,.x, "of", max(BlockNumbers) ,"termination", nrow(Out$results) ))
+    #print(Out$results)
     return(Out)
     
     })
 
-test <- Find_network_balance(List_of_BiConComps[[1]])
+test2 <- StabilModels[[127]]$result
+
+StabilModels[[127]]$NodeList
+
+ggplot(OriginBlock$results, aes(x = t , y = z)) + geom_line()
+
+FinalRound <- StabilModels %>% 
+  map_df(~{
+    
+    .x$result %>%
+  filter(t == max(t))
+
+  })
 
 
-g <- List_of_BiConComps[[147]]
+FinalRound %>%
+  filter(acceleration <2e-6) %>%
+  ggplot(aes(x = velocity, y = acceleration)) + 
+  geom_point()
+
 ```
 
+
+```{r}
+
+Block_tree <- biconnected_components(g)
+
+ArticulationVect <- get.vertex.attribute(g, "name", Block_tree$articulation_points)
+
+relative_blocks1 <- 1:length(StabilModels) %>% 
+  map_df(~{
+    
+    StabilModels[[.x]]$NodeList %>%
+      mutate(Reference_ID = .x)
+
+  }) %>%
+  bind_rows(OriginBlock$NodeList %>% 
+              mutate(Reference_ID = 0)) %>%
+  mutate(Articulation_node = (node %in% ArticulationVect ))
+
+
+#The height of each node relative to the origin and normalised
+final_z <-fix_z_to_origin(relative_blocks1, ArticulationVect) %>%
+  group_by(node) %>%
+  summarise_all(first) 
+%>%
+  mutate(z = z/sd(z))
+# 
+# 
+# final_z %>%
+#   ggplot(aes(x = z)) + geom_density() 
+# 
+# final_z %>%
+#   ggplot(aes(x = z, y = force)) + geom_point() +
+#   labs(title = "Distance from Z relative to force exerted on system")
+
+mean(final_z$z)
+median(final_z$z)
+
+#Is the strain power law distributed?
+line_strain <-as_data_frame(g) %>%
+  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
+  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
+  mutate(D = 1/Y,
+         dz = abs(z.x-z.y),
+         mean_z = (z.x+z.y)/2,
+         H = sqrt(dz^2 +D^2),
+         strain = (H-D)/D,
+         alpha = Link.Limit/abs(PowerFlow),
+         line_load = abs(PowerFlow)/Link.Limit,
+         percentile_strain = percent_rank(strain)) %>%
+  select(Link, alpha, line_load, dz, H, strain, percentile_strain, mean_z)
+
+cor(line_strain$dz, line_strain$strain)
+cor(line_strain$line_load, line_strain$strain)
+
+
+z_network_map <-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(line_strain, by = c("Link"))%>%
+   left_join(., final_z %>% select(node, z), by = c("Node"= "node")) 
+
+z_network_map %>%
+  #filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link, colour =percent_rank(line_load)), size = 0.8) + 
+   facet_grid(~PositionType) + 
+ # geom_point( aes(x = Latitude, y = Longitude, colour = percent_rank(z))) + 
+  scale_color_viridis_c()+
+  ggtitle("Strain map")
+
+ 
+z_network_map %>%
+  ggplot(aes(x = Latitude, y = mean_z, colour = percentile_strain)) + geom_point()+ scale_color_viridis_c()
+
+```
+
+
+```{r}
+library(sf)
+library(gstat)
+
+node_z <-z_network_map %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node, Longitude, Latitude, z) %>%
+  distinct(.keep_all = T)
+
+shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
+                       "Countries_December_2017_Ultra_Generalised_Clipped_Boundaries_in_UK_WGS84.shp")
+
+
+GB <- st_read(shapefile) %>%
+  filter(ctry17cd !="N92000002") %>%
+  st_union()
+
+ggplot(GB) +
+  geom_sf() +
+ # scale_fill_viridis("Area") +
+  ggtitle("Node locations in the UK") +
+  theme_bw() +
+  geom_line(data = z_network_map %>%
+              filter(PositionType=="Geo Space"),  aes(y = Longitude, x = Latitude, group = Link)) +
+   geom_point(data =node_z, aes(y = Longitude, x = Latitude, colour = z), alpha  = 0.7)+
+  coord_sf(ylim = c(50,58.9)) +
+  scale_color_viridis_c()
+
+spdf <- as(GB, "Spatial")
+
+grd <- makegrid(spdf, n = 15000)
+colnames(grd) <- c('x','y')
+
+grd_pts <- SpatialPoints(coords = grd, 
+                         proj4string=CRS(proj4string(spdf)))
+
+# find all points in `grd_pts` that fall within `spdf`
+grd_pts_in <- grd_pts[spdf, ]
+
+# transform grd_pts_in back into a data frame
+gdf <- as.data.frame(coordinates(grd_pts_in)) %>%
+  filter(y<59)
+
+
+#create spatial points of height data
+DT_sf  <-  st_as_sf(node_z, coords = c("Latitude","Longitude"),
+                        crs = "+proj=longlat +datum=WGS84", agr = "constant")%>% 
+  as_Spatial %>%
+  remove.duplicates() #remove duplicate points aka points super close
+
+#create spatial points of data that will have z interpolated
+grd_sf  <-  gdf %>% 
+    rename(Longitude = y, Latitude = x) %>%
+  st_as_sf(., coords = c("Latitude","Longitude"),
+                        crs = "+proj=longlat +datum=WGS84", agr = "constant") %>%
+  as_Spatial
+
+
+
+#create variogram of data
+dt.vgm <- variogram(z~1, DT_sp)
+
+
+dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
+
+# vgm() list of models
+
+plot(dt.vgm, dt.fit)
+
+
+lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sp), grd_sp, model=dt.fit) #remove duplicate locations
+
+lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2) %>% 
+  ggplot(aes(x=lon, y=lat)) + geom_tile(aes(fill=var1.pred)) +coord_equal() +
+  scale_fill_viridis_c() +
+  labs(title = "height of network across the  UK")
+
+
+
+kriged_df <- lzn.kriged %>% as.tibble %>%
+  rename(Z = var1.pred) %>%
+  select(-var1.var)
+
+kriged_df2 <- kriged_df %>%
+  spread(key = coords.x1, value = coords.x2, fill = 0) %>% as.matrix()
+
+kriged_df2
+
+```
