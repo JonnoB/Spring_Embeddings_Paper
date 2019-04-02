@@ -100,7 +100,7 @@ OverloadType <- list.files(Deletion_Order_Folder,
     
   }) %>%
   group_by(Name, type) %>%
-  summarise_all(sum)
+  summarise_all(sum) %>% ungroup
 
   
   OverloadType %>%
@@ -1086,7 +1086,7 @@ CommunityRank <-NodeCommunity %>%
    mutate(rank = rank(-size, ties.method = "random"))
 
 NodeCommunity %>%
-  left_join(CommunityRank) %>%
+  left_join(CommunityRank, by = "membership") %>%
   mutate( Community = case_when(
       size>=large ~ as.character(rank),
       size>=medium ~ "medium",
@@ -1135,8 +1135,8 @@ return(testmat3)
 IsSameCommunity2 <-function(Community1, Community2){
   #uses the output of Make Node Community to find if two nodes share the same community using the different methods
   
-  Community1 <- Community1 %>% full_join(Community2 %>% select(Node)) %>% arrange(Node)
-  Community2 <- Community2 %>% full_join(Community1 %>% select(Node)) %>% arrange(Node)
+  Community1 <- Community1 %>% full_join(Community2 %>% select(Node), by = "Node") %>% arrange(Node)
+  Community2 <- Community2 %>% full_join(Community1 %>% select(Node), by = "Node") %>% arrange(Node)
   
     CommAdjMat1 <- CommunityAdjacencyMat(Community1)
     CommAdjMat1[is.na(CommAdjMat1)] <- FALSE
@@ -1188,7 +1188,7 @@ TopoNodeCommunity <- as_data_frame(g) %>% as_tibble %>%
          to = to2,#this is so confusing I am keeping in the columns to make it easier to check back on
          PowerFlow = abs(PowerFlow)) %>%
    graph_from_data_frame(directed = TRUE) %>% set.edge.attribute(., "weight", value = 1) %>%
-cluster_infomap()%>% MakeNodeCommunity()
+cluster_walktrap() %>% MakeNodeCommunity()
 
 #Direction in Electrical distance is arguably meaningless as electricty flows over all available paths
 #I don't think electrical distance is working. It may be scrambling node names
@@ -1268,7 +1268,8 @@ MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
          Community2 = ifelse(is.na(Community), "small", Community2)) %>%
  # filter(Community=="2", PositionType == "Geo Space") %>% #Look at individual clusters
     ggplot(aes(x = Latitude, y = Longitude)) + 
-  geom_line(aes(group = Link), size = 0.8, arrow = arrow(angle = 15, length= unit(0.3, "cm"), type = "closed")) + 
+  geom_line(aes(group = Link), size = 0.8, ) + 
+  #geom_line(aes(group = Link), size = 0.8, arrow = arrow(angle = 15, length= unit(0.3, "cm"), type = "closed")) + 
   geom_point(#data = . %>% filter(Community != "small", Community != "medium"), #Keep only large clusters
              aes(colour =Community, shape = NodeType), size = 2) +
    facet_grid(~PositionType) +
@@ -1377,8 +1378,8 @@ CommSim2 <- IsSameCommunity2(test,TopoNodeCommunity) %>%
 
 #It's a mess
 CommSim %>%
-  ggplot(aes(x = size, y = Jaccard, colour = Community))+ geom_point() +
-   scale_color_brewer(palette = "Set1") 
+  ggplot(aes(x = rank, y = Jaccard, colour = Community)) + geom_point() +
+   scale_color_brewer(palette = "Paired") 
 
 MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(FailureNodeCommunity) %>%

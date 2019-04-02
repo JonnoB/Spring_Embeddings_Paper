@@ -10,61 +10,6 @@ editor_options:
 
 
 ```{r}
-library(tidyverse)
-
-list.files("/home/jonno/Useful_PhD__R_Functions", pattern = "Tension", full.names = T) %>%
-  walk(~source(.x))
-
-
-theta_force <- seq(0,pi/2, 0.05 )
-
-
-k = 300
-dist <- sqrt(2)
-force = 60
-test <- tibble(Tension = force/sin(theta_force), adjacent = force/tan(theta_force), 
-       opposite = force,
-       elongation = Tension/k,
-       theta_force = theta_force,
-       theta_dist = acos(dist/(dist+elongation)),
-       theta_diff = theta_force-theta_dist,
-       height = sqrt((dist+ elongation)^2- dist^2))
-
-test %>%
-  arrange(abs(theta_diff)) %>% slice(1)
-
-ggplot(test, aes(x = theta_force, y = theta_diff))+ geom_point()
-
-```
-
-
-
-
-```{r}
-k1<- 2.5
-k2 <- 3
-F1<- 15
-F2<- -25
-F3 <- 10
-
-D1 <- 1
-D2 <-1.5
-Dvect <- seq(0.01, 20, 0.001)
-
-test <-tibble(z = Dvect, DX1 = sqrt(z^2 + D1^2)-D1, DX2 = sqrt(z^2 + D2^2)-D2, Ft1 = k1*DX1, Ft2 = k2*DX2, 
-       F1u = Ft1*z/(DX1+D1), F2u = Ft2*z/(DX2+D2), difference = F1u+F2u+F3, min = abs(difference))
-
-
-ggplot(test, aes(x = z, y = min))+ geom_point()
-
-
-Fvect <- c(F1,-F3,F2)
-
-test %>% arrange(min) %>% slice(1) %>% pull(z) %>% c(0,.,0) %>%
-  tibble(ID  = 1:3, Fvect, height = -. ) %>%
-  ggplot(., aes(x = ID, y = height)) + geom_point(size = 5) +
-  geom_line()
-
 
 EdgeNode <- c(1,-1,0,0,0,0,
               0,1,-1,0,0,0,
@@ -102,12 +47,6 @@ HeightDiff <- t(Adj * Zvect) - (Adj * Zvect)
 D <- t(EdgeNode) %*% C %*% EdgeNode %>% abs
 diag(D) <-0
 
-# Tension <- function(dZ,k, D){
-#   
-#   k*(sqrt(dZ^2+ D^2)-D)*dZ/(sqrt(dZ^2+ D^2))
-#   
-# }
-
 kvect <- Link$k
 dvect <- Link$distance
 
@@ -131,33 +70,6 @@ Calc_Damping_matrix(SmallEdgeNode, 0, Smallkvect,
 
 
 ```{r}
-
-velocity <- function(u, a, t0, t1){
-  #calculates the velocity of an object given and initial velocity an acceleration and time difference
-  #u initial velocity
-  #a acceleration
-  #t0 initial time
-  #t1 next time period
-  
-  return(u + a*(t1-t0))
-}
-
-
-distance <- function(z, v, a, t0, t1 ){
-  #Calculates the total distance a node will be from the origin for a given time step
-  #z, distance at current time
-  #v velcoity at current time
-  #a acceleration
-  #t0 current time
-  #t1 time at and of time step
-  
-  return(v*(t1-t0) + 0.5*a*(t1-t0) + z)
-  
-}
-
-
-
-
 
 #MASS CAN'T BE ZERO!
 
@@ -294,43 +206,13 @@ test <- k1e4
 
 ```{r}
 
-smallBi <- biconnected_components(graph_from_adjacency_matrix(Adj, mode = "undirected"))
-
-smallBi$components[[1]] %>% length
-  
-bigraph <- biconnected_components(g)
-
-bigraph %>% names
-
-NodesPerComponent <- bigraph$components %>%
-  map_dbl(~length(.x)) %>%
-  tibble(components = 1:length(.), counts = .)
-
-
-get_bicomp_power <- function(g, component_number){
-
-  DeleteNodes <- get.vertex.attribute(g, "name")[!get.vertex.attribute(g, "name") %in% V(g)$name[bigraph$components[[component_number]]]]
-
-  delete.vertices(g, DeleteNodes) %>% get.vertex.attribute(., "BalencedPower") %>% sum
-}
-
-
-BicompPower <- 1:length(bigraph$components) %>%
-  map_df(~{
-    
-    tibble(BiComp = .x, Power = get_bicomp_power(g, .x))
-    
-  })
-
 #create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
-
-
 
 List_of_BiConComps <- Create_balanced_blocks(g)
 
 #use the largest block to set the simulation parameters k and m.
 #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, maxIter = 4000, kbase = 50, kdiff = 300, mass = 500)
+OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, maxIter = 8000, kbase = 50, kdiff = 300, mass = 500)
 
 BlockNumbers <-(1:length(List_of_BiConComps))[-147]
 
@@ -358,7 +240,6 @@ FinalRound <- StabilModels %>%
   filter(t == max(t))
 
   })
-
 
 FinalRound %>%
   filter(acceleration <2e-6) %>%
@@ -390,8 +271,7 @@ relative_blocks1 <- 1:length(StabilModels) %>%
 final_z <-fix_z_to_origin(relative_blocks1, ArticulationVect) %>%
   group_by(node) %>%
   summarise_all(first) 
-%>%
-  mutate(z = z/sd(z))
+
 # 
 # 
 # final_z %>%
@@ -405,7 +285,7 @@ mean(final_z$z)
 median(final_z$z)
 
 #Is the strain power law distributed?
-line_strain <-as_data_frame(g) %>%
+line_strain <-as_data_frame(g) %>% as_tibble %>%
   left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
   left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
   mutate(D = 1/Y,
@@ -429,27 +309,204 @@ z_network_map <-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
 z_network_map %>%
   #filter(!is.na(Perc)) %>%
     ggplot(aes(x = Latitude, y = Longitude)) + 
-  geom_line(aes(group = Link, colour =percent_rank(line_load)), size = 0.8) + 
+  geom_line(aes(group = Link, colour = percentile_strain), size = 0.8) + 
    facet_grid(~PositionType) + 
  # geom_point( aes(x = Latitude, y = Longitude, colour = percent_rank(z))) + 
   scale_color_viridis_c()+
   ggtitle("Strain map")
 
- 
-z_network_map %>%
-  ggplot(aes(x = Latitude, y = mean_z, colour = percentile_strain)) + geom_point()+ scale_color_viridis_c()
+```
+
+#distance clusters
+
+```{r}
+
+node_z <-z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node, Longitude, Latitude, z) %>%
+  distinct(.keep_all = T) 
+
+z_graph <- as_data_frame(g) %>% as_tibble %>%
+  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
+  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
+  mutate(D = 1/Y,
+         dz = abs(z.x-z.y),
+         mean_z = (z.x+z.y)/2,
+         H = sqrt(dz^2 +D^2),
+         strain = (H-D)/D,
+         alpha = Link.Limit/abs(PowerFlow),
+         line_load = abs(PowerFlow)/Link.Limit,
+         percentile_strain = percent_rank(strain)) %>%
+graph_from_data_frame(., vertices = node_z %>% select(Node, z), directed = FALSE ) 
+
+z_mst <- mst(z_graph, weights = get.edge.attribute(z_graph, "dz"))
+
+FailureNodeCommunity_z  <- z_graph %>% 
+  cluster_walktrap(.) %>% 
+  MakeNodeCommunity()
+
+IsSameCommunity2(FailureNodeCommunity, FailureNodeCommunity_z) %>% pull(Jaccard) %>% mean
+
+distancedf <- distances(g, weights = get.edge.attribute(g, "dz")) %>% as_tibble %>% mutate(from = names(.)) %>%
+    gather(key = "to", value = "distance",-from)
+
+#graph clustered based on height distance
+distgraph <- distancedf %>% spread(to, distance) %>% select(-from) %>% as.matrix
+rownames(distgraph) <- colnames(distgraph)
+dist_hclust <- distgraph %>% as.dist %>% hclust(.) 
+
+dist_hclust <- hclust_graph(z_mst)
+
+#True co-failure group
+hclust_nodes1 <- hclust_graph(g_cofailure, weight = "weight") %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+hclust_nodes2 <- hclust_graph(g) %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 12)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+#stress group
+hclust_nodes3 <- hclust_graph(z_graph, weight = "H") %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+#topological
+hclust_nodes4 <-  g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
+hclust_graph(., weight = "weight")  %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(hclust_nodes1) %>%
+#  left_join(VertexMetaData2 %>% rename(Node = Name)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =Community), size = 2) +
+   facet_grid(~PositionType) +
+    scale_color_brewer(palette = "Paired")+
+  labs(title = "Failure groups hierarchically clustered 10 groups")
+
+
+#There is a strong corellation betweeen Longitude and z and no corellation between latitude and z
+node_z %>%
+  gather(key = coord, value = value, -z,-Node) %>%
+  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
+  left_join(hclust_nodes1) %>%
+  mutate(Force = percent_rank(abs(NetTension))) %>%
+  ggplot(aes(x = value, y = z, colour = Force)) + geom_point() + 
+  scale_color_viridis_c() +
+  #scale_color_brewer(palette = "Paired")+
+  facet_grid(~coord, scales = "free_x") +
+  labs(title = "The height of each node and the percent rank Force acting on each node \n relative to the Latitude and Longitude")
+
+
+node_z %>%
+  gather(key = coord, value = value, -z,-Node) %>%
+  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
+  left_join(hclust_nodes1) %>%
+  ggplot(aes(x = value, y = z, colour = Community)) + geom_point() + 
+  scale_color_brewer(palette = "Paired")+
+  facet_grid(~coord, scales = "free_x") +
+  labs(title = "Node cluster membership")
+
+CommSim <- IsSameCommunity2(hclust_nodes1, hclust_nodes3) %>%
+  left_join(hclust_nodes2, by = c("Node"= "Node")) %>%
+  group_by(membership) %>%
+  summarise(Jaccard = mean(Jaccard),
+            size = first(size),
+            rank = first(rank) %>% as.integer,
+            Community = first(Community))
+
+
+
+test <-Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
+                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
+  mutate(type = "depth") %>%
+  bind_rows(Tree_Similarity( hclust_graph(g), 
+                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
+  mutate(type = "Line Limit")) %>%
+  # bind_rows(Tree_Similarity( hclust_graph(z_mst, weight = "dz"), 
+  #                      hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  # mutate(type = "mst depth")) %>%
+    bind_rows(Tree_Similarity(g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
+hclust_graph(., weight = "weight") , 
+                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  mutate(type = "topological")) %>%
+  bind_rows(Tree_Similarity( hclust_graph(z_graph, weight = "H"), 
+                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  mutate(type = "H dist")) 
+  
+
+
+test %>%
+  filter(trees>3) %>%
+  ggplot(aes(x = trees, y = mean, colour = type )) + geom_line()
+
+Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
+                       hclust_graph(g_cofailure, weight = "weight"),10,10, node_jaccard = T) %>%
+  ggplot(aes(x = Jaccard)) + geom_density()
+
+```
+
+```{r}
+
+test2 <- OverloadType %>%
+  filter(type == "Edge") %>% 
+  left_join(as_data_frame(z_graph)%>%as.tibble, by = c("Name"="name"))%>%  ungroup 
+   
+select(test2, Islanded, Overloaded, Targeted, mean_z, H, line_load, strain, percentile_strain, dz) %>% cor
+
+g_cofailure <- DistDF %>%
+  select(Node1, Node2, weight = counts) %>%
+  filter(weight >=1000) %>% #only edges with at least 1000 occurrances aka 10%, I'm not sure on the rights and wrongs of a cut off. This is definately a case for the metric backbone. Doing this or not makes a substantial difference
+  graph_from_data_frame(directed = FALSE)
+
 
 ```
 
 
+
+```{r}
+
+node_heights <- tibble(node = get.vertex.attribute(z_mst, "name"), z = get.vertex.attribute(z_mst, "z")) %>%
+  mutate(rank = rank(z))
+
+remove_nodes <- node_heights %>%
+  filter(rank>2) %>% pull(node)
+
+g_temp <- delete.vertices(z_mst, remove_nodes) 
+plot(g_temp)
+
+g_non_single <- delete.vertices(g_temp, get.vertex.attribute(g_temp,"name" )[degree(g_temp)==0])
+
+who_is_with_who <- tibble(name = names(components(g_non_single)$membership), component = components(g_non_single)$membership)
+
+
+#how to make a hclust object
+a <- list()  # initialize empty object
+# define merging pattern: 
+#    negative numbers are leaves, 
+#    positive are merged clusters (defined by row number in $merge)
+a$merge <- matrix(c(-1, -2,
+                    -3, -4,
+                     1,  2), nc=2, byrow=TRUE ) 
+a$height <- c(1, 1.5, 3)    # define merge heights
+a$order <- 1:4              # order of leaves(trivial if hand-entered)
+a$labels <- LETTERS[1:4]    # labels of leaves
+class(a) <- "hclust"        # make it an hclust object
+plot(a)                     # look at the result   
+
+#convert to a dendrogram object if needed
+ad <- as.dendrogram(a)
+
+```
+
+#Kriging
 ```{r}
 library(sf)
 library(gstat)
 
-node_z <-z_network_map %>%
-  filter(PositionType=="Geo Space") %>%
-  select(Node, Longitude, Latitude, z) %>%
-  distinct(.keep_all = T)
 
 shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
                        "Countries_December_2017_Ultra_Generalised_Clipped_Boundaries_in_UK_WGS84.shp")
@@ -470,9 +527,11 @@ ggplot(GB) +
   coord_sf(ylim = c(50,58.9)) +
   scale_color_viridis_c()
 
-spdf <- as(GB, "Spatial")
+spdf <- as(GB, "Spatial") %>% st_as_sf %>%
+  st_crop(c(xmin = -7.5, ymin = 50, xmax = 1.5, ymax = 59)) %>%
+  as_Spatial()
 
-grd <- makegrid(spdf, n = 15000)
+grd <- makegrid(spdf, n = 200)
 colnames(grd) <- c('x','y')
 
 grd_pts <- SpatialPoints(coords = grd, 
@@ -482,8 +541,7 @@ grd_pts <- SpatialPoints(coords = grd,
 grd_pts_in <- grd_pts[spdf, ]
 
 # transform grd_pts_in back into a data frame
-gdf <- as.data.frame(coordinates(grd_pts_in)) %>%
-  filter(y<59)
+gdf <- as.data.frame(coordinates(grd_pts_in))
 
 
 #create spatial points of height data
@@ -493,16 +551,15 @@ DT_sf  <-  st_as_sf(node_z, coords = c("Latitude","Longitude"),
   remove.duplicates() #remove duplicate points aka points super close
 
 #create spatial points of data that will have z interpolated
-grd_sf  <-  gdf %>% 
+grd_sf  <-  gdf %>% #expand.grid(x =unique(gdf$x), y = unique(gdf$y)) %>% as.tibble %>% #if expand grid isn't used problems
     rename(Longitude = y, Latitude = x) %>%
   st_as_sf(., coords = c("Latitude","Longitude"),
                         crs = "+proj=longlat +datum=WGS84", agr = "constant") %>%
   as_Spatial
 
 
-
 #create variogram of data
-dt.vgm <- variogram(z~1, DT_sp)
+dt.vgm <- variogram(z~1, DT_sf)
 
 
 dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
@@ -512,22 +569,58 @@ dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
 plot(dt.vgm, dt.fit)
 
 
-lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sp), grd_sp, model=dt.fit) #remove duplicate locations
+lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sf), grd_sf, model=dt.fit) #remove duplicate locations
 
 lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2) %>% 
   ggplot(aes(x=lon, y=lat)) + geom_tile(aes(fill=var1.pred)) +coord_equal() +
   scale_fill_viridis_c() +
   labs(title = "height of network across the  UK")
 
+lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2) %>% 
+  ggplot(aes(x=lon, y=lat, colour = var1.pred)) +geom_point() +  scale_colour_viridis_c()
+
 
 
 kriged_df <- lzn.kriged %>% as.tibble %>%
   rename(Z = var1.pred) %>%
-  select(-var1.var)
+  select(-var1.var) %>%
+  rename(x = coords.x1, y = coords.x2)
 
+Krig_spatial_points <- st_as_sf(kriged_df, coords = c("x", "y"), crs = "+proj=longlat +datum=WGS84", agr = "constant")
+kept_points <- st_intersection(st_as_sf(spdf), Krig_spatial_points) %>% as.data.frame()
+
+{
 kriged_df2 <- kriged_df %>%
-  spread(key = coords.x1, value = coords.x2, fill = 0) %>% as.matrix()
+  spread(key = x, value = Z, fill = NA) 
 
-kriged_df2
+x <- names(kriged_df2)[-1]  %>% as.numeric()
+y <- kriged_df2 %>% pull(y)
+
+kriged_df2 <- kriged_df2 %>%
+  select(-y) %>% as.matrix()
+}
+
+plot_ly(x=x,y=y,z=kriged_df2, type="surface")
+
+library(rgl)
+persp3d(unique(as.numeric(kriged_df$x)) %>% sort, unique(kriged_df$y) %>% sort, kriged_df, col="skyblue")
+
+
+
+
 
 ```
+
+
+#plotly
+```{r}
+x <- 1:5/10
+y <- 1:5
+z <- x %o% y
+z <- z + .2*z*runif(25) - .1*z
+
+library(plotly)
+plot_ly(x=x,y=y,z=z, type="surface")
+
+```
+
