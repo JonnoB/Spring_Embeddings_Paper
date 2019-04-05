@@ -7,6 +7,78 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r Setup}
+
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+#ggtree needs to be installed seperatly 
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("ggtree", version = "3.8")
+#devtools::install_github("eliocamp/ggnewscale@v0.1.0")
+#devtools::install_github("eliocamp/ggnewscale")
+
+# library(ggtree)
+# library(ape)
+# library(ggnewscale)
+
+
+sapply(packages, library, character.only = TRUE)
+
+
+lapply(packages, library, character.only = TRUE)
+library(PowerGridNetworking)
+
+#Set up file system to read the correct folders this switches between aws and windows mode
+
+basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
+datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
+LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Physics model for analysing flow graphs" 
+FiguresFolder <- file.path(LatexFolder, "Figures")
+TablesFolder <- file.path(LatexFolder, "Tables")
+MatricesFolder <- file.path(LatexFolder, "Matrices")
+Tariff <- file.path(basewd,"Tariff and Transport")
+PLwd <- "/media/jonno/Seagate Expansion Drive/Overloads"
+Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
+
+
+#Load necessary datasets and great the base powergrid network
+source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
+
+#Load some other useful functions
+list.files("/home/jonno/Useful_PhD__R_Functions", pattern = ".R", full.names = T) %>%
+  walk(~source(.x))
+
+list.files("/home/jonno/Flow_Spring_System", pattern = ".R", full.names = T) %>%
+  walk(~source(.x))
+
+VertexMetaData2 <- VertexMetaData %>%
+  mutate(NodeType = case_when(
+    BalencedPower>0 ~"Generator",
+    BalencedPower< 0~"Demand",
+    TRUE ~ "Transfer"
+  ),
+  NodeType2 = case_when(
+    Demand>0 & Generation>0 ~"Hybrid",
+    TRUE ~ NodeType
+  )) %>% select(Name, NodeType, NodeType2, BalencedPower)
+
+```
+
+
+#Set up Graph
+```{r}
+
+g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
+#Ensure there is powerflow
+SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
+g <- PowerFlow(g, SlackRef$name) #calculate power flow
+
+```
+
 
 
 ```{r}
@@ -208,18 +280,21 @@ test <- k1e4
 
 #create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
 
+g <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
+g <-set.edge.attribute(g, "distance", value = 1)
+
 List_of_BiConComps <- Create_balanced_blocks(g)
 
 #use the largest block to set the simulation parameters k and m.
 #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, maxIter = 8000, kbase = 50, kdiff = 300, mass = 500)
+OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, distance = "distance", maxIter = 8000, kbase = 50, kdiff = 300, mass = 500)
 
 BlockNumbers <-(1:length(List_of_BiConComps))[-147]
 
 StabilModels <- BlockNumbers %>% 
   map(~{
     
-    Out <- Find_network_balance(List_of_BiConComps[[.x]], tstep = 0.1, tol = 1e-10, maxIter = 4000, kbase = 200, kdiff = 1000, mass = 500, verbose = FALSE)
+    Out <- Find_network_balance(List_of_BiConComps[[.x]], tstep = 0.1, tol = 1e-10, distance = "distance", maxIter = 4000, kbase = 200, kdiff = 1000, mass = 500, verbose = FALSE)
     
     print(paste("Block" ,.x, "of", max(BlockNumbers) ,"termination", nrow(Out$results) ))
     #print(Out$results)
@@ -271,6 +346,12 @@ relative_blocks1 <- 1:length(StabilModels) %>%
 final_z <-fix_z_to_origin(relative_blocks1, ArticulationVect) %>%
   group_by(node) %>%
   summarise_all(first) 
+
+
+test <- Create_stabilised_blocks(g, OriginBlock, 147, tstep = 0.1, tol = 1e-10, distance = "distance", maxIter = 4000, kbase = 200, kdiff = 1000, mass = 500)
+
+
+#final_z3 <- final_z
 
 # 
 # 
@@ -506,6 +587,7 @@ ad <- as.dendrogram(a)
 ```{r}
 library(sf)
 library(gstat)
+library(automap)
 
 
 shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
@@ -531,7 +613,7 @@ spdf <- as(GB, "Spatial") %>% st_as_sf %>%
   st_crop(c(xmin = -7.5, ymin = 50, xmax = 1.5, ymax = 59)) %>%
   as_Spatial()
 
-grd <- makegrid(spdf, n = 200)
+grd <- makegrid(spdf, n = 80000)
 colnames(grd) <- c('x','y')
 
 grd_pts <- SpatialPoints(coords = grd, 
@@ -562,32 +644,40 @@ grd_sf  <-  gdf %>% #expand.grid(x =unique(gdf$x), y = unique(gdf$y)) %>% as.tib
 dt.vgm <- variogram(z~1, DT_sf)
 
 
-dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
+#dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
+
+dt.fit <- autofitVariogram(z~1, 
+                             DT_sf,
+                             model = c("Sph"), #commenting out this autfits the variogram. that produces the lowest error but doesn't look that great. I would think the sperical one was more accurate I don't understand much about it though
+                             kappa = c(0.05, seq(0.2, 2, 0.1), 5, 10),
+                             fix.values = c(NA, NA, NA),
+                             start_vals = c(NA,NA,NA),
+                             verbose = T)
 
 # vgm() list of models
+plot(dt.vgm, vario.fit$var_model, main = "Fitted variogram")
 
-plot(dt.vgm, dt.fit)
+test <- autoKrige(z~1, DT_sf, grd_sf)
 
+lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sf), grd_sf, model=dt.fit$var_mode) #remove duplicate locations
 
-lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sf), grd_sf, model=dt.fit) #remove duplicate locations
-
-lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2) %>% 
-  ggplot(aes(x=lon, y=lat)) + geom_tile(aes(fill=var1.pred)) +coord_equal() +
+lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2, height = var1.pred) %>% 
+  ggplot(aes(x=lon, y=lat)) + geom_tile(aes(fill=height)) +coord_equal() +
   scale_fill_viridis_c() +
-  labs(title = "height of network across the  UK")
-
-lzn.kriged %>% as.tibble %>% rename(lon=coords.x1, lat=coords.x2) %>% 
-  ggplot(aes(x=lon, y=lat, colour = var1.pred)) +geom_point() +  scale_colour_viridis_c()
-
-
+  # geom_point(data = node_z %>% left_join(VertexMetaData2, by = c("Node"="Name")) %>%
+  # filter(NodeType == "Generator") %>%
+  #   rename(lat = Longitude, lon = Latitude),
+  # aes(colour = BalencedPower))+
+scale_colour_viridis_c(option = "plasma") +
+  labs(title = "height of network across the  UK", colour = "Generation")
+ggsave(file.path(FiguresFolder, "BritainKrigedTopology.pdf"))
 
 kriged_df <- lzn.kriged %>% as.tibble %>%
   rename(Z = var1.pred) %>%
   select(-var1.var) %>%
-  rename(x = coords.x1, y = coords.x2)
+  rename(x = coords.x1, y = coords.x2) %>%
+  mutate(Z = Z/sd(Z))
 
-Krig_spatial_points <- st_as_sf(kriged_df, coords = c("x", "y"), crs = "+proj=longlat +datum=WGS84", agr = "constant")
-kept_points <- st_intersection(st_as_sf(spdf), Krig_spatial_points) %>% as.data.frame()
 
 {
 kriged_df2 <- kriged_df %>%
@@ -602,25 +692,253 @@ kriged_df2 <- kriged_df2 %>%
 
 plot_ly(x=x,y=y,z=kriged_df2, type="surface")
 
-library(rgl)
-persp3d(unique(as.numeric(kriged_df$x)) %>% sort, unique(kriged_df$y) %>% sort, kriged_df, col="skyblue")
 
+
+test <-as_data_frame(g)
+
+test %>% ggplot(aes(x = Length, y = 1/Y, colour = as.factor(Voltage))) + geom_point()
+
+```
+
+
+
+#Rayshading
+
+functions taken from
+
+#this needs to be properly integrated and attributed
+https://github.com/wcmbishop/rayshader-demo/blob/master/R/rayshader-gif.R
+
+```{r}
+#' Build a gif of 3D rayshader plots
+#'
+#' @param hillshade Hillshade/image to be added to 3D surface map.
+#' @param heightmap A two-dimensional matrix, where each entry in the matrix is the elevation at that point.
+#' @param file file path for .gif
+#' @param duration gif duration in seconds (framerate will be duration/n_frames)
+#' @param ... additional arguments passed to rayshader::plot_3d(). See Details for more info.
+#'
+#' @details This function is designed to be a pipe-in replacement for rayshader::plot_3d(),
+#' but it will generate a 3D animated gif. Any inputs with lengths >1 will 
+#' be interpreted as "animation" variables, which will be used to generate 
+#' individual animation frames -- e.g. a vector of theta values would produce
+#' a rotating gif. Inputs to plot_3d() that are meant to have length >1 
+#' (specifically "windowsize") will be excluded from this process.
+#'
+#' @return file path of .gif file created
+#' 
+#' @examples
+#' # MONTEREREY BAY WATER DRAINING
+#' # ------------------------------
+#' # define transition variables
+#' n_frames <- 180
+#' waterdepths <- transition_values(from = 0, to = min(montereybay), steps = n_frames) 
+#' thetas <- transition_values(from = -45, to = -135, steps = n_frames)
+#' # generate gif
+#' zscale <- 50
+#' montereybay %>% 
+#'   sphere_shade(texture = "imhof1", zscale = zscale) %>%
+#'   add_shadow(ambient_shade(montereybay, zscale = zscale), 0.5) %>%
+#'   add_shadow(ray_shade(montereybay, zscale = zscale, lambert = TRUE), 0.5) %>%
+#'   save_3d_gif(montereybay, file = "montereybay.gif", duration = 6,
+#'               solid = TRUE, shadow = TRUE, water = TRUE, zscale = zscale,
+#'               watercolor = "imhof3", wateralpha = 0.8, 
+#'               waterlinecolor = "#ffffff", waterlinealpha = 0.5,
+#'               waterdepth = waterdepths/zscale, 
+#'               theta = thetas, phi = 45)
+#' 
+save_3d_gif <- function(hillshade, heightmap, file, duration = 5, ...) {
+  require(rayshader)
+  require(magick)
+  require(rgl)
+  require(gifski)
+  require(rlang)
+  
+  # capture dot arguments and extract variables with length > 1 for gif frames
+  dots <- rlang::list2(...)
+  var_exception_list <- c("windowsize")
+  dot_var_lengths <- purrr::map_int(dots, length)
+  gif_var_names <- names(dots)[dot_var_lengths > 1 & 
+                                 !(names(dots) %in% var_exception_list)]
+  # split off dot variables to use on gif frames
+  gif_dots <- dots[gif_var_names]
+  static_dots <- dots[!(names(dots) %in% gif_var_names)]
+  gif_var_lengths <- purrr::map_int(gif_dots, length)
+  # build expressions for gif variables that include index 'i' (to use in the for loop)
+  gif_expr_list <- purrr::map(names(gif_dots), ~rlang::expr(gif_dots[[!!.x]][i]))
+  gif_exprs <- exprs(!!!gif_expr_list)
+  names(gif_exprs) <- names(gif_dots)
+  message(paste("gif variables found:", paste(names(gif_dots), collapse = ", ")))
+  
+  # TODO - can we recycle short vectors?
+  if (length(unique(gif_var_lengths)) > 1) 
+    stop("all gif input vectors must be the same length")
+  n_frames <- unique(gif_var_lengths)
+  
+  # generate temp .png images
+  temp_dir <- tempdir()
+  img_frames <- file.path(temp_dir, paste0("frame-", seq_len(n_frames), ".png"))
+  on.exit(unlink(img_frames))
+  message(paste("Generating", n_frames, "temporary .png images..."))
+  for (i in seq_len(n_frames)) {
+    message(paste(" - image", i, "of", n_frames))
+    rgl::clear3d()
+    hillshade %>%
+      plot_3d_tidy_eval(heightmap, !!!append(gif_exprs, static_dots))
+    rgl::snapshot3d(img_frames[i])
+  }
+  
+  # build gif
+  message("Generating .gif...")
+  magick::image_write_gif(magick::image_read(img_frames), 
+                          path = file, delay = duration/n_frames)
+  message("Done!")
+  invisible(file)
+}
+
+
+plot_3d_tidy_eval <- function(hillshade, ...) {
+  dots <- rlang::enquos(...)
+  plot_3d_call <- rlang::expr(plot_3d(hillshade, !!!dots))
+  rlang::eval_tidy(plot_3d_call)
+}
+
+
+#' Create a numeric vector of transition values.
+#' @description This function helps generate a sequence 
+#' of numeric values to transition "from" a start point
+#' "to" some end point. The transition can be "one_way" 
+#' (meaning it ends at the "to" point) or "two_way" (meaning
+#' we return back to end at the "from" point).
+#'
+#' @param from starting point for transition values
+#' @param to ending point (for one-way transitions) or turn-around point 
+#'           (for two-way transitions)
+#' @param steps the number of steps to take in the transation (i.e. the length
+#'              of the returned vector)
+#' @param one_way logical value to determine if we should stop at the "to" value
+#'                (TRUE) or turn around and return to the "from" value (FALSE)
+#' @param type string defining the transition type - currently suppoerts "cos"
+#'             (for a cosine curve) and "lin" (for linear steps)
+#'
+#' @return a numeric vector of transition values
+#' 
+transition_values <- function(from, to, steps = 10, 
+                              one_way = FALSE, type = "cos") {
+  if (!(type %in% c("cos", "lin")))
+    stop("type must be one of: 'cos', 'lin'")
+  
+  range <- c(from, to)
+  middle <- mean(range)
+  half_width <- diff(range)/2
+  
+  # define scaling vector starting at 1 (between 1 to -1)
+  if (type == "cos") {
+    scaling <- cos(seq(0, 2*pi / ifelse(one_way, 2, 1), length.out = steps))
+  } else if (type == "lin") {
+    if (one_way) {
+      xout <- seq(1, -1, length.out = steps)
+    } else {
+      xout <- c(seq(1, -1, length.out = floor(steps/2)), 
+                seq(-1, 1, length.out = ceiling(steps/2)))
+    }
+    scaling <- approx(x = c(-1, 1), y = c(-1, 1), xout = xout)$y 
+  }
+  
+  middle - half_width * scaling
+}
+
+```
+
+##create 3D plot
+```{r}
+library(rayshader)
+
+montereybay %>%
+  sphere_shade(zscale = 10, texture = "imhof1") %>%
+  add_shadow(ray_shade(montereybay, zscale = 50)) %>%
+  add_shadow(ambient_shade(montereybay, zscale = 50)) %>%
+  plot_3d(montereybay, zscale = 50, theta = -45, phi = 45, water = TRUE,
+          windowsize = c(1000,800), zoom = 0.75, waterlinealpha = 0.3,
+          wateralpha = 0.5, watercolor = "lightblue", waterlinecolor = "white")
+render_snapshot()
+
+
+
+ {kriged_df2*100} %>%
+  sphere_shade(zscale = 1, texture = "imhof1") %>%
+  add_shadow(ray_shade(kriged_df2, zscale = 50)) %>%
+  add_shadow(ambient_shade(kriged_df2, zscale = 50)) %>%
+  plot_3d(kriged_df2, zscale = 1, theta = -45, phi = 45, water = TRUE,
+          windowsize = c(1000,800), zoom = 0.75, waterlinealpha = 0.3,
+          wateralpha = 0.5, watercolor = "lightblue", waterlinecolor = "white")
+render_snapshot()
+
+
+{
+kriged_df3 <- kriged_df %>%
+  spread(key = x, value = Z, fill = min(kriged_df$Z)-2) 
+
+x <- names(kriged_df3)[-1]  %>% as.numeric()
+y <- kriged_df3 %>% pull(y)
+
+kriged_df3 <- kriged_df3 %>%
+  select(-y) %>% as.matrix()
+}
+
+elev_matrix <- (kriged_df3)*100
+
+ambmat <- ambient_shade(elev_matrix, zscale = 20)
+raymat <- ray_shade(elev_matrix, zscale = 20, lambert = TRUE)
+watermap <- detect_water(elev_matrix)
+
+elev_matrix %>%
+  sphere_shade(texture = "imhof1") %>%
+  add_water(watermap, color = "imhof4") %>%
+  add_shadow(raymat, max_darken = 0.5) %>%
+  add_shadow(ambmat, max_darken = 0.5) %>%
+  plot_3d(elev_matrix, zscale = 20, theta = -45, phi = 45, water = FALSE,
+          windowsize = c(1000,800), zoom = 0.75, waterlinealpha = 0.3,
+          wateralpha = 0.5, watercolor = "lightblue", waterlinecolor = "white")
+#%>% render_snapshot() # Save image to current path
 
 
 
 
 ```
 
-
-#plotly
+##animate
 ```{r}
-x <- 1:5/10
-y <- 1:5
-z <- x %o% y
-z <- z + .2*z*runif(25) - .1*z
+n_frames <- 180
+zscale <-1
+waterdepths <- transition_values(from = min(elev_matrix) + 2, to = 0, steps = n_frames) 
+thetas <- transition_values(from = -45, to = -135, steps = n_frames)
+# generate gif
+elev_matrix %>% 
+  sphere_shade(texture = "imhof1", zscale = zscale) %>%
+  add_shadow(raymat, max_darken = 0.5) %>%
+  add_shadow(ambmat, max_darken = 0.5) %>%
+  save_3d_gif(elev_matrix, file = "GB.gif", duration = 6,
+              solid = TRUE, shadow = TRUE, water = TRUE, zscale = 20,
+              watercolor = "imhof3", wateralpha = 0.8, 
+              waterlinecolor = "#ffffff", waterlinealpha = 0.5,
+              waterdepth = waterdepths/zscale, 
+              theta = thetas, phi = 45)
 
-library(plotly)
-plot_ly(x=x,y=y,z=z, type="surface")
+
+
+
+#orig
+elev_matrix %>% 
+  sphere_shade(texture = "imhof1", zscale = zscale) %>%
+  add_shadow(raymat, max_darken = 0.5) %>%
+  add_shadow(ambmat, max_darken = 0.5) %>%
+  save_3d_gif(elev_matrix, file = "GB.gif", duration = 6,
+              solid = TRUE, shadow = TRUE, water = TRUE, zscale = zscale,
+              watercolor = "imhof3", wateralpha = 0.8, 
+              waterlinecolor = "#ffffff", waterlinealpha = 0.5,
+              waterdepth = waterdepths/zscale, 
+              theta = thetas, phi = 45)
 
 ```
 
