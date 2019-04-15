@@ -49,7 +49,7 @@ FiguresFolder <- file.path(LatexFolder, "Figures")
 TablesFolder <- file.path(LatexFolder, "Tables")
 MatricesFolder <- file.path(LatexFolder, "Matrices")
 Tariff <- file.path(basewd,"Tariff and Transport")
-PLwd <- "/media/jonno/Seagate Expansion Drive/Overloads"
+PLwd <- "/media/jonno/Seagate Expansion Drive/System_Dynamics"
 Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
 
 
