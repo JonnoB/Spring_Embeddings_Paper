@@ -17,7 +17,7 @@ https://ggforce.data-imaginist.com/reference/geom_mark_rect.html
 
 ```{r Setup}
 
-packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader")
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -285,28 +285,29 @@ test <- k1e4
 
 #create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
 
-if(file.exists(file.path()))
-
-g <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
-g <-set.edge.attribute(g, "distance", value = 1) %>%
-  Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 400, 40) %>%
-  set.edge.attribute(., "Area", value = 1)
-
-block 83 single iteration to complete
-
-
-List_of_BiConComps <- Create_balanced_blocks(g)
-
-#use the largest block to set the simulation parameters k and m.
-#k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 8000, mass = 5000)
-
-OriginBlock$results %>% ggplot(aes(x = t, y = z)) + geom_line()
-
-test <- Find_network_balance(List_of_BiConComps[[1]], tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 8000, mass = 5000)
-
-final_z <- Create_stabilised_blocks(g, OriginBlock, 147, tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 4000, mass = 5000)
-
+if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
+  final_z <- read_rds(file.path(PLwd, "UK_power_grid_3d.rds"))
+} else{
+  
+  g <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
+  g <-set.edge.attribute(g, "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 400, 40) %>%
+    set.edge.attribute(., "Area", value = 1)
+  
+  # block 83 single iteration to complete
+  
+  
+  List_of_BiConComps <- Create_balanced_blocks(g)
+  
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+  OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 8000, mass = 5000)
+  
+  final_z <- Create_stabilised_blocks(g, OriginBlock, 147, tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 4000, mass = 5000)
+  
+  write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
+  
+}
 mean(final_z$z)
 median(final_z$z)
 
@@ -314,7 +315,7 @@ median(final_z$z)
 line_strain <-as_data_frame(g) %>% as_tibble %>%
   left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
   left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
-  mutate(D = 1/Y,
+  mutate(D = 1,
          dz = abs(z.x-z.y),
          mean_z = (z.x+z.y)/2,
          H = sqrt(dz^2 +D^2),
@@ -326,9 +327,6 @@ line_strain <-as_data_frame(g) %>% as_tibble %>%
 
 cor(line_strain$dz, line_strain$strain)
 cor(line_strain$line_load, line_strain$strain)
-
-
-test <- read_csv(file.path(basewd, "point.csv"))
 
 z_network_map <-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(line_strain, by = c("Link"))%>%
@@ -349,8 +347,19 @@ node_z <-z_network_map %>% as_tibble %>%
   select(Node, Longitude, Latitude, z) %>%
   distinct(.keep_all = T) 
 
+
+edge_z <-z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Longitude, Latitude, z, Link) %>%
+  group_by(Link) %>%
+  summarise_all(mean)
+
 #This is the strain of the network on each edge. It allows us to see the slope of the network
-edge_strain <- 
+edge_strain <- z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Longitude, Latitude, z = strain, Link) %>%
+  group_by(Link) %>%
+  summarise_all(mean)
 
 ```
 
@@ -383,75 +392,27 @@ spdf <- as(GB, "Spatial") %>% st_as_sf %>%
   as_Spatial()
 
 
-test <- Create_kriged_df(node_z, "z", spdf, 8e4)
-
-grd <- makegrid(spdf, n = 80000)
-colnames(grd) <- c('x','y')
-
-grd_pts <- SpatialPoints(coords = grd, 
-                         proj4string=CRS(proj4string(spdf)))
-
-# find all points in `grd_pts` that fall within `spdf`
-grd_pts_in <- grd_pts[spdf, ]
-
-# transform grd_pts_in back into a data frame
-gdf <- as.data.frame(coordinates(grd_pts_in))
+kriged_df <- Create_kriged_df(node_z, "z", spdf, 8e4) %>% mutate(type = "node z")
+kriged_df_strain <- Create_kriged_df(edge_strain, "z", spdf, 8e4) %>% mutate(type = "strain")
 
 
-#create spatial points of height data
-DT_sf  <-  st_as_sf(node_z, coords = c("Longitude", "Latitude"),
-                        crs = "+proj=longlat +datum=WGS84", agr = "constant")%>% 
-  as_Spatial %>%
-  remove.duplicates() #remove duplicate points aka points super close
-
-#create spatial points of data that will have z interpolated
-grd_sf  <-  gdf %>% #expand.grid(x =unique(gdf$x), y = unique(gdf$y)) %>% as.tibble %>% #if expand grid isn't used problems
-    rename(Longitude = x, Latitude = y) %>%
-  st_as_sf(., coords = c("Longitude", "Latitude"),
-                        crs = "+proj=longlat +datum=WGS84", agr = "constant") %>%
-  as_Spatial
-
-
-#create variogram of data
-dt.vgm <- variogram(z~1, DT_sf)
-
-
-#dt.fit <-fit.variogram(dt.vgm, model = vgm(1,"Lin",900,1)) # fit model
-
-dt.fit <- autofitVariogram(z~1, 
-                             DT_sf,
-                             model = c("Sph"), #commenting out this autfits the variogram. that produces the lowest error but doesn't look that great. I would think the sperical one was more accurate I don't understand much about it though
-                             kappa = c(0.05, seq(0.2, 2, 0.1), 5, 10),
-                             fix.values = c(NA, NA, NA),
-                             start_vals = c(NA,NA,NA),
-                             verbose = T)
-
-# vgm() list of models
-
-lzn.kriged <- krige((z) ~ 1, remove.duplicates(DT_sf), grd_sf, model=dt.fit$var_mode) #remove duplicate locations
-
-
-test %>% rename(Height = z) %>%
-  ggplot(aes(x=Longitude, y=Latitude)) + geom_tile(aes(fill=Height)) +coord_equal() +
+bind_rows(kriged_df, kriged_df_strain) %>%
+  group_by(type) %>%
+  mutate(z = percent_rank(z)) %>%
+#kriged_df_edge_z %>%
+#  mutate(z = percent_rank(z)) %>% 
+  rename(Height = z) %>%
+  ggplot(aes(x=Longitude, y=Latitude)) + geom_tile(aes(fill=Height)) + coord_equal() +
+  facet_grid(~type) +
   scale_fill_viridis_c() +
   # geom_point(data = node_z %>% left_join(VertexMetaData2, by = c("Node"="Name")) %>%
   # filter(NodeType == "Generator") %>%
   #   rename(lat = Longitude, lon = Latitude),
   # aes(colour = BalencedPower))+
 scale_colour_viridis_c(option = "plasma") +
-  labs(title = "height of network across the  UK", colour = "Generation")
+  labs(title = "Network across the  UK", colour = "Generation")
 ggsave(file.path(FiguresFolder, "BritainKrigedTopology.pdf"))
 
-kriged_df <- lzn.kriged %>% as.tibble %>%
-  rename(Z = var1.pred) %>%
-  select(-var1.var) %>%
-  rename(x = coords.x1, y = coords.x2) %>%
-  mutate(Z = Z/sd(Z))
-
-
-kriged_df <- test %>%
-  rename(x = Longitude, y = Latitude) %>%
-  mutate(Z = z/sd(z))
 ```
 
 
@@ -610,7 +571,10 @@ transition_values <- function(from, to, steps = 10,
 
 {
 kriged_df3 <- kriged_df %>%
-  spread(key = x, value = Z, fill = min(kriged_df$Z)-2) 
+  rename(x = Longitude, y = Latitude) %>%
+  mutate(Z = z/sd(z)) 
+kriged_df3 <- kriged_df3 %>%
+  spread(key = x, value = Z, fill = min(kriged_df3$Z)-2) 
 
 x <- names(kriged_df3)[-1]  %>% as.numeric()
 y <- kriged_df3 %>% pull(y)
@@ -923,6 +887,7 @@ test2 %>%
 
 
 
+
 #fixed alpha and weigted alpha
 
 The resultant thetas from an example group should be plotted
@@ -933,9 +898,9 @@ create a function that replaces the capcity and finds convergance.
 
 ```{r}
 
-test <- expand.grid(A= 20:80, B= 10:70, C =10:70) %>%
+fixed_mean_alpha <- expand.grid(A= 20:80, B= 10:70, C =10:70) %>%
   as.tibble %>% mutate(total = rowSums(.)) %>%
-filter(total == 100) %>%
+  filter(total == 100) %>%
   select(-total) %>%
   mutate(groupID = 1:n()) %>%
   gather(key = edge, value = capacity, - groupID) %>%
@@ -949,11 +914,13 @@ filter(total == 100) %>%
          excess_cap = sum(alpha*flow_fract)/3) %>%
   group_by(mean_alpha) %>%
   mutate(counts = n(),
-         rank = rank(excess_cap, ties.method = "random"))
+         rank = rank(excess_cap, ties.method = "random")) %>% 
+  ungroup
 
-
-test %>% select(edge, capacity, mean_alpha, groupID) %>%
-  spread(key = edge, value = capacity)
+target_groups <-fixed_mean_alpha %>% select(groupID:capacity) %>%
+  spread(key = edge, value = capacity) %>%
+  #filter(B<=C) %>% 
+  pull(groupID)
 
 #for a fixed value of A weighted alpha is fixed when excess capacity moves between B and C as they have the same flow and capacity.
 #However the theta value will be different
@@ -961,7 +928,167 @@ test %>% select(edge, capacity, mean_alpha, groupID) %>%
 test %>% group_by(groupID) %>% 
   summarise_all(first) %>%
   ggplot(aes(x = mean_alpha)) + geom_density()
-  filter(rank == 1)
+
+
+  
+  Adjmat <- c(0,1,0,0,
+              1,0,1,1,
+              0,1,0,0,
+              0,1,0,0) %>%
+    matrix(nrow = 4, byrow = T)
+  
+  toy1 <- graph_from_adjacency_matrix(Adjmat, mode = "undirected") 
+  toy1 %>% plot
+  
+  if(file.exists(file.path(PLwd, "toy_theta.rds"))){
+    
+    toy_theta <- read_rds(file.path(PLwd, "toy_theta.rds"))
+
+  }else {  
+    toy_theta <-1:length(target_groups) %>%
+      map_df(~{
+        
+        print(paste(.x, "of", length(target_groups)))
+        
+        current_settings <- fixed_mean_alpha %>%
+          filter(groupID == .x)
+        
+        toy1 <-graph_from_adjacency_matrix(Adjmat, mode = "undirected")  %>% 
+          set.vertex.attribute(., "Force", value = c(20,0,-10,-10)) %>%
+          set.edge.attribute(., "Flow", value = current_settings$flow) %>%
+          set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
+          set.edge.attribute(., "capacity", value =  current_settings$capacity) %>%
+          set.edge.attribute(., "distance", value = 1) %>%
+          set.edge.attribute(., "Area", value = 1) %>%
+          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 400, 40) %>%
+          set.vertex.attribute(., "name", value = 1:4) %>%
+          set.edge.attribute(., "Link", value = LETTERS[1:3])
+        
+        
+        List_of_BiConComps <- Create_balanced_blocks(toy1, force = "Force")
+        
+        OriginBlock <- Find_network_balance(List_of_BiConComps[[3]], force = "Force", flow = "Flow", capacity = "capacity",
+                                            tstep = 0.01, tol = 1e-10, distance = "distance",
+                                            maxIter = 8000, mass = 50, verbose = F)
+        
+        
+        toy_results <- Create_stabilised_blocks(toy1, OriginBlock, 3, force = "Force", flow = "Flow", capacity = "capacity", 
+                                                tstep = 0.1, tol = 1e-10, distance = "distance", 
+                                                maxIter = 8000, mass = 5000)
+        
+        
+        toy_z <- toy_results$z
+        
+        oa <-(max(toy_z)-min(toy_z)/2)
+        
+        theta_rads <- atan(oa)
+        theta_degs <- 360*theta_rads/(2*pi)
+        
+        Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa*2)
+        
+        return(Out)
+      })
+    
+    
+    write_rds(toy_theta, file.path(PLwd, "toy_theta.rds"))
+  }
+  
+  
+toy_theta_alpha_relation <- fixed_mean_alpha %>% select(groupID:capacity) %>%
+  spread(key = edge, value = capacity) %>%
+  right_join(toy_theta, by = "groupID") 
+
+  temp <-  fixed_mean_alpha %>%
+  select(groupID, edge, alpha, counts) %>%
+  spread(key = edge, value = alpha) %>%
+  mutate(
+    B= 1/B,
+    C = 1/C,
+    ratio = (B)/(C+B)) %>%
+  left_join(fixed_mean_alpha %>%
+  select(groupID, mean_alpha) %>%
+    distinct) %>%
+    select(-A, -B, -C)
+  
+  toy_theta_alpha_relation <- toy_theta_alpha_relation %>%
+    left_join(., temp)
+  rm(temp)
+  
+ 
+  toy_theta_alpha_relation %>%
+    #filter(counts >50) %>%
+    ggplot(aes(x = ratio, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
+    geom_line(size = 1) +
+    scale_colour_viridis_c() +
+    labs(title ="Relation ship between alpha, excess capacity and theta", y = "theta", 
+         x= TeX("$\\frac{\\alpha_B}{\\alpha_B + \\alpha_C}$"),
+         colour = "system alpha")
+  ggsave(file.path(FiguresFolder, "Constant_excess_capacity.pdf"))
+
+
+```
+
+##Entropic degree
+```{r}
+
+node_entropy <-1:length(target_groups) %>%
+      map_df(~{
+        
+        print(paste(.x, "of", length(target_groups))) 
+
+        current_settings <- fixed_mean_alpha %>%
+          filter(groupID == .x)
+        
+        toy1 <-graph_from_adjacency_matrix(Adjmat, mode = "undirected")  %>% 
+          set.vertex.attribute(., "Force", value = c(20,0,-10,-10)) %>%
+          set.edge.attribute(., "Flow", value = current_settings$flow) %>%
+          set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
+          set.edge.attribute(., "capacity", value =  current_settings$capacity) %>%
+          set.edge.attribute(., "distance", value = 1) %>%
+          set.edge.attribute(., "Area", value = 1) %>%
+          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 400, 40) %>%
+          set.vertex.attribute(., "name", value = 1:4) %>%
+          set.edge.attribute(., "Link", value = LETTERS[1:3])
+
+        tibble(
+          groupID = .x,
+          alpha = EntropicDegree(toy1, "alpha"),
+               alpha_scale = EntropicDegree(toy1, "alpha", Scale = T),
+               alpha_div = diversity(toy1, weights = get.edge.attribute(toy1, "alpha")),
+          capacity_div = diversity(toy1, weights = get.edge.attribute(toy1, "capacity"))
+        ) 
+        }
+ ) %>%
+  filter(complete.cases(.)) %>%
+  left_join(toy_theta_alpha_relation)
+
+
+node_entropy %>%
+  select(mean_alpha, theta_degs, capacity_div, alpha_div) %>%
+  rename(capacity = capacity_div, alpha = alpha_div) %>%
+  gather(key = type, value = div,  -theta_degs, - mean_alpha) %>%
+  ggplot(aes(x = div, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
+  geom_line(size = 1) +
+  scale_colour_viridis_c() +
+  facet_grid(~type) +
+  labs(title = "Exploring the relationship between theta, alpha and entropy", 
+       x = "Entropy", y = "theta", colour = "system alpha")
+ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
+
+
+test <- node_entropy %>%
+  filter(mean_alpha == 3)
+
+test <- node_entropy %>%
+  arrange(-alpha_div) %>%
+  select(theta_degs, mean_alpha, alpha_div) %>%
+  group_by(mean_alpha) %>%
+  summarise_all(first) 
+
+
+#This doesn't give the smooth edge I had hoped for but I don't know why. Perhaps it is becuase the convergance is glitching?
+test %>%
+  ggplot(aes(x = theta_degs, y = alpha_div,  colour = mean_alpha)) + geom_point()
 
 ```
 
