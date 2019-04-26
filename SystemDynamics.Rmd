@@ -12,6 +12,9 @@ https://github.com/schochastics/graphlayouts
 https://github.com/hackl/tikz-network
 
 
+#some IEEE datasets
+https://icseg.iti.illinois.edu/power-cases/
+
 #annpotate points with rectangles
 https://ggforce.data-imaginist.com/reference/geom_mark_rect.html
 
@@ -297,12 +300,13 @@ if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
   # block 83 single iteration to complete
   
   
-  List_of_BiConComps <- Create_balanced_blocks(g)
+  List_of_BiConComps <- Create_balanced_blocks(g, force = "BalencedPower")
   
   #use the largest block to set the simulation parameters k and m.
   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-  OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 8000, mass = 5000)
-  
+  OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.15, tol = 1e-10, distance = "distance", 
+                                      maxIter = 8000, mass = 5000)
+
   final_z <- Create_stabilised_blocks(g, OriginBlock, 147, tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 4000, mass = 5000)
   
   write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
@@ -423,7 +427,7 @@ ggsave(file.path(FiguresFolder, "BritainKrigedTopology.pdf"))
 functions taken from
 
 ##this needs to be properly integrated and attributed
-https://github.com/wcmbishop/rayshader-demo/blob/master/R/rayshader-gif.R
+% https://github.com/wcmbishop/rayshader-demo/blob/master/R/rayshader-gif.R
 
 ```{r}
 #' Build a gif of 3D rayshader plots
@@ -905,17 +909,18 @@ fixed_mean_alpha <- expand.grid(A= 20:80, B= 10:70, C =10:70) %>%
   mutate(groupID = 1:n()) %>%
   gather(key = edge, value = capacity, - groupID) %>%
   left_join(tibble(edge = c("A", "B", "C"), 
-                   flow = c(20,10,10)), 
+                   flow = c(20,10,10)), #edge flow is always postive! 
             by = "edge") %>%
-  mutate(alpha = capacity/flow) %>%
+  mutate(alpha = capacity/abs(flow)) %>%
   group_by(groupID) %>%
   mutate(mean_alpha = mean(alpha), 
-         flow_fract = flow/sum(flow),
+         flow_fract = abs(flow)/sum(ifelse(flow>0,flow,0)),
          excess_cap = sum(alpha*flow_fract)/3) %>%
   group_by(mean_alpha) %>%
   mutate(counts = n(),
          rank = rank(excess_cap, ties.method = "random")) %>% 
-  ungroup
+  ungroup #%>%
+ # filter(groupID %in% c(778,729,826))
 
 target_groups <-fixed_mean_alpha %>% select(groupID:capacity) %>%
   spread(key = edge, value = capacity) %>%
@@ -938,6 +943,8 @@ test %>% group_by(groupID) %>%
     matrix(nrow = 4, byrow = T)
   
   toy1 <- graph_from_adjacency_matrix(Adjmat, mode = "undirected") 
+  
+  
   toy1 %>% plot
   
   if(file.exists(file.path(PLwd, "toy_theta.rds"))){
@@ -945,7 +952,7 @@ test %>% group_by(groupID) %>%
     toy_theta <- read_rds(file.path(PLwd, "toy_theta.rds"))
 
   }else {  
-    toy_theta <-1:length(target_groups) %>%
+    toy_theta <-fixed_mean_alpha$groupID %>%#1:length(target_groups) %>%
       map_df(~{
         
         print(paste(.x, "of", length(target_groups)))
@@ -953,14 +960,14 @@ test %>% group_by(groupID) %>%
         current_settings <- fixed_mean_alpha %>%
           filter(groupID == .x)
         
-        toy1 <-graph_from_adjacency_matrix(Adjmat, mode = "undirected")  %>% 
+        toy1 <-graph_from_adjacency_matrix(Adjmat, mode = "undirected") %>% 
           set.vertex.attribute(., "Force", value = c(20,0,-10,-10)) %>%
           set.edge.attribute(., "Flow", value = current_settings$flow) %>%
           set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
           set.edge.attribute(., "capacity", value =  current_settings$capacity) %>%
           set.edge.attribute(., "distance", value = 1) %>%
           set.edge.attribute(., "Area", value = 1) %>%
-          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 400, 40) %>%
+          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
           set.vertex.attribute(., "name", value = 1:4) %>%
           set.edge.attribute(., "Link", value = LETTERS[1:3])
         
@@ -968,23 +975,22 @@ test %>% group_by(groupID) %>%
         List_of_BiConComps <- Create_balanced_blocks(toy1, force = "Force")
         
         OriginBlock <- Find_network_balance(List_of_BiConComps[[3]], force = "Force", flow = "Flow", capacity = "capacity",
-                                            tstep = 0.01, tol = 1e-10, distance = "distance",
-                                            maxIter = 8000, mass = 50, verbose = F)
-        
+                                            tstep = 0.02, tol = 1e-26, distance = "distance",
+                                            maxIter = 8000, mass = 5000, verbose = T)
+
         
         toy_results <- Create_stabilised_blocks(toy1, OriginBlock, 3, force = "Force", flow = "Flow", capacity = "capacity", 
-                                                tstep = 0.1, tol = 1e-10, distance = "distance", 
+                                                tstep = 0.02, tol = 1e-26, distance = "distance", 
                                                 maxIter = 8000, mass = 5000)
-        
         
         toy_z <- toy_results$z
         
-        oa <-(max(toy_z)-min(toy_z)/2)
+        oa <-(max(toy_z)-min(toy_z))/2
         
         theta_rads <- atan(oa)
         theta_degs <- 360*theta_rads/(2*pi)
         
-        Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa*2)
+        Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa)
         
         return(Out)
       })
@@ -998,7 +1004,7 @@ toy_theta_alpha_relation <- fixed_mean_alpha %>% select(groupID:capacity) %>%
   spread(key = edge, value = capacity) %>%
   right_join(toy_theta, by = "groupID") 
 
-  temp <-  fixed_mean_alpha %>%
+  toy_theta_temp <-  fixed_mean_alpha %>%
   select(groupID, edge, alpha, counts) %>%
   spread(key = edge, value = alpha) %>%
   mutate(
@@ -1011,20 +1017,21 @@ toy_theta_alpha_relation <- fixed_mean_alpha %>% select(groupID:capacity) %>%
     select(-A, -B, -C)
   
   toy_theta_alpha_relation <- toy_theta_alpha_relation %>%
-    left_join(., temp)
-  rm(temp)
+    left_join(., toy_theta_temp)
+  #rm(toy_theta_temp)
   
  
   toy_theta_alpha_relation %>%
-    #filter(counts >50) %>%
+        mutate(mean_alpha = signif(mean_alpha,5)) %>% # some of the mean_alpha values are seperating on machine tolerance or something
+    #filter(mean_alpha <2.6) %>%
     ggplot(aes(x = ratio, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
     geom_line(size = 1) +
     scale_colour_viridis_c() +
     labs(title ="Relation ship between alpha, excess capacity and theta", y = "theta", 
-         x= TeX("$\\frac{\\alpha_B}{\\alpha_B + \\alpha_C}$"),
-         colour = "system alpha")
+         x= "Line loading of edge B",
+         colour = latex2exp::TeX(paste("system", "$\\alpha$")))
   ggsave(file.path(FiguresFolder, "Constant_excess_capacity.pdf"))
-
+#latex2exp::TeX("$\\mathrm{LL}=\\frac{\\alpha_B}{\\alpha_B + \\alpha_C}$")
 
 ```
 
@@ -1046,8 +1053,8 @@ node_entropy <-1:length(target_groups) %>%
           set.edge.attribute(., "capacity", value =  current_settings$capacity) %>%
           set.edge.attribute(., "distance", value = 1) %>%
           set.edge.attribute(., "Area", value = 1) %>%
-          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 400, 40) %>%
-          set.vertex.attribute(., "name", value = 1:4) %>%
+          Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
+          set.vertex.attribute(., "name", value = nrow(Adjmat)) %>%
           set.edge.attribute(., "Link", value = LETTERS[1:3])
 
         tibble(
@@ -1067,6 +1074,7 @@ node_entropy %>%
   select(mean_alpha, theta_degs, capacity_div, alpha_div) %>%
   rename(capacity = capacity_div, alpha = alpha_div) %>%
   gather(key = type, value = div,  -theta_degs, - mean_alpha) %>%
+    mutate(mean_alpha = signif(mean_alpha,5)) %>%  # some of the mean_alpha values are seperating on machine tolerance or something
   ggplot(aes(x = div, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
   geom_line(size = 1) +
   scale_colour_viridis_c() +
@@ -1081,14 +1089,381 @@ test <- node_entropy %>%
 
 test <- node_entropy %>%
   arrange(-alpha_div) %>%
-  select(theta_degs, mean_alpha, alpha_div) %>%
+  select(theta_degs, mean_alpha, alpha_div, groupID, delta_z) %>%
+  mutate(mean_alpha = signif(mean_alpha,5)) %>%
   group_by(mean_alpha) %>%
   summarise_all(first) 
 
+unique(test$mean_alpha) %>% length
 
-#This doesn't give the smooth edge I had hoped for but I don't know why. Perhaps it is becuase the convergance is glitching?
+
+test2 <- test %>%
+  ggplot(aes(x = theta_degs, y = alpha_div,  colour = mean_alpha)) +  geom_point(aes(text = groupID))
+  geom_line()
+
+ggplotly(test2)
+
 test %>%
-  ggplot(aes(x = theta_degs, y = alpha_div,  colour = mean_alpha)) + geom_point()
+  ggplot(aes(x = theta_degs, y = alpha_div)) + 
+  geom_line()
+
+test <- node_entropy %>%
+  filter(groupID %in% c(1360,1327,1106)) %>% pull(mean_alpha)
+
+all.equal(test[1], test[2])
 
 ```
+
+##theta relation with force fraction
+
+```{r}
+#What happens when the base and the stiffness/stretch ratio is changed?
+#Where is the linear and non linear regime for theta?
+
+
+Adjmat2 <- c(0,1,
+             1,0) %>%
+  matrix(nrow = 2, byrow = T)
+
+toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected") 
+
+
+pair_network <- expand.grid(flow = seq(0.1,1, 0.1), alpha = c(c(1:10, Inf), 
+                                                              c(1/seq(0.9,1,0.01),Inf),
+                                                              c(1/seq(0.01,0.1,0.01),Inf)
+)
+) %>%
+  as.tibble %>%
+  mutate(groupID = 1:n(),
+         type = c(rep("General", 110), rep("Low", 120), rep("High", 110)))
+
+ff_delta_z <- pair_network$groupID  %>% 
+  map_df(~{  
+    
+    print(.x)
+    
+    current_settings <- pair_network  %>%
+      filter(groupID == .x)
+    
+    toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected")  %>% 
+      set.vertex.attribute(., "Force", value = c(current_settings$flow,-current_settings$flow)) %>% #ensures the forces are opposite
+      set.edge.attribute(., "Flow", value = current_settings$flow) %>%
+      set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
+      set.edge.attribute(., "capacity", value =  current_settings$alpha*current_settings$flow) %>%
+      set.edge.attribute(., "distance", value = 1) %>%
+      set.edge.attribute(., "Area", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
+      set.vertex.attribute(., "name", value = nrow(Adjmat2)) %>%
+      set.edge.attribute(., "Link", value = LETTERS[1])
+    
+    
+    toy_results <- Find_network_balance(toy2, force = "Force", flow = "Flow", capacity = "capacity",
+                                        tstep = .01, tol = 1e-10, distance = "distance",
+                                        maxIter = 8000, mass = 1, verbose = F)
+    
+    
+    toy_z <- toy_results$NodeList$z
+    
+    oa <-(max(toy_z)-min(toy_z))
+    
+    theta_rads <- atan(oa)
+    theta_degs <- 360*theta_rads/(2*pi)
+    
+    Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa, 
+                  flow = current_settings$flow,
+                  alpha = current_settings$alpha,
+                  k = get.edge.attribute(toy2, "E")[1],
+                  type = current_settings$type,
+                  delta_h = sqrt(delta_z^2 + 1)-1)
+    return(Out)
+    
+  })
+
+
+delta_h <- sqrt(oa^2+1)-1
+delta_h * Out$k
+Out$k*Out$delta_h
+Out$flow/sin(Out$theta_rads)
+
+
+ff_delta_z %>%
+  mutate(type = fct_relevel(type, "General", after = 1)) %>%
+  filter(alpha>1) %>%
+  group_by(type) %>%
+  mutate(p_alpha = percent_rank(alpha),
+         fsin = sin(theta_degs)*flow,
+         ften = k*delta_h*sin(theta_rads)) %>%
+  filter(type =="High") %>%
+  ggplot(aes(x = k*delta_h*sin(theta_rads), y = delta_z, colour = alpha, group = alpha)) + 
+  geom_line() +
+  scale_colour_viridis_c()+
+  facet_wrap(~type, scales = "free_y") +
+  labs(title = "Relationship between theta and flow fraction for different alpha values",
+       x = "Flow Fraction",
+       y = "theta")
+ggsave(file.path(FiguresFolder, "Theta_vs_flow_for_alpha.pdf"))
+
+
+ff_delta_z %>%
+  #filter(ifelse(type== "General" & alpha==1 , 0,1)) %>%
+  group_by(type) %>%
+  mutate(p_alpha = percent_rank(alpha)) %>%
+  ggplot(aes(x = alpha, y = theta_degs, colour = flow, group = flow)) + 
+  geom_line() +
+  scale_colour_viridis_c()+
+  facet_grid(type~., scales = "free")
+ 
+```
+
+
+##Unique edge delta z
+
+this calculates the delta for the unque edges in the 4-3 network. the delta_z can then be added making the calculation much faster
+
+```{r}
+
+Edge_combos <- fixed_mean_alpha %>%
+  distinct(alpha, flow, .keep_all = TRUE) %>%
+  mutate(groupID = 1:n())
+
+Edge_combos_delta_z <- Edge_combos$groupID  %>% 
+  map_df(~{  
+    
+    print(.x)
+    
+    current_settings <- Edge_combos   %>%
+      filter(groupID == .x)
+    
+    toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected")  %>% 
+      set.vertex.attribute(., "Force", value = c(current_settings$flow,-current_settings$flow)) %>% #ensures the forces are opposite
+      set.edge.attribute(., "Flow", value = current_settings$flow) %>%
+      set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
+      set.edge.attribute(., "capacity", value =  current_settings$alpha*current_settings$flow) %>%
+      set.edge.attribute(., "distance", value = 1) %>%
+      set.edge.attribute(., "Area", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
+      set.vertex.attribute(., "name", value = 1:nrow(Adjmat2)) %>%
+      set.edge.attribute(., "Link", value = LETTERS[1])
+    
+    
+    toy_results <- Find_network_balance(toy2, force = "Force", flow = "Flow", capacity = "capacity",
+                                        tstep = 0.1, tol = 1e-10, distance = "distance",
+                                            maxIter = 8000, mass = 5000, verbose = F)
+    
+    
+    toy_z <- toy_results$NodeList$z
+    
+    oa <-(max(toy_z)-min(toy_z))
+    
+    theta_rads <- atan(oa)
+    theta_degs <- 360*theta_rads/(2*pi)
+    
+    Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa, 
+                  flow = current_settings$flow,
+                  alpha = current_settings$alpha,
+                  k = get.edge.attribute(toy2, "E")[1],
+                  delta_h = sqrt(delta_z^2 + 1)-1)
+    return(Out)
+    
+  })
+
+test <- fixed_mean_alpha %>%
+select(groupID, edge, flow, alpha) %>%
+  left_join(Edge_combos_delta_z %>% select(-groupID)) 
+
+test2 <- test %>%
+  filter(edge != "A") %>%
+  group_by(groupID) %>%
+  arrange(-delta_z) %>%
+  summarise_all(first) %>%
+  bind_rows( test %>%
+               filter(edge == "A") ) %>%
+  group_by(groupID) %>%
+  summarise(delta_z = sum(delta_z),
+            mean_theta = mean(theta_rads)) %>%
+  mutate(theta_rads = atan(delta_z/2), #over 2 as there are two edges that make up the total angle
+         theta_degs = 360*theta_rads/(2*pi)) %>%
+left_join(toy_theta_temp)
+
+ #use spread to keep the delta values
+test2 <- test %>%
+  select(groupID, edge, delta_z) %>%
+  spread(key = edge, value = delta_z) %>%
+  mutate(delta_z = pmax(B, C)+A,
+         theta_rads = atan(delta_z/2), #over 2 as there are two edges that make up the total angle
+         theta_degs = 360*theta_rads/(2*pi)) %>%
+  left_join(toy_theta_temp, by = "groupID")
+
+
+test2 %>% 
+  arrange(-theta_rads) %>%
+  group_by(mean_alpha) %>%
+  summarise_all(first) %>%
+  filter(mean_alpha ==2 | mean_alpha ==3)
+
+  test2 %>%
+        mutate(mean_alpha = signif(mean_alpha,5)) %>% # some of the mean_alpha values are seperating on machine tolerance or something
+    #filter(mean_alpha <=2.5) %>%
+    ggplot(aes(x = ratio, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
+    geom_line(size = 1) +
+    scale_colour_viridis_c() +
+    labs(title ="Relation ship between alpha, excess capacity and theta", y = "theta", 
+         x= "Line loading of edge B",
+         colour = latex2exp::TeX(paste("system", "$\\alpha$")))
+
+  
+test3 <- test2 %>% filter(ratio ==0.5) 
+test3 %>%
+    ggplot(aes(x = mean_alpha, y = theta_degs)) + geom_line()
+  
+  test4 <- fixed_mean_alpha %>%
+    filter(groupID %in% test3$groupID) %>%
+    select(groupID, edge, alpha) %>%
+    spread(key = edge, value = alpha) %>%
+    left_join(test3, by =  "groupID")
+  
+  
+  test %>%
+    filter(edge =="A") %>%
+    ggplot(aes(x = alpha, y = theta_degs)) + geom_point()
+
+
+    test %>%
+    filter(edge =="B") %>%
+    ggplot(aes(x = alpha, y = theta_degs)) + geom_point()
+ 
+      test %>%
+    filter(edge =="A", alpha ==3) 
+
+    Edge_combos_delta_z %>% ggplot(aes(x = alpha, y = theta_degs, colour = as.factor(flow))) + geom_point()
+             
+    Edge_combos_delta_z %>% filter(alpha ==3)
+    
+```
+
+
+
+
+theta range
+```{r}
+ 
+ pair_network <- expand.grid(flow = c(1,0.5), alpha=1.8#seq(0,1, 0.01), alpha = c(Inf, 1)
+                             ) %>%
+  as.tibble %>%
+  mutate(groupID = 1:n())
+
+ theta_range <- pair_network$groupID  %>% 
+   map_df(~{  
+     
+     print(.x)
+     
+     current_settings <- pair_network  %>%
+       filter(groupID == .x)
+     
+     toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected")  %>% 
+       set.vertex.attribute(., "Force", value = c(current_settings$flow, -current_settings$flow) ) %>%
+       set.edge.attribute(., "Flow", value = current_settings$flow) %>%
+       set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
+       set.edge.attribute(., "capacity", value =  current_settings$alpha*current_settings$flow) %>%
+       set.edge.attribute(., "distance", value = 1) %>%
+       set.edge.attribute(., "Area", value = 1) %>%
+       Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
+       set.vertex.attribute(., "name", value = 1:2) %>%
+       set.edge.attribute(., "Link", value = LETTERS[1])
+     
+     
+     toy_results <- Find_network_balance(toy2, force = "Force", flow = "Flow", capacity = "capacity",
+                                         tstep = 0.01, tol = 1e-10, distance = "distance",
+                                         maxIter = 8000, mass = 1, verbose = T)
+     
+     
+     toy_z <- toy_results$NodeList$z
+     
+     oa <-(max(toy_z)-min(toy_z))
+     
+     theta_rads <- atan(oa)
+     theta_degs <- 360*theta_rads/(2*pi)
+     
+     Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa, 
+                   flow = current_settings$flow,
+                   alpha = current_settings$alpha,
+                   k = get.edge.attribute(toy2, "E")[1])
+     return(Out)
+     
+   })
+ 
+ 
+ Out$flow/sin(Out$theta_rads)
+ 
+ sin(Out$theta_rads)
+ 
+H <- sqrt(Out$delta_z^2 + 1)
+delta_h <- H-1
+
+delta_h*Out$k*sin(theta_rads)
+
+delta_h*Out$k*Out$delta_z
+
+ kmat*(Hmat-Dmat)*dZmat/Hmat
+
+ 
+theta_range2 <- theta_range %>%
+  select(theta_degs= delta_z, alpha, flow) %>%
+  spread(key = alpha, theta_degs) %>%
+  mutate(theta_range = `1`-`Inf`) 
+
+theta_range2 %>%
+   ggplot(aes(x = flow, y = theta_range)) + 
+   geom_line()
+
+
+test <- theta_range %>%
+  mutate(Hypotenuse = delta_z/sin(theta_rads))
+
+test %>%
+  ggplot(aes(x = delta_z, y = (Hypotenuse))) + geom_point()
+
+```
+
+
+```{r}
+
+Adjmat
+
+LineEdge <- matrix(c(-1)) %>% t
+k <- 100
+n <- 1
+kmat <- matrix(rep(0, n))
+diag(kmat) <-k
+
+kmat
+
+B <- t(LineEdge) %*% kmat %*% LineEdge
+
+fvect <- matrix(c(1,-1))
+
+sqrt((solve(B)*1 +1)^2 -1)
+
+
+
+A <- CreateTransmission(toy1, "Link")[,-1]
+K <- diag(get.edge.attribute(toy1, "E"))
+
+B <- t(A) %*% K %*% A
+
+elongation <- solve(B) %*% (matrix(get.vertex.attribute(toy1, "Force")[-1]))
+
+Line_delta_z <-as.tibble(sqrt((abs(elongation)+1)^2-1)) %>%
+  mutate(EdgeName = get.edge.attribute(toy1, "Link")) %>%
+  select(EdgeName, delta_z = V1)
+
+.24+0.822
+
+
+elongation2 <-  K %*% A %*% solve(B) %*% (matrix(get.vertex.attribute(toy1, "Force")[-1]))
+
+Line_delta_z$delta_z/(abs(elongation)+1)/get.edge.attribute(toy1, "E")
+
+```
+
 
