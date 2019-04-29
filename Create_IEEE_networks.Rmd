@@ -1,0 +1,213 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "29 April 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+
+
+
+```{r}
+IEEE_data_folder <- file.path(basewd, "IEEE power flow data")
+Saved_Sims <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+
+```
+
+
+```{r}
+test <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
+                       delim = " ",
+                       #skip = 2,
+                       col_names = FALSE)
+
+#each file is broken up into cards which represent different parts of the network
+#The first two cards are nodes and edges respectively. At the end of each of the main cards the number -999 is shown.
+#The final -999 is the end of the file followby by a single text line.
+
+card_end <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
+                       delim = " ",
+                       col_names = FALSE) %>% 
+  pull(1) %>% 
+  {. =="-999"} %>% 
+  which
+
+skip <- 2
+nodes <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
+                       delim = " ",
+                       skip = skip,
+                       col_names = FALSE,
+                                       trim_ws = TRUE,
+                   n_max = card_end[1]-1-skip) %>%
+  set_names(c("Bus_Number", "Name", "Area_Number", "drop", "Loss_zone", "Type" , "final_voltage_pu", "final_angle_degs", "Load_MW", "LOAD_MVAR", "Generation_MW", "Generation_MVAR", "Base_KV", "Desired_volts_pu", "Max_MVAR", "Min_MVAR", "Conductance", "Susceptance", "Remote_controlled_Bus_number" ))
+
+
+skip <- card_end[1]+1
+edges <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
+                   delim = " ",
+                   skip = skip,
+                   col_names = FALSE,
+                   trim_ws = TRUE,
+                   n_max = card_end[2]-1-skip) %>%
+  set_names(c("Tap_bus_number", "Z_bus_number", "Load_flow_area", "Loss_zone", "Circuit", "Type", "Branch_resistance_R_pr_unit", "Branch_resistance_X_pr_unit", "Line_charging_B_pr_unit", "Line_MVA rating_No_1", "Line_MVA_rating_No_2", "Line_MVA_rating_No_3", "Control_bus_number", "Side", "Transformer_final_turns_ratio", "Transformer_final_angle", "Minimum_tap_phase_shift", "Maximum_tap_phase_shift", "Step_size", "Minimum_voltage", "Maximum_voltage"))
+
+
+#The edges with near zero variance are unused anyway so I can drop them without issues
+edges2 <- edges %>%
+  mutate(Y = 1/Branch_resistance_X_pr_unit) %>%#We are using the DC assumuptions and the value of R is small compared to X thus we can say susceptance B = 1/X
+  rename(from = Tap_bus_number, to = Z_bus_number) %>%
+  select(-nearZeroVar(.),-Branch_resistance_R_pr_unit,-Branch_resistance_X_pr_unit) %>%
+  left_join(select(nodes, from = Bus_Number, Name), by = "from")%>%
+  left_join(select(nodes, to = Bus_Number, Name), by = "to") %>%
+  mutate(Link = paste(Name.x, Name.y, sep = "-")) %>%
+  select(-Name.x,-Name.y) %>%
+  group_by(from, to) %>%
+  #Remove parallel lines summing the susceptances
+  summarise(Y = sum(Y),
+            Link = first(Link)) 
+  
+
+  nodes2 <-nodes %>% select(-nearZeroVar(.)) %>%
+    mutate(Net_Generation = Generation_MW - Load_MW)
+
+
+IEEE_118 <- graph_from_data_frame(edges2, vertices = nodes2, directed = FALSE)
+
+SlackRef <- SlackRefFunc(IEEE118, name = "name", Generation = "Generation_MW")
+
+IEEE_118 <- PowerFlow(IEEE118, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
+
+
+test2 <- as_data_frame(test)
+
+node_power <- nodes2 %>%
+  filter(Net_Generation>0)%>%
+  pull(Net_Generation) %>% sum
+
+test3 <- Create_balanced_blocks(test_IEEE, force = "Net_Generation")
+
+
+test3[[11]] %>% plot
+
+
+NodePosition <- test2 %>%
+  select(from, to, Link, PowerFlow) %>%
+  gather(key = type, value = Node, -Link, -PowerFlow)
+
+ set.seed(158)
+  BaseCoords <- layout_with_fr(test_IEEE) %>% 
+    as_tibble %>% 
+    mutate(Node = names(V(test_IEEE))) %>%
+    rename(Longitude = V1,
+           Latitude = V2) %>%
+    left_join(NodePosition, .) %>%
+    left_join(nodes2 %>% 
+                select(Node = Bus_Number, Name, Net_Generation) %>% 
+                mutate(Node = as.character(Node),
+                       Node_type = case_when(Net_Generation ==0 ~"Transmission",
+                                        Net_Generation > 0 ~"Generation",
+                                        TRUE ~"Demand")), .)
+
+  BaseCoords %>%
+  ggplot(aes(x = Longitude, y = Latitude, group = Link)) + geom_line() +  
+    geom_point(aes(shape = Node_type, colour = Node_type))
+  
+    BaseCoords %>%
+  ggplot(aes(x = Longitude, y = Latitude, group = Link, colour = abs(PowerFlow))) + geom_line() +  
+    geom_point(aes(shape = Node_type), size = 2)+
+    scale_color_viridis_c()
+    
+```
+
+
+```{r}
+g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
+#Ensure there is powerflow
+SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
+g <- PowerFlow(g, SlackRef$name) #calculate power flow
+```
+
+
+
+```{r}
+  gProp <- Proportional_Load(IEEE_118, alpha = 2)
+
+
+NetworkList <- list(list(gProp))
+
+
+set.seed(32432)
+DeletionOrder <- MultiAttackOrder(IEEE_118, 10)[1,-1] %>% t %>% .[,1] 
+
+FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder))
+#suppres attack the grid messages
+AttackSeries <-AttackTheGrid(NetworkList,
+                             FixedNodes,
+                             referenceGrid = NULL,
+                             MinMaxComp = 0,
+                             TotalAttackRounds = 1000,
+                             CascadeMode = TRUE,
+                             Demand = "Load_MW",
+                             Generation = "Generation_MW",
+                             EdgeName = "Link", 
+                             VertexName = "name", 
+                             Net_generation = "Net_Generation")
+
+    AttackSeries <-suppressMessages(AttackTheGrid(list(list(g)),
+                                                  FixedNodes,
+                                                  referenceGrid = NULL,
+                                                  MinMaxComp,
+                                                  TotalAttackRounds,
+                                                  CascadeMode,
+                                                  Generation = Generation,
+                                                  EdgeName = EdgeName,
+                                                  VertexName = VertexName,
+                                                  Net_generation = Net_generation))
+
+    
+    AttackStrategy <- FixedNodes
+
+```
+
+
+#IEEE 118 proportional attack
+
+
+```{r}
+set.seed(21256)
+DeleteOrders <- MultiAttackOrder(IEEE118, 100)  
+
+
+#The vector of alpha values to be tested
+alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50)
+setwd(file.path(Saved_Sims, "IEEE118"))
+
+#Create the simulations for each of the alpha avalues using 100 simulations for each
+alpha_vector %>% walk(~{
+  gProp <- Proportional_Load(test_IEEE, alpha = .x)
+  
+  folder <- paste0("alpha_value_",  .x*100)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+  SaveMultiAttacks(gProp, DeleteOrders, folder, 
+                   TotalAttackRounds = 1000, 
+                   CascadeMode = T,
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   EdgeName = "Link", 
+                   VertexName = "name", 
+                   Net_generation = "Net_Generation")
+  
+}
+  
+)
+
+```
+
