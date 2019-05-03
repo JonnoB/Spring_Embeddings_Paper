@@ -39,8 +39,6 @@ if(length(new.packages)) install.packages(new.packages)
 
 sapply(packages, library, character.only = TRUE)
 
-
-lapply(packages, library, character.only = TRUE)
 library(PowerGridNetworking)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
@@ -1344,7 +1342,7 @@ test3 %>%
 
 
 
-theta range
+#theta range
 ```{r}
  
  pair_network <- expand.grid(flow = c(1,0.5), alpha=1.8#seq(0,1, 0.01), alpha = c(Inf, 1)
@@ -1426,44 +1424,242 @@ test %>%
 ```
 
 
+
+#IEEE118
+
+find the angle of IEEE 118 using a range of different proportional loadings.
+
+##Find stabil state for all alpha
+
 ```{r}
 
-Adjmat
+IEEE_Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
 
-LineEdge <- matrix(c(-1)) %>% t
-k <- 100
-n <- 1
-kmat <- matrix(rep(0, n))
-diag(kmat) <-k
+IEEE_118 <- readRDS(file.path(IEEE_Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
 
-kmat
+alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50)
 
-B <- t(LineEdge) %*% kmat %*% LineEdge
-
-fvect <- matrix(c(1,-1))
-
-sqrt((solve(B)*1 +1)^2 -1)
-
-
-
-A <- CreateTransmission(toy1, "Link")[,-1]
-K <- diag(get.edge.attribute(toy1, "E"))
-
-B <- t(A) %*% K %*% A
-
-elongation <- solve(B) %*% (matrix(get.vertex.attribute(toy1, "Force")[-1]))
-
-Line_delta_z <-as.tibble(sqrt((abs(elongation)+1)^2-1)) %>%
-  mutate(EdgeName = get.edge.attribute(toy1, "Link")) %>%
-  select(EdgeName, delta_z = V1)
-
-.24+0.822
-
-
-elongation2 <-  K %*% A %*% solve(B) %*% (matrix(get.vertex.attribute(toy1, "Force")[-1]))
-
-Line_delta_z$delta_z/(abs(elongation)+1)/get.edge.attribute(toy1, "E")
+alpha_vector%>% walk(~{
+  
+  alpha <- .x
+  
+  print(paste("alpha value", alpha))
+  
+  IEEE_118  <- IEEE_118 %>%
+    Proportional_Load(., alpha = alpha) %>% 
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+    set.edge.attribute(., "Area", value = 1)
+  
+  # block 83 single iteration to complete
+  
+  
+  List_of_BiConComps <- Create_balanced_blocks(IEEE_118, force = "Net_Generation")
+  
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+  OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = 0.05, tol = 1e-10, distance = "distance", 
+                                      maxIter = 16000, mass = 5000)
+  
+  final_z <- Create_stabilised_blocks(IEEE_118, OriginBlock, 11, force = "Net_Generation", 
+                                      tstep = 0.05, tol = 1e-10, distance = "distance",
+                                      maxIter = 16000, mass = 5000)
+  
+  write_rds(final_z, file.path(IEEE_Project_folder, "Solved_height_networks", paste0("IEEE_118_alpha_", alpha, ".rds")))
+})
 
 ```
 
+```{r}
+
+```
+
+
+
+###normalising the load
+
+This function allows the node power and edge capacities to be normalised to allow easier comparison across networks.
+```{r}
+Normalize_load <- function(force = "PowerFlow", capacity = "Link.Limit")
+```
+
+##calculate theta by alpha
+
+```{r}
+angle_from_solved_heights <- function(height_solution){
+  #This function creates a dataframe with the network theta from a solved height dataframe.
+   max_height_diff <- height_solution %>% 
+      arrange(z) %>%
+      slice(1, n()) 
+    
+    max_height_diff2 <- max(max_height_diff$z)-min(max_height_diff$z)
+    
+    #indexing only works on the IEEE graphs as the node name is ther vertex number
+    Adjacent <- distances(IEEE_118, v = max_height_diff$node[1], to = max_height_diff$node[2])
+    
+    Graph_theta <- atan(max_height_diff2/Adjacent)[1,1]
+    
+    Graph_theta*360/(2*pi)
+    
+  Out <- tibble(
+           theta_rads= Graph_theta,
+           theta_degs = Graph_theta*360/(2*pi)
+           )
+  
+  return(Out)
+}
+
+
+IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE) %>%
+  map_df(~{
+    read_rds(.x) %>%
+    angle_from_solved_heights(.) %>%
+    mutate(alpha = basename(.x),
+           )  
+  }) %>%
+  mutate(alpha = gsub("IEEE_118_alpha_", "", alpha) %>%
+           gsub(".rds", "",.) %>% as.numeric())
+
+IEEE_theta_by_alpha_ec_2 <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks_alpha_2"), full.names = TRUE) %>%
+  map_df(~{
+    read_rds(.x) %>%
+    angle_from_solved_heights(.) %>%
+    mutate(alpha = basename(.x))  
+  }) %>%
+  rename(v = alpha) %>%
+  mutate(v = gsub("IEEE_118_v_", "", v) %>%
+           gsub(".rds", "",.) %>% as.numeric )%>% 
+  arrange(v) %>% 
+  bind_cols(target_orders) #This is the target orders from the IEEE script
+
+
+
+test <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha"))[-1] %>%
+  map_df(~{
+    
+    Out <- list.files(.x, full.names = TRUE) %>%
+      map_df(~{
+        read_rds(.x) %>%
+          angle_from_solved_heights(.) %>%
+          mutate(alpha = basename(.x))  
+      }) %>%
+      rename(v = alpha) %>%
+      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
+              v = gsub("IEEE_118_v_", "", v) %>%
+                gsub(".rds", "",.) %>% as.numeric )%>% 
+      arrange(v) #%>% 
+     # bind_cols(target_orders) #This is the target orders from the IEEE script
+    
+    return(Out)
+    
+  })
+
+
+```
+
+
+##load all sims and find critical threshold
+
+```{r}
+
+
+critical_threshold <- function(g){
+  #finds the critical threshold according to the molly reed criterion
+  node_degree <-degree(g)
+  k2_over_k <- mean(node_degree^2)/mean(node_degree)
+  
+  Out <- 1- 1/(k2_over_k-1)
+  
+  return(Out)
+}
+
+#perc of nodes that need to be removed to lose giant component
+critical_threshold(IEEE_118)
+
+#remaining nodes
+IEEE_118_critical <- round(118- critical_threshold(IEEE_118)*118, 0)
+
+#Proportional loading
+ExtractAttackStats(file.path(IEEE_Project_folder, "IEEE118"), 
+                   file.path(IEEE_Project_folder, "SummaryData"),
+                   Generation = "Net_Generation",
+                   EdgeName = "Link")
+
+
+#scrambled edges alpha 2
+ExtractAttackStats(file.path(IEEE_Project_folder, "IEEE1118_const_ec"), 
+                   file.path(IEEE_Project_folder, "SummaryData_ec_alpha_2"),
+                   Generation = "Net_Generation",
+                   EdgeName = "Link")
+
+
+
+AttackRoundData <- list.files(path = file.path(IEEE_Project_folder,"SummaryData"), 
+                              pattern = ".rds", 
+                              full.names = TRUE) %>%
+   map_df(~read_rds(.x))   %>%
+  arrange(-TotalNodes) %>%
+  filter(TotalNodes<= IEEE_118_critical) %>%
+  group_by(simulationID, alpha) %>%
+  summarise_all(first) %>%
+  mutate(alpha = gsub("alpha_value_", "", alpha) %>% 
+           as.numeric()/100)
+
+
+AttackRoundData_ec_alpha_2  <-  list.files(path = file.path(IEEE_Project_folder,"SummaryData_ec_alpha_2"), 
+                              pattern = ".rds", 
+                              full.names = TRUE) %>%
+   map_df(~read_rds(.x))     %>%
+  arrange(-TotalNodes) %>%
+  filter(TotalNodes<= IEEE_118_critical) %>%
+  group_by(simulationID, alpha) %>%
+  summarise_all(first) %>%
+  rename(v = alpha) %>%
+  mutate(v = gsub("constant_ec_v", "", v) %>% 
+           as.integer) %>%
+  left_join(IEEE_theta_by_alpha_ec_2 %>% select(v, alpha), by = "v")
+
+
+theta_crit_thresh <- AttackRoundData %>%
+  group_by(alpha) %>%
+  summarise_all(mean) %>%
+  left_join(IEEE_theta_by_alpha)
+
+
+theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_2  %>%
+  group_by(alpha) %>%
+  select(-v) %>%
+  summarise_all(mean) %>%
+  left_join(IEEE_theta_by_alpha_ec_2) %>% mutate(type = "ec_2")
+
+AttackRoundData %>%
+  ggplot(aes(x = NodesAttacked, y = TotalNodes, colour = alpha)) + geom_point()
+
+AttackRoundData %>%
+  ggplot(aes(x = alpha, y = NodesAttacked, fill = alpha)) + geom_boxplot()
+
+
+theta_crit_thresh %>%
+  ggplot(aes(x = NodesAttacked, y = theta_degs)) + geom_line()
+
+
+test <- theta_crit_thresh %>%
+  select(alpha, NodesAttacked, theta_degs) %>%
+  gather(key = type, value = value, -NodesAttacked) 
+
+test2 <- theta_crit_thresh_ec_2 %>%
+               select(alpha, NodesAttacked, theta_degs) %>%
+               gather(key = type, value = value, -NodesAttacked) %>% 
+               mutate(type2 = "ec_2")
+
+test %>%
+  ggplot(aes(x = value, y = NodesAttacked)) + geom_line() +
+   geom_point(data = test2, aes(colour = type2)) +
+  facet_grid(~type, scales = "free_x") +
+  labs(title = "Comparing theta for different alpha and excess capacity levels", 
+       y = "Nodes Attacked")
+ggsave(file.path(FiguresFolder, "Theta_vs_alpha_ec_118.pdf"))
+
+```
 

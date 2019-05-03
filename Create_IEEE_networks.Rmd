@@ -14,7 +14,8 @@ editor_options:
 
 ```{r}
 IEEE_data_folder <- file.path(basewd, "IEEE power flow data")
-Saved_Sims <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
 
 ```
 
@@ -77,21 +78,19 @@ edges2 <- edges %>%
 
 IEEE_118 <- graph_from_data_frame(edges2, vertices = nodes2, directed = FALSE)
 
-SlackRef <- SlackRefFunc(IEEE118, name = "name", Generation = "Generation_MW")
+SlackRef <- SlackRefFunc(IEEE_118, name = "name", Generation = "Generation_MW")
 
-IEEE_118 <- PowerFlow(IEEE118, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
+IEEE_118 <- PowerFlow(IEEE_118, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
 
-
-test2 <- as_data_frame(test)
-
-node_power <- nodes2 %>%
-  filter(Net_Generation>0)%>%
-  pull(Net_Generation) %>% sum
-
-test3 <- Create_balanced_blocks(test_IEEE, force = "Net_Generation")
+saveRDS(IEEE_118, file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
+    
+```
 
 
-test3[[11]] %>% plot
+#Plot 118
+
+```{r}
+test2 <- as_data_frame(IEEE_118)
 
 
 NodePosition <- test2 %>%
@@ -99,9 +98,9 @@ NodePosition <- test2 %>%
   gather(key = type, value = Node, -Link, -PowerFlow)
 
  set.seed(158)
-  BaseCoords <- layout_with_fr(test_IEEE) %>% 
+  BaseCoords <- layout_with_fr(IEEE_118) %>% 
     as_tibble %>% 
-    mutate(Node = names(V(test_IEEE))) %>%
+    mutate(Node = names(V(IEEE_118))) %>%
     rename(Longitude = V1,
            Latitude = V2) %>%
     left_join(NodePosition, .) %>%
@@ -120,57 +119,6 @@ NodePosition <- test2 %>%
   ggplot(aes(x = Longitude, y = Latitude, group = Link, colour = abs(PowerFlow))) + geom_line() +  
     geom_point(aes(shape = Node_type), size = 2)+
     scale_color_viridis_c()
-    
-```
-
-
-```{r}
-g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
-#Ensure there is powerflow
-SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
-g <- PowerFlow(g, SlackRef$name) #calculate power flow
-```
-
-
-
-```{r}
-  gProp <- Proportional_Load(IEEE_118, alpha = 2)
-
-
-NetworkList <- list(list(gProp))
-
-
-set.seed(32432)
-DeletionOrder <- MultiAttackOrder(IEEE_118, 10)[1,-1] %>% t %>% .[,1] 
-
-FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder))
-#suppres attack the grid messages
-AttackSeries <-AttackTheGrid(NetworkList,
-                             FixedNodes,
-                             referenceGrid = NULL,
-                             MinMaxComp = 0,
-                             TotalAttackRounds = 1000,
-                             CascadeMode = TRUE,
-                             Demand = "Load_MW",
-                             Generation = "Generation_MW",
-                             EdgeName = "Link", 
-                             VertexName = "name", 
-                             Net_generation = "Net_Generation")
-
-    AttackSeries <-suppressMessages(AttackTheGrid(list(list(g)),
-                                                  FixedNodes,
-                                                  referenceGrid = NULL,
-                                                  MinMaxComp,
-                                                  TotalAttackRounds,
-                                                  CascadeMode,
-                                                  Generation = Generation,
-                                                  EdgeName = EdgeName,
-                                                  VertexName = VertexName,
-                                                  Net_generation = Net_generation))
-
-    
-    AttackStrategy <- FixedNodes
-
 ```
 
 
@@ -179,16 +127,16 @@ AttackSeries <-AttackTheGrid(NetworkList,
 
 ```{r}
 set.seed(21256)
-DeleteOrders <- MultiAttackOrder(IEEE118, 100)  
+DeleteOrders <- MultiAttackOrder(IEEE_118, 100)  
 
 
 #The vector of alpha values to be tested
-alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50)
-setwd(file.path(Saved_Sims, "IEEE118"))
+alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
+setwd(file.path(Project_folder, "IEEE118"))
 
 #Create the simulations for each of the alpha avalues using 100 simulations for each
 alpha_vector %>% walk(~{
-  gProp <- Proportional_Load(test_IEEE, alpha = .x)
+  gProp <- Proportional_Load(IEEE_118, alpha = .x)
   
   folder <- paste0("alpha_value_",  .x*100)
   #create folder if it doesn't already exist
@@ -198,7 +146,7 @@ alpha_vector %>% walk(~{
   
   SaveMultiAttacks(gProp, DeleteOrders, folder, 
                    TotalAttackRounds = 1000, 
-                   CascadeMode = T,
+                   CascadeMode = TRUE,
                    Demand = "Load_MW",
                    Generation = "Generation_MW",
                    EdgeName = "Link", 
@@ -209,5 +157,130 @@ alpha_vector %>% walk(~{
   
 )
 
+
+```
+
+#Create all target orders
+
+```{r}
+
+if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
+  
+  set.seed(123)
+  random_seeds <- sample(1:100000, 10000)
+  
+  target_orders <- c(1.05, 1.1, 1.2, 1.5, 2) %>% map_df(~{
+    
+    print(.x)
+    #load network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
+    #permute edges
+    print("creating the random permutations")
+    seed_alpha <- Permute_excess_capacity(Scrambled_edge_cap, random_seeds)
+    #take subselection
+    target_orders <- sub_selection_of_seed_alpha(seed_alpha, total_samples = 10, seed = 123) %>%
+      mutate(ec = .x)
+    
+    return(target_orders)
+    
+  })
+  
+  saveRDS(target_orders, file.path(Project_folder, "target_orders.rds"))
+  
+} else {
+  
+  target_orders  <- readRDS(file.path(Project_folder, "target_orders.rds"))
+  
+}
+
+
+
+
+```
+
+
+#Do a multi-attack on each fixed ec
+
+```{r}
+
+c(1.05, 1.1, 1.2, 1.5, 2) %>% walk(~{
+  
+  target_orders<- target_orders %>% 
+    filter(ec == .x)
+  
+  folder <- paste0("alpha_value_",  .x*100) %>%
+    file.path(Project_folder, "IEEE_permute_edge_ec", .)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+  #attack network using the deletion orders
+  setwd(folder)
+  Scrambled_Edge_SaveMultiAttacks(target_orders, Scrambled_edge_cap, "constant_ec_v", DeleteOrders[1:15,])
+  
+})
+
+seed_alpha %>%
+  ggplot(aes(x = alpha)) + geom_density()
+
+```
+
+
+#calculate the angle of the selected networks
+
+```{r}
+
+for(n in c(1.05, 1.1, 1.2, 1.5, 2)){
+  
+  target_orders2 <- target_orders %>% 
+    filter(ec == n)
+  
+  alpha_folder <-  paste0("Solved_height_networks_alpha_", n*100) %>%
+    file.path(Project_folder, "constant_ec_from_alpha", .)
+  #create folder if it doesn't already exist
+  if(!file.exists(alpha_folder)){
+    dir.create(alpha_folder)
+  }
+  
+  1:nrow(target_orders2) %>% walk(~{
+    
+    alpha <- .x
+    
+    print(paste("alpha value", alpha))
+    
+    set.seed(target_orders2$seed[.x])
+    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
+    
+    temp <- as_data_frame(Scrambled_edge_cap) %>%
+      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
+             ec2 = ec[ec_order], #change order of excess capacity
+             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
+             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
+    
+    print(mean(temp$alpha))
+    
+    current_graph <- Scrambled_edge_cap %>%
+      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
+      set.edge.attribute(. , "distance", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+      set.edge.attribute(., "Area", value = 1)
+    
+    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+    
+    #use the largest block to set the simulation parameters k and m.
+    #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+    OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
+                                        tstep = 0.03, tol = 1e-10, distance = "distance",
+                                        maxIter = 8000, mass = 5000)
+    
+    final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation",
+                                        tstep = 0.03, tol = 1e-10, distance = "distance",
+                                        maxIter = 8000, mass = 5000)
+    
+    write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", alpha, ".rds")))
+  })
+  
+}
 ```
 

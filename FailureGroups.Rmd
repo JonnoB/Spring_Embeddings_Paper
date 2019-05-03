@@ -341,15 +341,13 @@ if (NextSim==Inf) break #Stops function making error on last iteration
 
 #Animation
 ```{r}
-
+#There is a problem with the 1st simulation of real limits this needs to be checked
 RoundRemovedReal <- AllRemovedNodes %>%
-  filter(alpha == "Real_Limits", type == "Edge", Sim == "Simulation_ID_1") %>%
+  filter(alpha == "Real_Limits", type == "Edge", Sim == "Simulation_ID_2") %>%
   select(Name:RemovalType)
 
 
-
-#test comes from the ggGeoPlot chunk in prop loading
-test3 <-test2 %>%
+test3 <-  MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))   %>%
   left_join(RoundRemovedReal, by = c("Link" = "Name"))
 
 
@@ -367,7 +365,7 @@ p <- test4 %>%
          PositionType = factor(PositionType),
          PositionType = fct_relevel(PositionType, "Geo Space", after = 0),
          PresentInRound = factor(PresentInRound)) %>%
-  ggplot(aes(x = V1, y = V2)) + 
+  ggplot(aes(x = Longitude, y = Latitude)) + 
   geom_line(aes(colour = Voltage, group = Link)) +
   facet_grid(~PositionType, scales = "free") +
   theme(axis.title.x=element_blank(),
@@ -378,7 +376,16 @@ p <- test4 %>%
         axis.ticks.y=element_blank()) + 
   transition_manual(PresentInRound)
 
-anim_save(file = file.path(basewd, "CollapseOfGrid1.gif"))
+anim_save(filename = file.path(basewd, "CollapseOfGrid1.gif"))
+
+
+library(gganimate)
+anim <- ggplot(mtcars, aes(factor(gear), mpg)) +
+  geom_boxplot() +
+  transition_manual(gear)
+
+
+anim
 
 ```
 
