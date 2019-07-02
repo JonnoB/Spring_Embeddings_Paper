@@ -21,6 +21,20 @@ IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
 
 
 ```{r}
+  ForceV_from_angle <- function(target_angle = 5*pi/12, k, d=temp$d){
+    
+    tibble(H = sqrt(d^2 * (1 + tan(target_angle)^2)),
+           ForceT = k*(H-d), 
+           ForceV = ForceT*sin(target_angle)) %>%
+      pull(ForceV)
+    
+  }
+```
+
+
+
+#Create the network
+```{r}
 test <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
                        delim = " ",
                        #skip = 2,
@@ -46,6 +60,15 @@ nodes <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
                    n_max = card_end[1]-1-skip) %>%
   set_names(c("Bus_Number", "Name", "Area_Number", "drop", "Loss_zone", "Type" , "final_voltage_pu", "final_angle_degs", "Load_MW", "LOAD_MVAR", "Generation_MW", "Generation_MVAR", "Base_KV", "Desired_volts_pu", "Max_MVAR", "Min_MVAR", "Conductance", "Susceptance", "Remote_controlled_Bus_number" ))
 
+
+#A couple of node names appear twice, so I use the Bus number as the official name of the node
+#This causes issues to do with the edge name
+test <- nodes %>%
+  group_by(Bus_Number, Name) %>%
+  summarise(counts = n()) %>%
+  group_by(Name) %>%
+  summarise(counts = n()) %>%
+  filter(counts>1)
 
 skip <- card_end[1]+1
 edges <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
@@ -78,6 +101,12 @@ edges2 <- edges %>%
 
 IEEE_118 <- graph_from_data_frame(edges2, vertices = nodes2, directed = FALSE)
 
+#The forces need balancing
+IEEE_118 <-  BalencedGenDem(IEEE_118, 
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   OutputVar = "Net_Generation")
+
 SlackRef <- SlackRefFunc(IEEE_118, name = "name", Generation = "Generation_MW")
 
 IEEE_118 <- PowerFlow(IEEE_118, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
@@ -90,7 +119,9 @@ saveRDS(IEEE_118, file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 #Plot 118
 
 ```{r}
-test2 <- as_data_frame(IEEE_118)
+test2 <- as_data_frame(IEEE_118) %>%
+  mutate(absPF = abs(PowerFlow),
+         rank = rank(absPF))
 
 
 NodePosition <- test2 %>%
@@ -117,8 +148,9 @@ NodePosition <- test2 %>%
   
     BaseCoords %>%
   ggplot(aes(x = Longitude, y = Latitude, group = Link, colour = abs(PowerFlow))) + geom_line() +  
-    geom_point(aes(shape = Node_type), size = 2)+
+    geom_point(aes(shape = Node_type), size = 2) +
     scale_color_viridis_c()
+
 ```
 
 
@@ -126,12 +158,52 @@ NodePosition <- test2 %>%
 
 
 ```{r}
+
+IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
+setwd(file.path(Project_folder, "IEEE118_edges"))
+
+rep <-5
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200)[c(0,6,12)+rep]
+alpha_vector
 set.seed(21256)
-DeleteOrders <- MultiAttackOrder(IEEE_118, 100)  
+DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
+
+#Create the simulations for each of the alpha avalues using 100 simulations for each
+alpha_vector %>% walk(~{
+  gProp <- Proportional_Load(IEEE_118, alpha = .x)
+  
+  folder <- paste0("alpha_value_",  .x*100)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+  SaveMultiAttacks(gProp, DeleteOrders, folder, 
+                   TotalAttackRounds = 1000, 
+                   CascadeMode = TRUE,
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   EdgeName = "Link", 
+                   VertexName = "name", 
+                   Net_generation = "Net_Generation",
+                   Target = "Edges")
+  
+}
+
+)
+
+
+
+```
+
+
+```{r}
+set.seed(21256)
+DeleteOrders <- MultiAttackOrder(IEEE_118, Sims = 100)  
 
 
 #The vector of alpha values to be tested
-alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
+alpha_vector <- c(1, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
 setwd(file.path(Project_folder, "IEEE118"))
 
 #Create the simulations for each of the alpha avalues using 100 simulations for each
@@ -154,8 +226,51 @@ alpha_vector %>% walk(~{
                    Net_generation = "Net_Generation")
   
 }
-  
+
 )
+
+
+
+
+
+
+alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
+setwd(file.path(Project_folder, "Max_vulnerability"))
+
+#Create the simulations for each of the alpha avalues using 100 simulations for each
+alpha_vector %>% walk(~{
+  
+  gProp <- Proportional_Load(IEEE_118, alpha = .x)
+  
+  folder <- paste0("alpha_value_",  .x*100)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+Total_Flow <- get.edge.attribute(gProp, "PowerFlow") %>% abs %>% sum
+
+Total_Capacity <- Total_Flow*.x  
+
+Excess_Capacity <- Total_Capacity - Total_Flow
+
+temp <- as_data_frame(gProp) %>%
+  mutate(Link.Limit = ifelse(abs(PowerFlow) == min(abs(PowerFlow)), abs(PowerFlow) + Excess_Capacity, abs(PowerFlow)),
+         alpha = Link.Limit/abs(PowerFlow))
+
+  SaveMultiAttacks(gProp, DeleteOrders, folder, 
+                   TotalAttackRounds = 1000, 
+                   CascadeMode = TRUE,
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   EdgeName = "Link", 
+                   VertexName = "name", 
+                   Net_generation = "Net_Generation")
+  
+}
+
+)
+
 
 
 ```
@@ -169,17 +284,18 @@ if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
   set.seed(123)
   random_seeds <- sample(1:100000, 10000)
   
-  target_orders <- c(1.05, 1.1, 1.2, 1.5, 2) %>% map_df(~{
+  target_orders <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) %>% map_df(~{
     
     print(.x)
-    #load network
+    #create network
     Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
     #permute edges
     print("creating the random permutations")
     seed_alpha <- Permute_excess_capacity(Scrambled_edge_cap, random_seeds)
     #take subselection
     target_orders <- sub_selection_of_seed_alpha(seed_alpha, total_samples = 10, seed = 123) %>%
-      mutate(ec = .x)
+      mutate(ec = .x,
+             v = 1:n())
     
     return(target_orders)
     
@@ -201,15 +317,15 @@ if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
 
 #Do a multi-attack on each fixed ec
 
+##Node attack
 ```{r}
-
-c(1.05, 1.1, 1.2, 1.5, 2) %>% walk(~{
+c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) %>% walk(~{
   
-  target_orders<- target_orders %>% 
+  target_orders_x<- target_orders %>% 
     filter(ec == .x)
   
   folder <- paste0("alpha_value_",  .x*100) %>%
-    file.path(Project_folder, "IEEE_permute_edge_ec", .)
+    file.path(Project_folder, "IEEE_permute_edge_ec_Node", .)
   #create folder if it doesn't already exist
   if(!file.exists(folder)){
     dir.create(folder)
@@ -217,21 +333,112 @@ c(1.05, 1.1, 1.2, 1.5, 2) %>% walk(~{
   
   #attack network using the deletion orders
   setwd(folder)
-  Scrambled_Edge_SaveMultiAttacks(target_orders, Scrambled_edge_cap, "constant_ec_v", DeleteOrders[1:15,])
+  #create network
+  Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
+  #attack!
+  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders)
   
 })
-
-seed_alpha %>%
+  
+  seed_alpha %>%
   ggplot(aes(x = alpha)) + geom_density()
+```
+
+##Edge attack
+```{r}
+IEEE_118<- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
+set.seed(21256)
+DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
+c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) 
+1.2 %>% walk(~{
+  
+  target_orders_x <- target_orders %>% 
+    filter(ec == .x)
+  
+  folder <- paste0("alpha_value_",  .x*100) %>%
+    file.path(Project_folder, "IEEE_permute_edge_ec_Edge", .)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+  #attack network using the deletion orders
+  setwd(folder)
+  #create network
+  Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
+  #attack!
+  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders, Target = "Edges")
+  
+})
 
 ```
 
 
 #calculate the angle of the selected networks
 
+
+The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
+```{r}
+common_time <- 0.01
+common_Iter <- 1
+common_tol <- 1e-10
+common_mass <- 5000
+```
+
+
+##Propoortionally loaded angles
+
+```{r}
+IEEE_Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+
+IEEE_118 <- readRDS(file.path(IEEE_Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
+
+
+
+#Network loadings to find the angles for
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 2.5, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
+
+#calculate theta for all values of alpha
+alpha_vector %>% walk(~{
+  
+  alpha <- .x
+  
+  print(paste("alpha value", alpha))
+  
+  current_graph  <- IEEE_118 %>%
+    Proportional_Load(., alpha = alpha) %>% 
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+    set.edge.attribute(., "Area", value = 1)
+  
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+  
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+  OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
+  
+  final_z2 <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation", 
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
+  
+  write_rds(final_z, file.path(IEEE_Project_folder, "Solved_height_networks", paste0("IEEE_118_alpha_", alpha, ".rds")))
+})
+
+
+test <-OriginBlock$results
+
+test %>% ggplot(aes(x = t, y = z)) + geom_line()
+
+```
+
+
+##Scrambled edge angles
+
 ```{r}
 
-for(n in c(1.05, 1.1, 1.2, 1.5, 2)){
+for(n in c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)){
   
   target_orders2 <- target_orders %>% 
     filter(ec == n)
@@ -243,11 +450,13 @@ for(n in c(1.05, 1.1, 1.2, 1.5, 2)){
     dir.create(alpha_folder)
   }
   
-  1:nrow(target_orders2) %>% walk(~{
+ 1:nrow(target_orders2) %>% walk(~{
     
-    alpha <- .x
+    ID <- .x
     
-    print(paste("alpha value", alpha))
+    print(paste("alpha value", ID))
+    #create network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = n)
     
     set.seed(target_orders2$seed[.x])
     ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
@@ -271,16 +480,242 @@ for(n in c(1.05, 1.1, 1.2, 1.5, 2)){
     #use the largest block to set the simulation parameters k and m.
     #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
     OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = 0.03, tol = 1e-10, distance = "distance",
-                                        maxIter = 8000, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass)
     
     final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation",
-                                        tstep = 0.03, tol = 1e-10, distance = "distance",
-                                        maxIter = 8000, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass)
     
-    write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", alpha, ".rds")))
+    write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds")))
   })
   
 }
+```
+
+
+#explore convergence
+
+It seems that the algorithm is not converging properly.
+I am getting large difference between the infinite model and the a = 10 random ex model.
+This below chunk tries to test if 16k and t = 0.3 is good enough, or just what is going on
+
+```{r}
+
+  target_orders2 <- target_orders %>% 
+    filter(ec == 10) #set the ec level
+
+ID <- 6 #for v = 6 which has large deviations at the moment
+ print(paste("alpha value", ID))
+    #create network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = n)
+    
+    set.seed(target_orders2$seed[ID])
+    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
+    
+    temp <- as_data_frame(Scrambled_edge_cap) %>%
+      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
+             ec2 = ec[ec_order], #change order of excess capacity
+             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
+             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
+    
+    print(mean(temp$alpha))
+    
+    current_graph <- Scrambled_edge_cap %>%
+      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
+      set.edge.attribute(. , "distance", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+      set.edge.attribute(., "Area", value = 1)
+    
+    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+    
+    
+    OriginBlock_ec_10_6 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                            tstep = 0.01, tol = 1e-10, distance = "distance", 
+                                            maxIter =  16000*3, mass = 5000)
+    
+    ec_10_6 <- Create_stabilised_blocks(current_graph, OriginBlock_ec_10_6, 11, force = "Net_Generation", 
+                                      tstep = 0.01, tol = 1e-10, distance = "distance",
+                                      maxIter = 16000*3, mass = 5000)
+    
+
+  params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
+    
+  param_check <- 1:nrow(params) %>%
+    map_df(~{
+      
+          OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
+                                        tstep = params$tstep[.x], tol = 1e-10, distance = "distance",
+                                        maxIter = params$Iterations[.x], mass = 5000)$NodeList %>%
+            mutate(tstep = params$tstep[.x],
+                   maxIter = params$Iterations[.x])
+      return(OriginBlock)
+    })
+  
+  saveRDS(param_check, file.path(Project_folder, "Param_check.rds"))
+  
+  #Infinity topological loading
+param_Inf <-  "/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks/IEEE_118_alpha_Inf.rds" 
+
+  
+  check_node_height <- param_check %>%
+        mutate(type = paste("type",tstep, maxIter, sep = "_")) %>%
+    select(node, z, type) %>%
+    spread(key = type, value = z) %>%
+    mutate(diff = type_0.01_144000-type_0.03_16000,
+           abs_diff = abs(diff))
+  
+```
+
+##10k edge
+```{r}
+ID <- 6 #for v = 6 which has large deviations at the moment
+ print(paste("alpha value", ID))
+    #create network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = 10000)
+    
+   # set.seed(target_orders2$seed[ID])
+    #ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
+    
+    temp <- as_data_frame(Scrambled_edge_cap) %>%
+      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
+             ec2 = ec, #order of excess capacity not changed
+             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
+             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
+    
+    print(mean(temp$alpha))
+    
+    current_graph <- Scrambled_edge_cap %>%
+      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
+      set.edge.attribute(. , "distance", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+      set.edge.attribute(., "Area", value = 1)
+    
+    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+    
+      OriginBlock_10k <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = 0.01, tol = 1e-10, distance = "distance", 
+                                      maxIter = 16000*9, mass = 5000)
+  
+  alpha_10k <- Create_stabilised_blocks(current_graph, OriginBlock_10k, 11, force = "Net_Generation", 
+                                      tstep = 0.01, tol = 1e-10, distance = "distance",
+                                      maxIter = 16000*9, mass = 5000)
+```
+
+
+##Infity edge
+
+```{r}
+ID <- 6 #for v = 6 which has large deviations at the moment
+ print(paste("alpha value", ID))
+    #create network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = Inf)
+    
+    set.seed(target_orders2$seed[ID])
+    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
+    
+    temp <- as_data_frame(Scrambled_edge_cap) %>%
+      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
+             ec2 = ec[ec_order], #change order of excess capacity
+             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
+             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
+    
+    print(mean(temp$alpha))
+    
+    current_graph <- Scrambled_edge_cap %>%
+      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
+      set.edge.attribute(. , "distance", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+      set.edge.attribute(., "Area", value = 1)
+    
+    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+    
+      OriginBlock_Inf <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = 0.01, tol = 1e-10, distance = "distance", 
+                                      maxIter = 16000, mass = 5000)
+  
+  alpha_Inf <- Create_stabilised_blocks(current_graph, OriginBlock_Inf, 11, force = "Net_Generation", 
+                                      tstep = 0.01, tol = 1e-10, distance = "distance",
+                                      maxIter = 16000, mass = 5000)
+  
+  #params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
+    
+  param_check <- 1:nrow(params) %>%
+   map_df(~{
+      
+          OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
+                                        tstep = params$tstep[1], tol = 1e-10, distance = "distance",
+                                        maxIter = params$Iterations[1], mass = 5000)$NodeList %>%
+            mutate(tstep = params$tstep[1],
+                   maxIter = params$Iterations[1])
+      return(OriginBlock)
+    })
+
+```
+
+
+#analysis of angles
+
+Even after doing a 0.01 timestep and over 140k reps the angle is still way off
+I don't understand what is happening
+
+```{r}
+alpha_Inf_15k <- alpha_Inf %>%
+    Calc_weighted_angle(IEEE_118, .)  
+
+
+alpha_Inf_15k2 <- final_z %>%
+    Calc_weighted_angle(IEEE_118, .)  
+
+alpha_Inf_15k3 <- final_z2 %>%
+    Calc_weighted_angle(IEEE_118, .)  
+
+ ec_10_6_15k <- ec_10_6 %>%
+   Calc_weighted_angle(IEEE_118, .)  
+ 
+ alpha_10_15k <- alpha_10k %>%
+    Calc_weighted_angle(IEEE_118, .) 
+ 
+test <- bind_rows(
+ OriginBlock_10k$results %>% mutate(type = "10k"),
+ OriginBlock_ec_10_6$results %>% mutate(type = "ec"),
+ OriginBlock_Inf$results %>% mutate(type = "Inf"),
+ )
+ 
+
+test %>%
+  ggplot(aes(x = t, y = z, colour = type)) + geom_line() 
+ 
+ #Only the large component is smaller in the ec_network. This makes no sense.
+ left_join(alpha_Inf_15k %>% select(block, alpha_Inf = theta_degs), 
+           alpha_Inf_15k %>% select(block, alpha_10 = theta_degs)) %>%
+   left_join(., 
+             ec_10_6_15k %>% select(block, ec_10 = theta_degs)) %>%
+   mutate(alpha_10_small = alpha_10<alpha_Inf,
+ ec_10_small = ec_10<alpha_Inf)
+ 
+
+check_Inf_height <-  OriginBlock %>%
+        mutate(type = paste("type",tstep, maxIter, sep = "_")) %>%
+    select(node, z, type) %>%
+    spread(key = type, value = z) %>%
+    mutate(diff = type_0.01_144000-type_0.03_16000,
+           abs_diff = abs(diff))
+
+check_Inf_height <- OriginBlock %>%
+  left_join(., read_rds("/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks/IEEE_118_alpha_Inf.rds" ), by = "node") %>%
+  mutate(diff = z.x-z.y,
+         abs_diff = abs(diff))
+
+
+comp <- OriginBlock %>%
+  filter(tstep == 0.01) %>%
+  select(node, z) %>%
+  left_join(check_node_height) %>%
+  mutate( diff2 = type_0.01_144000-z)
+          
+Inf_angles <- final_z %>%
+      Calc_weighted_angle(IEEE_118, .)
+
 ```
 
