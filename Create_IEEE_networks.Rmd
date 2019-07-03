@@ -20,19 +20,6 @@ IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
 ```
 
 
-```{r}
-  ForceV_from_angle <- function(target_angle = 5*pi/12, k, d=temp$d){
-    
-    tibble(H = sqrt(d^2 * (1 + tan(target_angle)^2)),
-           ForceT = k*(H-d), 
-           ForceV = ForceT*sin(target_angle)) %>%
-      pull(ForceV)
-    
-  }
-```
-
-
-
 #Create the network
 ```{r}
 test <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
@@ -275,7 +262,7 @@ temp <- as_data_frame(gProp) %>%
 
 ```
 
-#Create all target orders
+#Target orders
 
 ```{r}
 
@@ -379,8 +366,8 @@ c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
 
 The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
 ```{r}
-common_time <- 0.01
-common_Iter <- 1
+common_time <- 0.03
+common_Iter <- 25000
 common_tol <- 1e-10
 common_mass <- 5000
 ```
@@ -419,7 +406,7 @@ alpha_vector %>% walk(~{
                                       tstep = common_time, tol = common_tol, distance = "distance", 
                                       maxIter = common_Iter, mass = common_mass)
   
-  final_z2 <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation", 
+  final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation", 
                                       tstep = common_time, tol = common_tol, distance = "distance", 
                                       maxIter = common_Iter, mass = common_mass)
   
@@ -439,7 +426,7 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 ```{r}
 
 for(n in c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)){
-  
+  print(n)
   target_orders2 <- target_orders %>% 
     filter(ec == n)
   
@@ -480,12 +467,12 @@ for(n in c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)){
     #use the largest block to set the simulation parameters k and m.
     #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
     OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass)
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
     
     final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation",
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass)
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
     
     write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds")))
   })
@@ -508,7 +495,7 @@ This below chunk tries to test if 16k and t = 0.3 is good enough, or just what i
 ID <- 6 #for v = 6 which has large deviations at the moment
  print(paste("alpha value", ID))
     #create network
-    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = n)
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = 10)
     
     set.seed(target_orders2$seed[ID])
     ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
@@ -531,12 +518,17 @@ ID <- 6 #for v = 6 which has large deviations at the moment
     
     
     OriginBlock_ec_10_6 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                            tstep = 0.01, tol = 1e-10, distance = "distance", 
-                                            maxIter =  16000*3, mass = 5000)
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
+    
+    OriginBlock_ec_10_6_2 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
+    
     
     ec_10_6 <- Create_stabilised_blocks(current_graph, OriginBlock_ec_10_6, 11, force = "Net_Generation", 
-                                      tstep = 0.01, tol = 1e-10, distance = "distance",
-                                      maxIter = 16000*3, mass = 5000)
+                                      tstep = common_time, tol = common_tol, distance = "distance", 
+                                      maxIter = common_Iter, mass = common_mass)
     
 
   params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
@@ -545,8 +537,9 @@ ID <- 6 #for v = 6 which has large deviations at the moment
     map_df(~{
       
           OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = params$tstep[.x], tol = 1e-10, distance = "distance",
-                                        maxIter = params$Iterations[.x], mass = 5000)$NodeList %>%
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))$NodeList %>%
             mutate(tstep = params$tstep[.x],
                    maxIter = params$Iterations[.x])
       return(OriginBlock)
@@ -594,12 +587,14 @@ ID <- 6 #for v = 6 which has large deviations at the moment
     List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
     
       OriginBlock_10k <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                      tstep = 0.01, tol = 1e-10, distance = "distance", 
-                                      maxIter = 16000*9, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
   
   alpha_10k <- Create_stabilised_blocks(current_graph, OriginBlock_10k, 11, force = "Net_Generation", 
-                                      tstep = 0.01, tol = 1e-10, distance = "distance",
-                                      maxIter = 16000*9, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
 ```
 
 
@@ -631,12 +626,24 @@ ID <- 6 #for v = 6 which has large deviations at the moment
     List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
     
       OriginBlock_Inf <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                      tstep = 0.01, tol = 1e-10, distance = "distance", 
-                                      maxIter = 16000, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
   
   alpha_Inf <- Create_stabilised_blocks(current_graph, OriginBlock_Inf, 11, force = "Net_Generation", 
-                                      tstep = 0.01, tol = 1e-10, distance = "distance",
-                                      maxIter = 16000, mass = 5000)
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
+  
+  OriginBlock_Inf2 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
+  
+  alpha_Inf <- Create_stabilised_blocks(current_graph, OriginBlock_Inf, 11, force = "Net_Generation", 
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass, 
+                                        window_size = round(common_Iter/10))
   
   #params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
     
@@ -644,8 +651,8 @@ ID <- 6 #for v = 6 which has large deviations at the moment
    map_df(~{
       
           OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = params$tstep[1], tol = 1e-10, distance = "distance",
-                                        maxIter = params$Iterations[1], mass = 5000)$NodeList %>%
+                                        tstep = common_time, tol = common_tol, distance = "distance", 
+                                        maxIter = common_Iter, mass = common_mass)$NodeList %>%
             mutate(tstep = params$tstep[1],
                    maxIter = params$Iterations[1])
       return(OriginBlock)
@@ -663,28 +670,36 @@ I don't understand what is happening
 alpha_Inf_15k <- alpha_Inf %>%
     Calc_weighted_angle(IEEE_118, .)  
 
-
-alpha_Inf_15k2 <- final_z %>%
-    Calc_weighted_angle(IEEE_118, .)  
-
-alpha_Inf_15k3 <- final_z2 %>%
-    Calc_weighted_angle(IEEE_118, .)  
-
  ec_10_6_15k <- ec_10_6 %>%
    Calc_weighted_angle(IEEE_118, .)  
  
  alpha_10_15k <- alpha_10k %>%
     Calc_weighted_angle(IEEE_118, .) 
  
+ test_stop <- OriginBlock_Inf2$results %>%
+   mutate(
+          window_sd = rollapply(theta_rads, width =5000, FUN = sd, fill = NA, align = "right"),
+          perc = window_sd/theta_rads)
+ 
+ test_stop %>%
+ #  filter(t>150, t<200) %>%
+   
+ ggplot(aes(x = t, y = perc)) + geom_line()
+ +
+   coord_cartesian(ylim = c(0,1))
+ 
+ 
 test <- bind_rows(
- OriginBlock_10k$results %>% mutate(type = "10k"),
+ #OriginBlock_10k$results %>% mutate(type = "10k"),
  OriginBlock_ec_10_6$results %>% mutate(type = "ec"),
+ OriginBlock_ec_10_6_2$results %>% mutate(type = "ec 2"),
  OriginBlock_Inf$results %>% mutate(type = "Inf"),
+ OriginBlock_Inf2$results %>% mutate(type = "Inf 2")
  )
  
 
 test %>%
-  ggplot(aes(x = t, y = z, colour = type)) + geom_line() 
+  ggplot(aes(x = t, y = theta_degs, colour = type)) + geom_line() 
  
  #Only the large component is smaller in the ec_network. This makes no sense.
  left_join(alpha_Inf_15k %>% select(block, alpha_Inf = theta_degs), 
