@@ -264,6 +264,12 @@ temp <- as_data_frame(gProp) %>%
 
 #Target orders
 
+
+```{r}
+Scramble_ec_values <- c(1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 100) 
+```
+
+
 ```{r}
 
 if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
@@ -271,7 +277,7 @@ if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
   set.seed(123)
   random_seeds <- sample(1:100000, 10000)
   
-  target_orders <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) %>% map_df(~{
+  target_orders <- Scramble_ec_values %>% map_df(~{
     
     print(.x)
     #create network
@@ -301,12 +307,11 @@ if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
 
 ```
 
-
 #Do a multi-attack on each fixed ec
 
 ##Node attack
 ```{r}
-c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) %>% walk(~{
+Scramble_ec_values[c(1,11)] %>% walk(~{
   
   target_orders_x<- target_orders %>% 
     filter(ec == .x)
@@ -336,8 +341,7 @@ c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) %>% walk(~{
 IEEE_118<- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 set.seed(21256)
 DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
-c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10) 
-1.2 %>% walk(~{
+Scramble_ec_values %>% walk(~{
   
   target_orders_x <- target_orders %>% 
     filter(ec == .x)
@@ -425,7 +429,7 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 
 ```{r}
 
-for(n in c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)){
+for(n in Scramble_ec_values){
   print(n)
   target_orders2 <- target_orders %>% 
     filter(ec == n)
@@ -481,256 +485,123 @@ for(n in c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)){
 ```
 
 
+#Strain
+This looks at how strain functions as a robustness metric
+
+```{r}
+
+Calc_line_strain <- function(g, solved_height_df, distance){
+  
+  line_strain <-as_data_frame(g) %>% as_tibble %>%
+  left_join(., solved_height_df %>% select(node, z), by = c("from"= "node")) %>%
+  left_join(., solved_height_df %>% select(node, z), by = c("to"= "node")) %>%
+  mutate(dz = abs(z.x-z.y),
+         mean_z = (z.x+z.y)/2,
+         H = sqrt(dz^2 +{{distance}}^2),
+         strain = (H-{{distance}})/{{distance}},
+         alpha = Link.Limit/abs(PowerFlow),
+         line_load = abs(PowerFlow)/Link.Limit,
+         percentile_strain = percent_rank(strain)) %>%
+  select(Link, alpha, line_load, dz, H, strain, percentile_strain, mean_z, PowerFlow)
+  
+}
+
+
+test <- list.files("/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks", full.names = T) %>%
+  map_df(~{
+    
+    alpha <- basename(.x) %>% gsub("IEEE_118_alpha_", "", .) %>% gsub(".rds", "", .) %>% as.numeric()
+
+    IEEE_118_test<- Proportional_Load(IEEE_118, alpha = alpha) %>%
+      set.edge.attribute(. , "distance", value = 1)
+    
+    read_rds(.x) %>%
+      Calc_line_strain(IEEE_118_test , ., distance = distance)
+
+    
+  })
+
+
+
+
+test %>%
+  ggplot(aes(x = strain, colour = as.factor(alpha))) + geom_density()
+
+test_strain <- test %>%
+  mutate(alpha = round(alpha, 5)) %>%
+  group_by(alpha) %>%
+  summarise(mean = mean(strain),
+            median = median(strain),
+            weighted.mean = weighted.mean(strain, abs(PowerFlow)),
+            counts = n())
+
+test_strain %>%
+  ggplot()
+
+test_strain %>%
+  gather(key = type, value = strain, -alpha, -counts) %>%
+  ggplot(aes(x = 1/alpha, y = strain, colour = type )) + geom_point()
+
+```
+
+
 #explore convergence
 
 It seems that the algorithm is not converging properly.
 I am getting large difference between the infinite model and the a = 10 random ex model.
 This below chunk tries to test if 16k and t = 0.3 is good enough, or just what is going on
 
+
+
 ```{r}
 
-  target_orders2 <- target_orders %>% 
-    filter(ec == 10) #set the ec level
-
-ID <- 6 #for v = 6 which has large deviations at the moment
- print(paste("alpha value", ID))
-    #create network
-    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = 10)
-    
-    set.seed(target_orders2$seed[ID])
-    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
-    
-    temp <- as_data_frame(Scrambled_edge_cap) %>%
-      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
-             ec2 = ec[ec_order], #change order of excess capacity
-             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
-             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
-    
-    print(mean(temp$alpha))
-    
-    current_graph <- Scrambled_edge_cap %>%
-      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
-      set.edge.attribute(. , "distance", value = 1) %>%
-      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
-      set.edge.attribute(., "Area", value = 1)
-    
-    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-    
-    
-    OriginBlock_ec_10_6 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
-    
-    OriginBlock_ec_10_6_2 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
-    
-    
-    ec_10_6 <- Create_stabilised_blocks(current_graph, OriginBlock_ec_10_6, 11, force = "Net_Generation", 
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
-    
-
-  params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
-    
-  param_check <- 1:nrow(params) %>%
-    map_df(~{
-      
-          OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))$NodeList %>%
-            mutate(tstep = params$tstep[.x],
-                   maxIter = params$Iterations[.x])
-      return(OriginBlock)
-    })
+#calculate theta for all values of alpha
+finnesse_prop <-c(1.1, 1.05) %>% map_df(~{
   
-  saveRDS(param_check, file.path(Project_folder, "Param_check.rds"))
+  alpha <- .x
   
-  #Infinity topological loading
-param_Inf <-  "/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks/IEEE_118_alpha_Inf.rds" 
-
+  print(paste("alpha value", alpha))
   
-  check_node_height <- param_check %>%
-        mutate(type = paste("type",tstep, maxIter, sep = "_")) %>%
-    select(node, z, type) %>%
-    spread(key = type, value = z) %>%
-    mutate(diff = type_0.01_144000-type_0.03_16000,
-           abs_diff = abs(diff))
+  current_graph  <- IEEE_118 %>%
+    Proportional_Load(., alpha = alpha) %>% 
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
+    set.edge.attribute(., "Area", value = 1)
   
-```
-
-##10k edge
-```{r}
-ID <- 6 #for v = 6 which has large deviations at the moment
- print(paste("alpha value", ID))
-    #create network
-    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = 10000)
-    
-   # set.seed(target_orders2$seed[ID])
-    #ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
-    
-    temp <- as_data_frame(Scrambled_edge_cap) %>%
-      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
-             ec2 = ec, #order of excess capacity not changed
-             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
-             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
-    
-    print(mean(temp$alpha))
-    
-    current_graph <- Scrambled_edge_cap %>%
-      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
-      set.edge.attribute(. , "distance", value = 1) %>%
-      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
-      set.edge.attribute(., "Area", value = 1)
-    
-    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-    
-      OriginBlock_10k <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
   
-  alpha_10k <- Create_stabilised_blocks(current_graph, OriginBlock_10k, 11, force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
-```
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+  OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
+                                      tstep = 0.01, tol = common_tol, distance = "distance", 
+                                      maxIter = 75000, mass = common_mass)
+  
+  final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation", 
+                                      tstep = 0.01, tol = common_tol, distance = "distance", 
+                                      maxIter = 75000, mass = common_mass) %>%
+    mutate(ec = .x)
+  
+return(final_z)
+})
 
 
-##Infity edge
+test <-c(1.05, 1.1) %>% map_df(~{
+  
+test_g <- IEEE_118  %>%
+    Proportional_Load(., alpha = .x) %>% 
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10)
+  
+  finnesse_prop %>%
+    filter(ec == .x) %>%
+  Calc_line_strain(test_g, ., distance) 
+}) %>%
+  mutate(alpha = round(alpha, 5)) %>%
+  group_by(alpha) %>%
+  summarise(strain = mean(strain))
 
-```{r}
-ID <- 6 #for v = 6 which has large deviations at the moment
- print(paste("alpha value", ID))
-    #create network
-    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = Inf)
-    
-    set.seed(target_orders2$seed[ID])
-    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
-    
-    temp <- as_data_frame(Scrambled_edge_cap) %>%
-      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
-             ec2 = ec[ec_order], #change order of excess capacity
-             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
-             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
-    
-    print(mean(temp$alpha))
-    
-    current_graph <- Scrambled_edge_cap %>%
-      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
-      set.edge.attribute(. , "distance", value = 1) %>%
-      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
-      set.edge.attribute(., "Area", value = 1)
-    
-    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-    
-      OriginBlock_Inf <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
-  
-  alpha_Inf <- Create_stabilised_blocks(current_graph, OriginBlock_Inf, 11, force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
-  
-  OriginBlock_Inf2 <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
-  
-  alpha_Inf <- Create_stabilised_blocks(current_graph, OriginBlock_Inf, 11, force = "Net_Generation", 
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass, 
-                                        window_size = round(common_Iter/10))
-  
-  #params  <- tibble(tstep = c(0.03, 0.03, 0.01, 0.01), Iterations = c(16000, 16000*3, 16000*3, 16000*9))
-    
-  param_check <- 1:nrow(params) %>%
-   map_df(~{
-      
-          OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                        tstep = common_time, tol = common_tol, distance = "distance", 
-                                        maxIter = common_Iter, mass = common_mass)$NodeList %>%
-            mutate(tstep = params$tstep[1],
-                   maxIter = params$Iterations[1])
-      return(OriginBlock)
-    })
+test2 <- theta_crit_thresh %>%
+  mutate(alpha = 1/alpha) %>%
+  select(alpha,  NodesAttacked, theta_degs, orig_strain)
 
 ```
-
-
-#analysis of angles
-
-Even after doing a 0.01 timestep and over 140k reps the angle is still way off
-I don't understand what is happening
-
-```{r}
-alpha_Inf_15k <- alpha_Inf %>%
-    Calc_weighted_angle(IEEE_118, .)  
-
- ec_10_6_15k <- ec_10_6 %>%
-   Calc_weighted_angle(IEEE_118, .)  
- 
- alpha_10_15k <- alpha_10k %>%
-    Calc_weighted_angle(IEEE_118, .) 
- 
- test_stop <- OriginBlock_Inf2$results %>%
-   mutate(
-          window_sd = rollapply(theta_rads, width =5000, FUN = sd, fill = NA, align = "right"),
-          perc = window_sd/theta_rads)
- 
- test_stop %>%
- #  filter(t>150, t<200) %>%
-   
- ggplot(aes(x = t, y = perc)) + geom_line()
- +
-   coord_cartesian(ylim = c(0,1))
- 
- 
-test <- bind_rows(
- #OriginBlock_10k$results %>% mutate(type = "10k"),
- OriginBlock_ec_10_6$results %>% mutate(type = "ec"),
- OriginBlock_ec_10_6_2$results %>% mutate(type = "ec 2"),
- OriginBlock_Inf$results %>% mutate(type = "Inf"),
- OriginBlock_Inf2$results %>% mutate(type = "Inf 2")
- )
- 
-
-test %>%
-  ggplot(aes(x = t, y = theta_degs, colour = type)) + geom_line() 
- 
- #Only the large component is smaller in the ec_network. This makes no sense.
- left_join(alpha_Inf_15k %>% select(block, alpha_Inf = theta_degs), 
-           alpha_Inf_15k %>% select(block, alpha_10 = theta_degs)) %>%
-   left_join(., 
-             ec_10_6_15k %>% select(block, ec_10 = theta_degs)) %>%
-   mutate(alpha_10_small = alpha_10<alpha_Inf,
- ec_10_small = ec_10<alpha_Inf)
- 
-
-check_Inf_height <-  OriginBlock %>%
-        mutate(type = paste("type",tstep, maxIter, sep = "_")) %>%
-    select(node, z, type) %>%
-    spread(key = type, value = z) %>%
-    mutate(diff = type_0.01_144000-type_0.03_16000,
-           abs_diff = abs(diff))
-
-check_Inf_height <- OriginBlock %>%
-  left_join(., read_rds("/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks/IEEE_118_alpha_Inf.rds" ), by = "node") %>%
-  mutate(diff = z.x-z.y,
-         abs_diff = abs(diff))
-
-
-comp <- OriginBlock %>%
-  filter(tstep == 0.01) %>%
-  select(node, z) %>%
-  left_join(check_node_height) %>%
-  mutate( diff2 = type_0.01_144000-z)
-          
-Inf_angles <- final_z %>%
-      Calc_weighted_angle(IEEE_118, .)
-
-```
-

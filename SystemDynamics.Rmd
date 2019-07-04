@@ -88,199 +88,6 @@ g <- PowerFlow(g, SlackRef$name) #calculate power flow
 
 ```
 
-
-
-```{r}
-
-EdgeNode <- c(1,-1,0,0,0,0,
-              0,1,-1,0,0,0,
-              0,0,0,1,-1,0,
-              0,0,0,1,-1,0,
-              0,0,0,0,1,-1,
-              0,0,0,1,0,-1,
-              0,1,0,0,-1,0
-              ) %>% matrix(nrow = 7, byrow = T)
-
-Link <- tibble(EdgeName = 1:7, 
-               distance = c(sqrt(2), sqrt(2), sqrt(2), sqrt(2), 1,1, sqrt(2)),
-               k = c(5,2,2.5,4,4,3,1))
-
-  C <- matrix(data = 0, nrow = nrow(Link), ncol = nrow(Link))
-  diag(C) <- Link$distance
-
-#Injection vector of power put in and removed
-InjectionVect <- c(10,20,0,-20,10,-20)
-sum(InjectionVect)
-
-InjectMat <- diag(InjectionVect)
-
-
-Adj <- (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) / (t(EdgeNode) %*% diag(1, nrow = nrow(EdgeNode)) %*% EdgeNode) 
-diag(Adj) <-0
-Adj[!is.finite(Adj)] <-0
-Adj
-
-graph_from_adjacency_matrix(Adj, mode = "undirected") %>% plot
-
-Zvect <- c(1,2,0,-1,-2,-2)
-
-HeightDiff <- t(Adj * Zvect) - (Adj * Zvect) 
-D <- t(EdgeNode) %*% C %*% EdgeNode %>% abs
-diag(D) <-0
-
-kvect <- Link$k
-dvect <- Link$distance
-
-SmallEdgeNode <- matrix(c(1,-1,0,
-                   0,1,-1), nrow = 2, byrow = T)
-Smallzvect <- c(2,-1,1)
-Smallkvect <- c(3,4)
-Smalldvect <- c(1,1)
-
-Create_Tension_matrix(SmallEdgeNode, Smallzvect, Smallkvect, Smalldvect)
-
-Create_Tension_matrix(SmallEdgeNode, Smallzvect, Smallkvect, Smalldvect) %>%
-  rowSums()
-
-
-Calc_Damping_matrix(SmallEdgeNode, 0, Smallkvect, 
-                    c(5,5,5))
-
-```
-
-
-
-```{r}
-
-#MASS CAN'T BE ZERO!
-
-NodeStatus2 <- tibble(node = 1:6, mass = 5, force = c(10,20,0,-20,10,-20), z = 0, 
-       NetTension = 0, velocity = 0, 
-       friction = 0,
-       NetForce = NetTension + force - friction,
-       acceleration = NetForce/mass,
-       t = 0)
-
-
-
-
-SmallNodeStatus <- tibble(node = 1:3, mass = 5, force = c(10,0,-10), z = 0, 
-       NetTension = 0, velocity = 0, 
-       friction = 0,
-       NetForce = force + NetTension +friction,
-       acceleration = NetForce/mass,
-       t = 0)
-
-Smalltest <-FindStabilSystem(SmallNodeStatus, SmallEdgeNode, Smallkvect, Smalldvect, tstep=0.01, maxIter = 10000, frctmultiplier = 0.01) %>%
-  bind_rows()
-
-
-
-Smalltest %>%
-  group_by(t) %>%
-  summarise(z = mean(abs(z)),
-            NetForce = mean(abs(NetForce)),
-            velocity = mean(abs(velocity)),
-            acceleration = mean(abs(acceleration))) %>%
-  ggplot(aes(x = t, y =z )) + geom_line()
-
-
-Smalltest  %>%
-  mutate(node = factor(node)) %>%
-  ggplot(aes(x = t, y =z , colour = node)) + geom_line()
-
-```
-
-
-#Test real graph
-
-```{r}
-#Create Edge matrix from graph
-
-A <- as_data_frame(List_of_BiConComps[[147]]) %>% 
-  select(Link, from, to) %>% 
-  gather(key = type, Node, -Link) %>%
-  arrange(Node) %>%
-  mutate(value = ifelse(type =="from", 1, -1)) %>%
-  ungroup %>%
-  select(-type) %>%
-  spread(key = Node, value, fill = 0) %>%
-  arrange(Link)
-
-rowdat <- A$Link
-
-A <- A %>% select(-Link) %>%
-  as.matrix()
-
-rownames(rowdat)
-
-rm(rowdat)
-
-
-NodeStatus <- as_data_frame(List_of_BiConComps[[147]], what = "vertices") %>%
-  select(node = name, force = BalencedPower ) %>%
-  mutate(
-    z = 0,
-    mass = 2000,
-    NetTension = 0, velocity = 0, 
-       friction = 0,
-       NetForce = force + NetTension - friction,
-       acceleration = NetForce/mass,
-       t = 0) %>%
-  filter(!(node %in% deletenames))
-
-NodeStatus$force %>% sum
-
-testratio <- NodeStatus %>%
-  mutate(ratio = abs(force/mass))
-
-
-Link <- as_data_frame(g) %>%
-  mutate(EdgeName = Link, distance = 1/Y, alpha = Link.Limit/abs(PowerFlow),  k= 1000*(1-1/alpha)) %>% #arbitary k!
-  select(EdgeName, distance, k) 
-
-test <-FindStabilSystem(NodeStatus, A, Link$k, Link$distance, tstep= 0.5, maxIter = 2000, frctmultiplier = 1) %>%
-  bind_rows()
-
-test <-FindStabilSystem2(NodeStatus, A, Link$k, Link$distance, tstep= 0.5, maxIter = 2000, frctmultiplier = 1) 
-
-
-
- test$results %>%
-  ggplot(aes(x = t, y =z)) + geom_line()
-
-test2 <- test$NodeList
- 
-summtest <- test %>%
-  group_by(t) %>%
-  summarise(z = mean(abs(z)),
-            NetForce = mean(abs(NetForce)),
-            velocity = mean(abs(velocity)),
-            acceleration = mean(abs(acceleration))) 
-
-summtest %>%
-  ggplot(aes(x = t, y = z)) + geom_line()
-
-
-testnode <- test %>%
-  filter(node =="DUGR")
-
-testnode %>%
-  ggplot(aes(x = t, y = z )) + geom_line()
-
-
-finalround <- test %>%
-  filter(t == max(t))
-
-#k1e4 <- test
-#k10 <- test
-#k100Iter2k <- test
-
-test <- k1e4
-
-```
-
-
 #UK map 
 ```{r}
 
@@ -375,7 +182,6 @@ nodes_shortest_path_df <- z_network_map %>%select(-type) %>%
   filter(PositionType=="Geo Space", 
          Node %in% nodes_shortest_path)
 
-atan((extrema$z[1]-extrema$z[2])/(length(nodes_shortest_path)-1))*360/(2*pi)
 
 
 node_z2 <- node_z %>%
@@ -402,44 +208,10 @@ node_z2 <- node_z %>%
          mass_lon_diff = mass_lon_cumsum - mass_lon_rev_cumsum,
          mass_lon_abs_diff = abs(mass_lon_diff))
 
-node_z2 %>%
-  ggplot(aes(x = Latitude, y = lat_abs_diff)) + geom_line()
-
-node_z2 %>%
-  ggplot(aes(x = Latitude, y = mass_lat_abs_diff)) + geom_line()
-
-
-node_z2 %>%
-  ggplot(aes(x = Longitude, y = lon_abs_diff)) + geom_line()
-
-
-node_z2 %>%
-  ggplot(aes(x = Longitude, y = mass_lon_abs_diff)) + geom_line()
-
-
-test <- node_z2 %>%
- filter(Generation>0) %>%
-  filter(lon_abs_diff== min(lon_abs_diff) | lat_abs_diff== min(lat_abs_diff)) %>%
-  select(Node, lat_abs_diff, lon_abs_diff)
-
-node_z2 %>%
-  filter(lat_abs_diff== min(lat_abs_diff) | lat_abs_diff== min(lat_abs_diff))
-
-
-node_z2 %>%
-  filter(mass_lon_abs_diff== min(mass_lon_abs_diff) | mass_lat_abs_diff== min(mass_lat_abs_diff))
-
-node_z3 <- node_z %>%
-  left_join(VertexMetaData %>% rename(Node = Name)) %>%
-  filter(Latitude< {.}%>% filter(Node=="MOFF") %>% pull(Latitude))
-
 ```
 
-
-##Kriging
+##UK network plot
 ```{r}
-
-
 shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
                        "Countries_December_2017_Ultra_Generalised_Clipped_Boundaries_in_UK_WGS84.shp")
 
@@ -448,6 +220,7 @@ GB <- st_read(shapefile) %>%
   filter(ctry17cd !="N92000002") %>%
   st_union()
 
+#plots the uk network with the shortest path between the highest and lowest points as well as the midpoint
 ggplot(GB) +
   geom_sf() +
  # scale_fill_viridis("Area") +
@@ -470,11 +243,15 @@ ggplot(GB) +
   geom_hline(aes(yintercept = node_z2 %>% filter(Node == "BLAC") %>% pull(Latitude)), colour = "red") +
     geom_hline(aes(yintercept = node_z2 %>% filter(Node == "MOFF") %>% pull(Latitude)), colour = "red")+
     geom_vline(aes(xintercept = node_z2 %>% filter(Node == "CONQ") %>% pull(Longitude)), colour = "cyan") 
+```
+
+
+##Kriging
+```{r}
 
 spdf <- as(GB, "Spatial") %>% st_as_sf %>%
   st_crop(c(xmin = -7.5, ymin = 50, xmax = 2, ymax = 59)) %>%
   as_Spatial()
-
 
 kriged_df <- Create_kriged_df(node_z, "z", spdf, 8e4) %>% mutate(type = "node z")
 kriged_df_strain <- Create_kriged_df(edge_strain, "z", spdf, 8e4) %>% mutate(type = "strain")
@@ -488,9 +265,9 @@ mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
   ggplot(aes(x=Longitude, y=Latitude)) + 
   geom_tile(aes(fill=Height)) + coord_equal() +
   #plot shortest path in red as an overlay
-  geom_line(data = nodes_shortest_path_df,
-            aes(group = Link),
-            colour = "red")+
+ # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
+  #          aes(group = Link),
+   #         colour = "red")+
   facet_grid(~type) +
   scale_fill_viridis_c() +
 scale_colour_viridis_c(option = "plasma") +
@@ -507,7 +284,8 @@ scale_colour_viridis_c(option = "plasma") +
 ##Voronoi tessaltion
 What does the height map look like with a vonoi tesselation instead of kriging?
 
-The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix
+The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix.
+I'm not sure what I want to use the Voronoi for if at all, but it will be useful at some point so I am keeping it
 ```{r}
 #convert the dataframe to an sf object
 node_z_sf <- node_z %>%
@@ -530,508 +308,38 @@ clipped_tess_node <- st_intersection(st_cast(v), st_union(GB)) %>%
 #grey areas occure when the node is accidently offshore and clippied out of the map. This can be easily fixed.
 bind_rows(clipped_tess_edge, clipped_tess_node) 
 
+#voronoi of the nodes is pretty good
 clipped_tess_node %>%
 ggplot() + geom_sf(aes(fill = z, colour = z)) +
    scale_fill_viridis_c()+
   scale_colour_viridis_c() +
   facet_grid(~type)
 
-
-
-edge_z_sf <- edge_strain %>%
-  mutate(z = percent_rank(z))%>% 
-  st_as_sf(., coords = c("Longitude", "Latitude")) 
-#add in the correct projection data to align with the map
-st_crs(edge_z_sf) <- st_crs(GB)$proj4string
-
-#create the tessellation
-v_edge <- st_voronoi(st_combine(edge_z_sf))
-
-#clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
-#the key simple feature is of course z
-clipped_tess_edge <- st_intersection(st_cast(v_edge), st_union(GB)) %>% 
-  st_sf(geom=.) %>%
-  st_join(edge_z_sf) %>% 
-  mutate(type = "edge")
-
-```
-
-
-
-#Rayshading
-
-functions taken from
-
-##this needs to be properly integrated and attributed
-% https://github.com/wcmbishop/rayshader-demo/blob/master/R/rayshader-gif.R
-
-```{r}
-#' Build a gif of 3D rayshader plots
-#'
-#' @param hillshade Hillshade/image to be added to 3D surface map.
-#' @param heightmap A two-dimensional matrix, where each entry in the matrix is the elevation at that point.
-#' @param file file path for .gif
-#' @param duration gif duration in seconds (framerate will be duration/n_frames)
-#' @param ... additional arguments passed to rayshader::plot_3d(). See Details for more info.
-#'
-#' @details This function is designed to be a pipe-in replacement for rayshader::plot_3d(),
-#' but it will generate a 3D animated gif. Any inputs with lengths >1 will 
-#' be interpreted as "animation" variables, which will be used to generate 
-#' individual animation frames -- e.g. a vector of theta values would produce
-#' a rotating gif. Inputs to plot_3d() that are meant to have length >1 
-#' (specifically "windowsize") will be excluded from this process.
-#'
-#' @return file path of .gif file created
-#' 
-#' @examples
-#' # MONTEREREY BAY WATER DRAINING
-#' # ------------------------------
-#' # define transition variables
-#' n_frames <- 180
-#' waterdepths <- transition_values(from = 0, to = min(montereybay), steps = n_frames) 
-#' thetas <- transition_values(from = -45, to = -135, steps = n_frames)
-#' # generate gif
-#' zscale <- 50
-#' montereybay %>% 
-#'   sphere_shade(texture = "imhof1", zscale = zscale) %>%
-#'   add_shadow(ambient_shade(montereybay, zscale = zscale), 0.5) %>%
-#'   add_shadow(ray_shade(montereybay, zscale = zscale, lambert = TRUE), 0.5) %>%
-#'   save_3d_gif(montereybay, file = "montereybay.gif", duration = 6,
-#'               solid = TRUE, shadow = TRUE, water = TRUE, zscale = zscale,
-#'               watercolor = "imhof3", wateralpha = 0.8, 
-#'               waterlinecolor = "#ffffff", waterlinealpha = 0.5,
-#'               waterdepth = waterdepths/zscale, 
-#'               theta = thetas, phi = 45)
-#' 
-save_3d_gif <- function(hillshade, heightmap, file, duration = 5, ...) {
-  require(rayshader)
-  require(magick)
-  require(rgl)
-  require(gifski)
-  require(rlang)
-  
-  # capture dot arguments and extract variables with length > 1 for gif frames
-  dots <- rlang::list2(...)
-  var_exception_list <- c("windowsize")
-  dot_var_lengths <- purrr::map_int(dots, length)
-  gif_var_names <- names(dots)[dot_var_lengths > 1 & 
-                                 !(names(dots) %in% var_exception_list)]
-  # split off dot variables to use on gif frames
-  gif_dots <- dots[gif_var_names]
-  static_dots <- dots[!(names(dots) %in% gif_var_names)]
-  gif_var_lengths <- purrr::map_int(gif_dots, length)
-  # build expressions for gif variables that include index 'i' (to use in the for loop)
-  gif_expr_list <- purrr::map(names(gif_dots), ~rlang::expr(gif_dots[[!!.x]][i]))
-  gif_exprs <- exprs(!!!gif_expr_list)
-  names(gif_exprs) <- names(gif_dots)
-  message(paste("gif variables found:", paste(names(gif_dots), collapse = ", ")))
-  
-  # TODO - can we recycle short vectors?
-  if (length(unique(gif_var_lengths)) > 1) 
-    stop("all gif input vectors must be the same length")
-  n_frames <- unique(gif_var_lengths)
-  
-  # generate temp .png images
-  temp_dir <- tempdir()
-  img_frames <- file.path(temp_dir, paste0("frame-", seq_len(n_frames), ".png"))
-  on.exit(unlink(img_frames))
-  message(paste("Generating", n_frames, "temporary .png images..."))
-  for (i in seq_len(n_frames)) {
-    message(paste(" - image", i, "of", n_frames))
-    rgl::clear3d()
-    hillshade %>%
-      plot_3d_tidy_eval(heightmap, !!!append(gif_exprs, static_dots))
-    rgl::snapshot3d(img_frames[i])
-  }
-  
-  # build gif
-  message("Generating .gif...")
-  magick::image_write_gif(magick::image_read(img_frames), 
-                          path = file, delay = duration/n_frames)
-  message("Done!")
-  invisible(file)
-}
-
-
-plot_3d_tidy_eval <- function(hillshade, ...) {
-  dots <- rlang::enquos(...)
-  plot_3d_call <- rlang::expr(plot_3d(hillshade, !!!dots))
-  rlang::eval_tidy(plot_3d_call)
-}
-
-
-#' Create a numeric vector of transition values.
-#' @description This function helps generate a sequence 
-#' of numeric values to transition "from" a start point
-#' "to" some end point. The transition can be "one_way" 
-#' (meaning it ends at the "to" point) or "two_way" (meaning
-#' we return back to end at the "from" point).
-#'
-#' @param from starting point for transition values
-#' @param to ending point (for one-way transitions) or turn-around point 
-#'           (for two-way transitions)
-#' @param steps the number of steps to take in the transation (i.e. the length
-#'              of the returned vector)
-#' @param one_way logical value to determine if we should stop at the "to" value
-#'                (TRUE) or turn around and return to the "from" value (FALSE)
-#' @param type string defining the transition type - currently suppoerts "cos"
-#'             (for a cosine curve) and "lin" (for linear steps)
-#'
-#' @return a numeric vector of transition values
-#' 
-transition_values <- function(from, to, steps = 10, 
-                              one_way = FALSE, type = "cos") {
-  if (!(type %in% c("cos", "lin")))
-    stop("type must be one of: 'cos', 'lin'")
-  
-  range <- c(from, to)
-  middle <- mean(range)
-  half_width <- diff(range)/2
-  
-  # define scaling vector starting at 1 (between 1 to -1)
-  if (type == "cos") {
-    scaling <- cos(seq(0, 2*pi / ifelse(one_way, 2, 1), length.out = steps))
-  } else if (type == "lin") {
-    if (one_way) {
-      xout <- seq(1, -1, length.out = steps)
-    } else {
-      xout <- c(seq(1, -1, length.out = floor(steps/2)), 
-                seq(-1, 1, length.out = ceiling(steps/2)))
-    }
-    scaling <- approx(x = c(-1, 1), y = c(-1, 1), xout = xout)$y 
-  }
-  
-  middle - half_width * scaling
-}
-
-```
-
-##create 3D plot
-```{r}
-
-{
-kriged_df3 <- kriged_df %>%
-  rename(x = Longitude, y = Latitude) %>%
-  mutate(Z = z/sd(z)) 
-kriged_df3 <- kriged_df3 %>%
-  spread(key = x, value = Z, fill = min(kriged_df3$Z)-2) 
-
-x <- names(kriged_df3)[-1]  %>% as.numeric()
-y <- kriged_df3 %>% pull(y)
-
-kriged_df3 <- kriged_df3 %>%
-  select(-y) %>% as.matrix()
-}
-
-elev_matrix <- (kriged_df3)*100
-
-ambmat <- ambient_shade(elev_matrix, zscale = 20)
-raymat <- ray_shade(elev_matrix, zscale = 20, lambert = TRUE)
-watermap <- detect_water(elev_matrix)
-
-elev_matrix %>%
-  sphere_shade(texture = "imhof1") %>%
-  add_water(watermap, color = "imhof4") %>%
-  add_shadow(raymat, max_darken = 0.5) %>%
-  add_shadow(ambmat, max_darken = 0.5) %>%
-  plot_3d(elev_matrix, zscale = 20, theta = -45, phi = 45, water = FALSE,
-          windowsize = c(1000,800), zoom = 0.75, waterlinealpha = 0.3,
-          wateralpha = 0.5, watercolor = "lightblue", waterlinecolor = "white")
-#%>% render_snapshot() # Save image to current path
-
-
-
-
-```
-
-##animate
-```{r}
-n_frames <- 180
-zscale <-20
-waterdepths <- transition_values(from = min(elev_matrix) + 2, to = 0, steps = n_frames) 
-thetas <- transition_values(from = -65, to = -115, steps = n_frames)
-# generate gif
-elev_matrix %>% 
-  sphere_shade(texture = "imhof1", zscale = 1) %>%
-  add_shadow(raymat, max_darken = 0.5) %>%
-  add_shadow(ambmat, max_darken = 0.5) %>%
-  save_3d_gif(elev_matrix, file = "GB.gif", duration = 5,
-              solid = TRUE, shadow = TRUE, water = TRUE, zscale = zscale,
-              watercolor = "imhof3", wateralpha = 0.8, 
-              waterlinecolor = "#ffffff", waterlinealpha = 0.5,
-              waterdepth = waterdepths/zscale, 
-              theta = thetas, phi = 45)
-
-
-
-
-#orig
-elev_matrix %>% 
-  sphere_shade(texture = "imhof1", zscale = zscale) %>%
-  add_shadow(raymat, max_darken = 0.5) %>%
-  add_shadow(ambmat, max_darken = 0.5) %>%
-  save_3d_gif(elev_matrix, file = "GB.gif", duration = 6,
-              solid = TRUE, shadow = TRUE, water = TRUE, zscale = zscale,
-              watercolor = "imhof3", wateralpha = 0.8, 
-              waterlinecolor = "#ffffff", waterlinealpha = 0.5,
-              waterdepth = waterdepths/zscale, 
-              theta = thetas, phi = 45)
+#voronoi of the mid point of the edges is just a chaos
+# edge_z_sf <- edge_strain %>%
+#   mutate(z = percent_rank(z))%>% 
+#   st_as_sf(., coords = c("Longitude", "Latitude")) 
+# #add in the correct projection data to align with the map
+# st_crs(edge_z_sf) <- st_crs(GB)$proj4string
+# 
+# #create the tessellation
+# v_edge <- st_voronoi(st_combine(edge_z_sf))
+# 
+# #clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+# #the key simple feature is of course z
+# clipped_tess_edge <- st_intersection(st_cast(v_edge), st_union(GB)) %>% 
+#   st_sf(geom=.) %>%
+#   st_join(edge_z_sf) %>% 
+#   mutate(type = "edge")
 
 ```
 
 
+#Psychadelic beard/boat
 
-#Extended model
+This plots the strain values of a 4 node three edge graph with a constant EC and varying alpha. It shows that strain is more expressive than either alpha, ec or a combination of the two
 
-
-##Distance clusters
-
-```{r}
-z_graph <- as_data_frame(g) %>% as_tibble %>%
-  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
-  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
-  mutate(D = 1/Y,
-         dz = abs(z.x-z.y),
-         mean_z = (z.x+z.y)/2,
-         H = sqrt(dz^2 +D^2),
-         strain = (H-D)/D,
-         alpha = Link.Limit/abs(PowerFlow),
-         line_load = abs(PowerFlow)/Link.Limit,
-         percentile_strain = percent_rank(strain)) %>%
-graph_from_data_frame(., vertices = node_z %>% select(Node, z), directed = FALSE ) 
-
-z_mst <- mst(z_graph, weights = get.edge.attribute(z_graph, "dz"))
-
-FailureNodeCommunity_z  <- z_graph %>% 
-  cluster_walktrap(.) %>% 
-  MakeNodeCommunity()
-
-IsSameCommunity2(FailureNodeCommunity, FailureNodeCommunity_z) %>% pull(Jaccard) %>% mean
-
-distancedf <- distances(g, weights = get.edge.attribute(g, "dz")) %>% as_tibble %>% mutate(from = names(.)) %>%
-    gather(key = "to", value = "distance",-from)
-
-#graph clustered based on height distance
-distgraph <- distancedf %>% spread(to, distance) %>% select(-from) %>% as.matrix
-rownames(distgraph) <- colnames(distgraph)
-dist_hclust <- distgraph %>% as.dist %>% hclust(.) 
-
-dist_hclust <- hclust_graph(z_mst)
-
-#True co-failure group
-hclust_nodes1 <- hclust_graph(g_cofailure, weight = "weight") %>%
-  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
-  MakeNodeCommunity(large = 1, medium = 0)
-
-hclust_nodes2 <- hclust_graph(g) %>%
-  list(names = names(cutree(., 10)),  membership = cutree(., 12)) %>%
-  MakeNodeCommunity(large = 1, medium = 0)
-
-#stress group
-hclust_nodes3 <- hclust_graph(z_graph, weight = "H") %>%
-  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
-  MakeNodeCommunity(large = 1, medium = 0)
-
-#topological
-hclust_nodes4 <-  g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
-hclust_graph(., weight = "weight")  %>%
-  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
-  MakeNodeCommunity(large = 1, medium = 0)
-
-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
-  left_join(hclust_nodes1) %>%
-#  left_join(VertexMetaData2 %>% rename(Node = Name)) %>%
-    ggplot(aes(x = Latitude, y = Longitude)) + 
-  geom_line(aes(group = Link), size = 0.8) + 
-  geom_point(aes(colour =Community), size = 2) +
-   facet_grid(~PositionType) +
-    scale_color_brewer(palette = "Paired")+
-  labs(title = "Failure groups hierarchically clustered 10 groups")
-
-
-#There is a strong corellation betweeen Longitude and z and no corellation between latitude and z
-node_z %>%
-  gather(key = coord, value = value, -z,-Node) %>%
-  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
-  left_join(hclust_nodes1) %>%
-  mutate(Force = percent_rank(abs(NetTension))) %>%
-  ggplot(aes(x = value, y = z, colour = Force)) + geom_point() + 
-  scale_color_viridis_c() +
-  #scale_color_brewer(palette = "Paired")+
-  facet_grid(~coord, scales = "free_x") +
-  labs(title = "The height of each node and the percent rank Force acting on each node \n relative to the Latitude and Longitude")
-
-
-node_z %>%
-  gather(key = coord, value = value, -z,-Node) %>%
-  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
-  left_join(hclust_nodes1) %>%
-  ggplot(aes(x = value, y = z, colour = Community)) + geom_point() + 
-  scale_color_brewer(palette = "Paired")+
-  facet_grid(~coord, scales = "free_x") +
-  labs(title = "Node cluster membership")
-
-CommSim <- IsSameCommunity2(hclust_nodes1, hclust_nodes3) %>%
-  left_join(hclust_nodes2, by = c("Node"= "Node")) %>%
-  group_by(membership) %>%
-  summarise(Jaccard = mean(Jaccard),
-            size = first(size),
-            rank = first(rank) %>% as.integer,
-            Community = first(Community))
-
-
-
-test <-Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
-                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
-  mutate(type = "depth") %>%
-  bind_rows(Tree_Similarity( hclust_graph(g), 
-                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
-  mutate(type = "Line Limit")) %>%
-  # bind_rows(Tree_Similarity( hclust_graph(z_mst, weight = "dz"), 
-  #                      hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
-  # mutate(type = "mst depth")) %>%
-    bind_rows(Tree_Similarity(g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
-hclust_graph(., weight = "weight") , 
-                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
-  mutate(type = "topological")) %>%
-  bind_rows(Tree_Similarity( hclust_graph(z_graph, weight = "H"), 
-                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
-  mutate(type = "H dist")) 
-  
-
-
-test %>%
-  filter(trees>3) %>%
-  ggplot(aes(x = trees, y = mean, colour = type )) + geom_line()
-
-Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
-                       hclust_graph(g_cofailure, weight = "weight"),10,10, node_jaccard = T) %>%
-  ggplot(aes(x = Jaccard)) + geom_density()
-
-```
-
-```{r}
-
-test2 <- OverloadType %>%
-  filter(type == "Edge") %>% 
-  left_join(as_data_frame(z_graph)%>%as.tibble, by = c("Name"="name"))%>%  ungroup 
-   
-select(test2, Islanded, Overloaded, Targeted, mean_z, H, line_load, strain, percentile_strain, dz) %>% cor
-
-g_cofailure <- DistDF %>%
-  select(Node1, Node2, weight = counts) %>%
-  filter(weight >=1000) %>% #only edges with at least 1000 occurrances aka 10%, I'm not sure on the rights and wrongs of a cut off. This is definately a case for the metric backbone. Doing this or not makes a substantial difference
-  graph_from_data_frame(directed = FALSE)
-
-
-```
-
-
-
-```{r}
-
-node_heights <- tibble(node = get.vertex.attribute(z_mst, "name"), z = get.vertex.attribute(z_mst, "z")) %>%
-  mutate(rank = rank(z))
-
-remove_nodes <- node_heights %>%
-  filter(rank>2) %>% pull(node)
-
-g_temp <- delete.vertices(z_mst, remove_nodes) 
-plot(g_temp)
-
-g_non_single <- delete.vertices(g_temp, get.vertex.attribute(g_temp,"name" )[degree(g_temp)==0])
-
-who_is_with_who <- tibble(name = names(components(g_non_single)$membership), component = components(g_non_single)$membership)
-
-
-#how to make a hclust object
-a <- list()  # initialize empty object
-# define merging pattern: 
-#    negative numbers are leaves, 
-#    positive are merged clusters (defined by row number in $merge)
-a$merge <- matrix(c(-1, -2,
-                    -3, -4,
-                     1,  2), nc=2, byrow=TRUE ) 
-a$height <- c(1, 1.5, 3)    # define merge heights
-a$order <- 1:4              # order of leaves(trivial if hand-entered)
-a$labels <- LETTERS[1:4]    # labels of leaves
-class(a) <- "hclust"        # make it an hclust object
-plot(a)                     # look at the result   
-
-#convert to a dendrogram object if needed
-ad <- as.dendrogram(a)
-
-```
-
-
-
-The extended model replaces k with functions for A and E. This arguably allows a more robust and flexible model.
-
-E is a function of line loading 
-A is a logistic function of free capacity and initial flow
-
-```{r}
-
-eta <- 5
-gamma <- 5
-midpoint <- 5
-k <- 1
-x <- seq(-10, 10, by = .01)
-
-calc_beta <- function(Force, Total_Free_Capacity, Free_Capacity){
-  
-  
- Fi - Fi/(Total_Free_Capacity - Free_Capacity)
-  
-}
-
-Freecapi <- 0
-FreeCap <- seq(Freecapi, 30, 0.1)
-x <- calc_beta(10, FreeCap, Freecapi)
-
-
-Area_df <- tibble(FreeCap, x, logisitc = 1/(1+exp(-k*(x-midpoint))), eta, gamma, final_curve = eta*logisitc + gamma)
-
-Area_df %>%
-ggplot(aes(x = FreeCap,y = final_curve)) + geom_line()
-
-
-
-test <- Calc_logistic_Spring_Area(g, "PowerFlow", "Link.Limit", .1, 2, .1) %>%
-  as_data_frame() %>% mutate(absFlow = abs(PowerFlow))
-
-test %>% 
-  ggplot(aes(x = Area/abs(PowerFlow), y = abs(abs(PowerFlow)/Link.Limit))) + geom_point()
-
-
-minimum_value <- 100
-stretch_ratio <-10
-
-
-test2 <- Calc_Spring_Youngs_Modulus(g, "PowerFlow", "Link.Limit", 100, 10) %>%
-  Calc_logistic_Spring_Area(., "PowerFlow", "Link.Limit", .1, 2, .1) %>%
-  as_data_frame() %>% mutate(absFlow = abs(PowerFlow))
-
-test2 %>% 
-  ggplot(aes(x = E, y = abs(abs(PowerFlow)/Link.Limit))) + geom_point()
-
-test2 %>%
-  ggplot(aes(x =E )) + geom_density()
-
-test2 %>% 
-  ggplot(aes(x = E, y = Area/abs(PowerFlow), colour = percent_rank(abs(PowerFlow)))) + geom_point() +
-  scale_color_viridis_c()
-
-
-```
-
-
-
-
-#fixed alpha and weigted alpha
-
-This plots the theta values of a 4 node three edge graph with a constant EC and varying alpha. It shows that theta is more expressive than either alpha, ec or a combination of the two
-
+The code giveing the animation that shows convergence has been lost. The animation is pretty helpful so it is a good idea to do it again.
 ```{r}
 
 #The function that calculate the force from the angle
@@ -1093,9 +401,10 @@ Edge_combos_delta_z <- Edge_combos$groupID2  %>%
       mutate( theta_rads = coef(solution_angle)[1],
               theta_degs = theta_rads*360/(2*pi),
               delta_z = tan(theta_rads),
-              delta_h = sqrt(delta_z^2 + 1)-1
+              delta_h = sqrt(delta_z^2 + 1)-1,
+              strain = delta_z # this is because the distance is 1 and strain = (H-d)/d and H = delta_h+d
       ) %>%
-      select(groupID, theta_rads, theta_degs, delta_z, flow, alpha, k, delta_h)
+      select(groupID, theta_rads, theta_degs, delta_z, flow, alpha, k, delta_h, strain)
   })  
 
 #calculate the ratio of excess capacity split between B and C then join with the alpha value by group
@@ -1116,50 +425,27 @@ toy_height_data <- fixed_mean_alpha %>%
 select(groupID, edge, flow, alpha) %>%
   #add in the height data
   left_join(Edge_combos_delta_z %>% select(-groupID))  %>%
-  select(groupID, edge, delta_z) %>%
+  select(groupID, edge, strain) %>%
   #Use spread to keep the delta values for each edge
-  spread(key = edge, value = delta_z) %>%
-  mutate(delta_z = pmax(B, C)+A,
-         theta_rads = atan(delta_z/2), #over 2 as there are two edges that make up the total angle
-         theta_degs = 360*theta_rads/(2*pi)) %>%
-  left_join(toy_theta_temp, by = "groupID") %>%
-  #add in weighted angle by block
-  mutate(theta_rads_weighted = (atan(A)+atan(B)*0.5+atan(C)*0.5)/(1+0.5+0.5),
-         theta_degs_weighted = theta_rads_weighted*360/(2*pi))
+  spread(key = edge, value = strain) %>%
+  mutate(mean_strain = (A+B+C)/3) %>%
+  left_join(toy_theta_temp, by = "groupID")
 
-
-max(toy_height_data$theta_degs)-min(toy_height_data$theta_degs)
-
-test <- toy_height_data %>%
-  mutate(mean_alpha = signif(mean_alpha,5)) %>%
-  group_by(mean_alpha) %>%
-  summarise(max_theta = max(theta_degs),
-            min_theta = min(theta_degs)) %>%
-  mutate(diff = max_theta-min_theta)
-
-test %>% ggplot(aes(y = diff, x = mean_alpha)) + geom_line()
 
   toy_height_data %>%
     # some of the mean_alpha values are seperating on machine tolerance or something
         mutate(mean_alpha = signif(mean_alpha,5)) %>% 
     #filter(mean_alpha <=2.5) %>%
-    ggplot(aes(x = ratio, y = theta_degs_weighted, colour = mean_alpha, group = mean_alpha)) + 
+    ggplot(aes(x = ratio, y = mean_strain, colour = mean_alpha, group = mean_alpha)) + 
     geom_line(size = 1) +
     scale_colour_viridis_c() +
-    labs(title =latex2exp::TeX(paste("Thev relationship between ", 
-                                     "$\\alpha , \\,ec$", " and ", "$\\theta$", 
-                                     " in terms of the weighting of ec in edge B" )), 
-         y = latex2exp::TeX(paste("system", "$\\theta$")), 
+    labs(title =latex2exp::TeX(paste("The relationship between strain and ", 
+                                     "$\\alpha \\,$", 
+                                     " in terms of ec fraction in edge B" )), 
+         y = "system strain", 
          x= latex2exp::TeX("$\\frac{ec_{B}}{ec_{B}+ec_{C}}$"),
          colour = latex2exp::TeX(paste("system", "$\\alpha$")))
   ggsave(file.path(FiguresFolder, "Constant_excess_capacity.pdf"))
-  
-test3 <- test2 %>% filter(ratio ==0.5) 
-test3 %>%
-    ggplot(aes(x = mean_alpha, y = theta_degs)) + geom_line()
-  
-
-
 
 "Relationship between alpha, excess capacity and theta"
 ```
@@ -1181,210 +467,24 @@ entropy_data<- fixed_mean_alpha %>%
          alpha = alpha/max(alpha))
 
 toy_height_data %>%
-  select(groupID, theta_degs, mean_alpha) %>%
+  select(groupID, mean_strain, mean_alpha) %>%
   left_join(entropy_data) %>%
-  gather(key = type, value = div, -theta_degs, - mean_alpha,-groupID ) %>%
+  gather(key = type, value = div, -mean_strain, - mean_alpha,-groupID ) %>%
     mutate(mean_alpha = signif(mean_alpha,5)) %>%  # some of the mean_alpha values are seperating on machine tolerance or something
-  ggplot(aes(x = div, y = theta_degs, colour = mean_alpha, group = mean_alpha)) + 
+  ggplot(aes(x = div, y = mean_strain, colour = mean_alpha, group = mean_alpha)) + 
   geom_line(size = 1) +
   scale_colour_viridis_c() +
   facet_grid(~type) +
-  labs(title = latex2exp::TeX(paste("Exploring the relationship between","$\\theta$", 
+  labs(title = latex2exp::TeX(paste("Exploring the relationship between strain", 
                                     ",", 
                                     "$\\alpha$", "and entropy")), 
        x = "Normalised entropy", 
-       y =latex2exp::TeX(paste("system", "$\\theta$")), 
+       y ="system strain", 
        colour =  latex2exp::TeX(paste("system", "$\\alpha$")))
 ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
 
 rm(entropy_data)
 ```
-
-
-
-##theta relation with force fraction
-
-```{r}
-#What happens when the base and the stiffness/stretch ratio is changed?
-#Where is the linear and non linear regime for theta?
-
-
-Adjmat2 <- c(0,1,
-             1,0) %>%
-  matrix(nrow = 2, byrow = T)
-
-toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected") 
-
-
-pair_network <- expand.grid(flow = seq(0.1,1, 0.1), alpha = c(c(1:10, Inf), 
-                                                              c(1/seq(0.9,1,0.01),Inf),
-                                                              c(1/seq(0.01,0.1,0.01),Inf)
-)
-) %>%
-  as.tibble %>%
-  mutate(groupID = 1:n(),
-         type = c(rep("General", 110), rep("Low", 120), rep("High", 110)))
-
-ff_delta_z <- pair_network$groupID  %>% 
-  map_df(~{  
-    
-    print(.x)
-    
-    current_settings <- pair_network  %>%
-      filter(groupID == .x)
-    
-    toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected")  %>% 
-      set.vertex.attribute(., "Force", value = c(current_settings$flow,-current_settings$flow)) %>% #ensures the forces are opposite
-      set.edge.attribute(., "Flow", value = current_settings$flow) %>%
-      set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
-      set.edge.attribute(., "capacity", value =  current_settings$alpha*current_settings$flow) %>%
-      set.edge.attribute(., "distance", value = 1) %>%
-      set.edge.attribute(., "Area", value = 1) %>%
-      Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
-      set.vertex.attribute(., "name", value = nrow(Adjmat2)) %>%
-      set.edge.attribute(., "Link", value = LETTERS[1])
-    
-    
-    toy_results <- Find_network_balance(toy2, force = "Force", flow = "Flow", capacity = "capacity",
-                                        tstep = .01, tol = 1e-10, distance = "distance",
-                                        maxIter = 8000, mass = 1, verbose = F)
-    
-    
-    toy_z <- toy_results$NodeList$z
-    
-    oa <-(max(toy_z)-min(toy_z))
-    
-    theta_rads <- atan(oa)
-    theta_degs <- 360*theta_rads/(2*pi)
-    
-    Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa, 
-                  flow = current_settings$flow,
-                  alpha = current_settings$alpha,
-                  k = get.edge.attribute(toy2, "E")[1],
-                  type = current_settings$type,
-                  delta_h = sqrt(delta_z^2 + 1)-1)
-    return(Out)
-    
-  })
-
-
-delta_h <- sqrt(oa^2+1)-1
-delta_h * Out$k
-Out$k*Out$delta_h
-Out$flow/sin(Out$theta_rads)
-
-
-ff_delta_z %>%
-  mutate(type = fct_relevel(type, "General", after = 1)) %>%
-  filter(alpha>1) %>%
-  group_by(type) %>%
-  mutate(p_alpha = percent_rank(alpha),
-         fsin = sin(theta_degs)*flow,
-         ften = k*delta_h*sin(theta_rads)) %>%
-  filter(type =="High") %>%
-  ggplot(aes(x = k*delta_h*sin(theta_rads), y = delta_z, colour = alpha, group = alpha)) + 
-  geom_line() +
-  scale_colour_viridis_c()+
-  facet_wrap(~type, scales = "free_y") +
-  labs(title = "Relationship between theta and flow fraction for different alpha values",
-       x = "Flow Fraction",
-       y = "theta")
-ggsave(file.path(FiguresFolder, "Theta_vs_flow_for_alpha.pdf"))
-
-
-ff_delta_z %>%
-  #filter(ifelse(type== "General" & alpha==1 , 0,1)) %>%
-  group_by(type) %>%
-  mutate(p_alpha = percent_rank(alpha)) %>%
-  ggplot(aes(x = alpha, y = theta_degs, colour = flow, group = flow)) + 
-  geom_line() +
-  scale_colour_viridis_c()+
-  facet_grid(type~., scales = "free")
- 
-```
-
-
-#theta range
-```{r}
- 
- pair_network <- expand.grid(flow = c(1,0.5), alpha=1.8#seq(0,1, 0.01), alpha = c(Inf, 1)
-                             ) %>%
-  as.tibble %>%
-  mutate(groupID = 1:n())
-
- theta_range <- pair_network$groupID  %>% 
-   map_df(~{  
-     
-     print(.x)
-     
-     current_settings <- pair_network  %>%
-       filter(groupID == .x)
-     
-     toy2 <- graph_from_adjacency_matrix(Adjmat2, mode = "undirected")  %>% 
-       set.vertex.attribute(., "Force", value = c(current_settings$flow, -current_settings$flow) ) %>%
-       set.edge.attribute(., "Flow", value = current_settings$flow) %>%
-       set.edge.attribute(., "alpha", value =  current_settings$alpha) %>%
-       set.edge.attribute(., "capacity", value =  current_settings$alpha*current_settings$flow) %>%
-       set.edge.attribute(., "distance", value = 1) %>%
-       set.edge.attribute(., "Area", value = 1) %>%
-       Calc_Spring_Youngs_Modulus(., "Flow", "capacity", 100, 10) %>%
-       set.vertex.attribute(., "name", value = 1:2) %>%
-       set.edge.attribute(., "Link", value = LETTERS[1])
-     
-     
-     toy_results <- Find_network_balance(toy2, force = "Force", flow = "Flow", capacity = "capacity",
-                                         tstep = 0.01, tol = 1e-10, distance = "distance",
-                                         maxIter = 8000, mass = 1, verbose = T)
-     
-     
-     toy_z <- toy_results$NodeList$z
-     
-     oa <-(max(toy_z)-min(toy_z))
-     
-     theta_rads <- atan(oa)
-     theta_degs <- 360*theta_rads/(2*pi)
-     
-     Out <- tibble(groupID = .x, theta_rads, theta_degs, delta_z = oa, 
-                   flow = current_settings$flow,
-                   alpha = current_settings$alpha,
-                   k = get.edge.attribute(toy2, "E")[1])
-     return(Out)
-     
-   })
- 
- 
- Out$flow/sin(Out$theta_rads)
- 
- sin(Out$theta_rads)
- 
-H <- sqrt(Out$delta_z^2 + 1)
-delta_h <- H-1
-
-delta_h*Out$k*sin(theta_rads)
-
-delta_h*Out$k*Out$delta_z
-
- kmat*(Hmat-Dmat)*dZmat/Hmat
-
- 
-theta_range2 <- theta_range %>%
-  select(theta_degs= delta_z, alpha, flow) %>%
-  spread(key = alpha, theta_degs) %>%
-  mutate(theta_range = `1`-`Inf`) 
-
-theta_range2 %>%
-   ggplot(aes(x = flow, y = theta_range)) + 
-   geom_line()
-
-
-test <- theta_range %>%
-  mutate(Hypotenuse = delta_z/sin(theta_rads))
-
-test %>%
-  ggplot(aes(x = delta_z, y = (Hypotenuse))) + geom_point()
-
-```
-
 
 
 #IEEE118
@@ -1472,177 +572,17 @@ Normalize_load <- function(force = "PowerFlow", capacity = "Link.Limit")
   
 ```
 
-##weighted angle
-
-I realised that simply doing highest to lowest causing large distortions in apparent robustness caused by dangling minor branches.
-weighted block vulnerability seems more robust to outliers
-```{r}
-
-Calc_weighted_angle <- function(g, height_df, node_name = "name", force = "Net_Generation"){
-  
-  #Calculates the mean angle of all the blocks weighted by total power of the balanced blocks
-  
-  #This function was designed to work with the IEEE_118 graph only. 
-  #It has not been tested on other graphs and may cause problems
-  
-  #get the biconnected components/blocks
-  List_of_BiConComps <- Create_balanced_blocks(g, force = force)
-  
-  #find which node is in which components, articulations nodes will be in more than one component
-  node_presence_df <- 1:length(List_of_BiConComps) %>%
-    map_df(~{
-      
-      block_vertex <- List_of_BiConComps[[.x]] %>%
-        get.vertex.attribute(., node_name)
-      
-      temp <- tibble(node = get.vertex.attribute(g, node_name)) %>%
-        mutate(value =  node %in% block_vertex,
-               block = .x)
-      
-      return(temp)
-    }) %>%
-    filter(value) %>%
-    mutate(node = as.integer(node))
-  
-  #modify the height dataframe to include, the generation data (this is very experimental)
-  height_df <-height_df %>%
-  left_join(as_data_frame(g, what = "vertices") %>%
-  select(node = name, Net_Generation), by = "node" )%>%
-  mutate(pos_gen = ifelse(Net_Generation>0, Net_Generation, 0))
-  
-  #get the angle of each block
-  all_block_angles <- 1:length(List_of_BiConComps) %>%
-  map_df(~{
-    block <- List_of_BiConComps[[.x]]
-    
-    #Nodes in block
-    temp_nodes_df <- node_presence_df %>% 
-      filter(block ==.x, )
-    
-    #Height of Nodes in block
-    height_df_temp <- height_df %>%
-      filter(node %in% temp_nodes_df$node)
-    
-    block_power <-get.vertex.attribute(block, force)%>%
-               ifelse(.>0, ., 0)
-    
-    angle_from_solved_heights(height_df_temp, block) %>%
-      mutate(block = .x,
-             #The sum of the power should really be the amount of power generated by the block not the power passed through the block, this is becuase some blocks may have a huge amount of power passing through them but generate nothing.
-             #Then again depending on the topology perhaps this isn't important?
-             weight =  sum(block_power), #The weight of the block 
-             weight2 = sum(height_df_temp$pos_gen)) 
-    
-  })
-  
-  Out <- all_block_angles
-  
-  #put angles into a data frame
-  # Out <- tibble(theta_rads = weighted.mean(all_block_angles$theta_rads, all_block_angles$weight),
-  #      theta_degs = theta_rads*360/(2*pi) )
-  
-  return(Out)
-}
-
-
-IEEE_theta_by_alpha2 <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE) %>%
-  map_df(~{
-    read_rds(.x) %>%
-    Calc_weighted_angle(IEEE_118, .) %>%
-    mutate(alpha = basename(.x),
-           )  
-  }) %>%
-  mutate(alpha = gsub("IEEE_118_alpha_", "", alpha) %>%
-           gsub(".rds", "",.) %>% as.numeric())
-
-IEEE_theta_by_alpha_ec2 <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha"), recursive = FALSE) %>%
-  map_df(~{
-
-    Out <- list.files(.x, full.names = TRUE) %>%
-      map_df(~{
-        read_rds(.x) %>%
-             Calc_weighted_angle(IEEE_118, .) %>%
-          mutate(alpha = basename(.x))  
-      }) %>%
-      rename(v = alpha) %>%
-      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
-              v = gsub("IEEE_118_v_", "", v) %>%
-                gsub(".rds", "",.) %>% as.numeric )%>% 
-      arrange(v) #%>% 
-     bind_cols(target_orders) #This is the target orders from the IEEE script
-    
-    return(Out)
-    
-  })
-
-
-test1 <- IEEE_theta_by_alpha2 %>%
-  group_by(alpha) %>%
-  mutate(weight_frac = weight/sum(weight2),
-         theta_rads_frac = theta_rads*weight_frac,
-         theta_degs_frac = theta_rads_frac*360/(2*pi))
-
-test1_summ <- test1 %>%
-  group_by(alpha) %>%
-  summarise(theta_rads = sum(theta_rads_frac)/sum(weight_frac)) %>%
-  mutate(theta_degs = theta_rads*360/(2*pi))
-
-test2 <- IEEE_theta_by_alpha_ec2 %>%
-  rename(alpha = ec) %>%
-  group_by(alpha, v) %>%
-  mutate(weight_frac = weight/sum(weight2),
-         theta_rads_frac = theta_rads*weight_frac,
-         theta_degs_frac = theta_rads_frac*360/(2*pi))
-
-test2_summ <- test2 %>%
-  group_by(alpha, v) %>%
-  summarise(theta_rads = sum(theta_rads_frac)/sum(weight_frac)) %>%
-  mutate(theta_degs = theta_rads*360/(2*pi))
-
-#load the dynamics df for the Inf system
-Inf_sys <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks/Solved_height_networks/IEEE_118_alpha_Inf.rds"   %>%
-  read_rds
-
-#load the dynamics df for the 10 v 10 ec system
-
-ten_sys <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks/constant_ec_from_alpha/Solved_height_networks_alpha_1000/IEEE_118_v_6.rds" %>%
-  read_rds()
-
-
-comp <- left_join(ten_sys, final_z, by = "node") %>%
-  mutate(diff = z.x-z.y,
-         abs_diff = abs(diff))
-
-
-test3 <- Calc_weighted_angle(IEEE_118, final_z) %>%
-  mutate(weight_frac = weight/sum(weight2),
-         theta_rads_frac = theta_rads*weight_frac,
-         theta_degs_frac = theta_rads_frac*360/(2*pi))
-
-test3_summ <- test3 %>%
-  summarise(theta_rads = sum(theta_rads_frac)/sum(weight_frac)) %>%
-  mutate(theta_degs = theta_rads*360/(2*pi))
-
-
-combined_1 <- IEEE_theta_by_alpha_ec2 %>%
-  filter(v==6, ec == 1000) %>%
-  select(EC_10_degs = theta_degs, block) %>%
-  left_join(IEEE_theta_by_alpha2 %>% filter(alpha == Inf) %>%
-              select(block, alpha_Inf_degs = theta_degs),.,  by = "block")
-
-```
-
-
-##calculate theta by alpha
+##Strain alpha relationship
 
 ```{r}
- 
 target_orders  <- readRDS(file.path(IEEE_Project_folder, "target_orders.rds"))
 
 IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE) %>%
   map_df(~{
     read_rds(.x) %>%
-    angle_from_solved_heights(.) %>%
+    Calc_line_strain(IEEE_118_test , ., distance = distance) %>%
+      summarise(theta_degs = mean(strain)) %>%
+    #angle_from_solved_heights(.) %>%
     mutate(alpha = basename(.x),
            )  
   }) %>%
@@ -1655,7 +595,9 @@ IEEE_theta_by_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_f
     Out <- list.files(.x, full.names = TRUE) %>%
       map_df(~{
         read_rds(.x) %>%
-          angle_from_solved_heights(.) %>%
+    Calc_line_strain(IEEE_118_test , ., distance = distance) %>%
+      summarise(theta_degs = mean(strain)) %>%
+    #angle_from_solved_heights(.) %>%
           mutate(alpha = basename(.x))  
       }) %>%
       rename(v = alpha) %>%
@@ -1678,7 +620,6 @@ Data loaded from Create_IEEE_networks.Rmd
 
 ##Extract Nodes version
 ```{r}
-
 
 critical_threshold <- function(g){
   #finds the critical threshold according to the molly reed criterion
@@ -1797,13 +738,6 @@ list.dirs(file.path(IEEE_Project_folder,"IEEE_permute_edge_ec_Edge"), recursive 
     
   })
 
-#I don't know what is the difference between this one and the previous need, to check but will comment out before that point
-# ExtractAttackStats(file.path(IEEE_Project_folder, "IEEE1118_const_ec"), 
-#                    file.path(IEEE_Project_folder, "SummaryData_ec_alpha_2"),
-#                    Generation = "Net_Generation",
-#                    EdgeName = "Link")
-
-
 
 AttackRoundData <- list.files(path = file.path(IEEE_Project_folder,"SummaryData_edges_attack"), 
                               pattern = ".rds", 
@@ -1817,7 +751,6 @@ AttackRoundData <- list.files(path = file.path(IEEE_Project_folder,"SummaryData_
   summarise_all(first) %>%
   mutate(alpha = gsub("alpha_value_", "", alpha) %>% 
            as.numeric()/100)
-
 
 
 AttackRoundData_ec_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"SummaryData_ec_alpha_2_Edge"), recursive = F) %>%
@@ -1849,19 +782,25 @@ AttackRoundData_ec_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"SummaryD
 
 ##plot scramble results
 ```{r}
-IEEE_theta_by_alpha <- test1_summ %>% ungroup #IEEE_theta_by_alpha2 
-IEEE_theta_by_alpha_ec <- test2_summ%>% rename(ec = alpha)%>% ungroup #IEEE_theta_by_alpha_ec2
+relative_position <- function(strain_vect, ref_strain_vect){
+  #this function finds the relative fraction of strain compared to the absolute max and min values of that parameter
+  #strain_vect a numeric value of the mean strain of a network
+  #ref_strain_vect a vector of values of at least two inclduing the strain in the network when k = c and k = RC
+  (strain_vect-min(ref_strain_vect))/(max(ref_strain_vect)-min(ref_strain_vect))
+  
+}
 
-
+#get the mean number of edges attacked per line loading alpha
 theta_crit_thresh <- AttackRoundData %>%
   group_by(alpha) %>%
   summarise_all(mean) %>%
   left_join(IEEE_theta_by_alpha) %>%
   mutate(alpha = 1/alpha,
-         theta_degs = (theta_degs-min(IEEE_theta_by_alpha$theta_degs))/(max(IEEE_theta_by_alpha$theta_degs)-min(IEEE_theta_by_alpha$theta_degs))) %>%
+         orig_strain = theta_degs,
+     theta_degs =   relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs) ) %>%
   mutate(true_alpha = 1/alpha)
 
-
+#get the mean number of elements attacked for each of the hundred random attacks per scramble
 theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
  # group_by(alpha) %>%
   #select(-v) %>%
@@ -1869,20 +808,21 @@ theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
   left_join(IEEE_theta_by_alpha_ec %>% 
               mutate(ec = ec %>% as.numeric(.)/100)) %>%
   mutate(alpha = 1/alpha,
-         theta_degs = (theta_degs-min(IEEE_theta_by_alpha$theta_degs))/(max(IEEE_theta_by_alpha$theta_degs)-min(IEEE_theta_by_alpha$theta_degs)))
+                  orig_strain = theta_degs,
+         theta_degs =  relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs))
 
-min(IEEE_theta_by_alpha$theta_degs)
-
+#reshape so that the alpha and strain values can be plotted
 PropLoad_line <- theta_crit_thresh %>%
   select(alpha, NodesAttacked, theta_degs) %>%
   gather(key = type, value = value, -NodesAttacked)  %>%
-  mutate(type = type %>%factor(., labels = c("1/alpha[sys]", "theta~as~fraction~of~max~range")))
+  mutate(type = type %>%factor(., labels = c("1/alpha[sys]", "epsilon~as~fraction~of~max~range")))
 
+#reshape so that the alpha and strain values can be plotted
 scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
                select(alpha, NodesAttacked, theta_degs, ec, v) %>%
                gather(key = type, value = value, -NodesAttacked, -ec, -v) %>%
   mutate(ec = factor(ec),
-         type = type %>%factor(., labels = c("1/alpha[sys]", "theta~as~fraction~of~max~range"))
+         type = type %>%factor(., labels = c("1/alpha[sys]", "epsilon~as~fraction~of~max~range"))
          #type = ifelse(type=="theta_degs", "Theta as fraction of range between max and min", "One over system alpha")
          ) %>%
   mutate(alpha_limit = case_when(
@@ -1891,1011 +831,17 @@ scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
     TRUE ~"0ther"
   ))
 
+#plot the data to show that the strain value has a closer relationship to 
 PropLoad_line %>%
-  ggplot(aes(x = value, y = NodesAttacked)) + 
+  ggplot(aes(y = 1/value, x = NodesAttacked)) + 
   geom_line() +
-  #geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
-  geom_point(data = scrambled_ec_points, aes(colour = ec)) +
+ # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
+  geom_point(data = scrambled_ec_points,# %>%  filter(ec !=100),
+             aes(colour = ec)) +
   facet_grid(~type, scales = "free_x", labeller = label_parsed) + #parsing shows the plotmath
-  labs(title = "Comparing theta for different alpha and excess capacity levels", 
-       y = "Nodes Attacked") #+
+  labs(title = "Comparing strain for different alpha and excess capacity levels", 
+       y = "Edges Attacked")
 #scale_colour_viridis_d()
-  #geom_smooth(data = bind_rows(test,test2))
-#ggsave(file.path(FiguresFolder, "Theta_vs_alpha_ec_118.pdf"))
-
-test <- bind_rows(PropLoad_line %>% mutate(type2 = "prop"), scrambled_ec_points%>% mutate(type2 = "scram")) %>%
-  spread(type, value) %>%
-  setNames(c("Nodes_attacked", "type", "ec", "v", "alpha", "theta"))
-
-test  %>% 
-  filter(type !="prop") %>%
-  ggplot(aes(x = log(alpha), Nodes_attacked, colour = theta )) + geom_point() +
-  facet_wrap(~v) +
-    scale_color_viridis_c()
+ggsave(file.path(FiguresFolder, "Theta_vs_alpha_ec_118.pdf"))
 
 ```
-
-
-#angles and force
-
-```{r}
-#distance is 1
-
-k <- 1000
-d <- 1 #distance
-Force <- 10
-#the angles to test
-angles <- pi/2*c(0.0000001,seq(0.0001,.9999, 0.0001)) #prevents 90 degrees
-
-H <- sqrt(d^2 + tan(angles)^2)
-
-#The maximum value Force H can be is k
-test <- tibble(ForceT = k*(H-d), angles, degs = angles*180/pi, H, ratio = tan(angles), ratio2 = ratio^2,
-               ForceV = ForceT*sin(angles), ForceH = ForceT*cos(angles),
-               log_ForceV = log(ForceV),
-               ForcesquareArea = ForceV*ForceH,
-               ForceArea = ForcesquareArea/2,
-               AreaRatio = ForceArea/ratio2,
-               SquaredForceRatio = ForceH^2/ForceV^2)
-
-#The ration of the Force area to the physical area looks like the mirror of the beta distribution with alpha = 2 and beta = 5
-which.min((test$ForceV-test$ForceH))
-
-
-test %>%
-  mutate(HminusV =  ForceH-ForceV) %>%
-  filter(HminusV>0) %>%
-  filter(degs !=90) %>%
-  ggplot(aes(x = degs, y = HminusV)) + geom_line()
-
-test  %>% filter((ForceV)<100, SquaredForceRatio<100)%>%
- #filter(degs >0.0001) %>%
-  ggplot(aes(x = ((ForceV)), y = SquaredForceRatio )) + geom_line() 
-+
-  scale_y_continuous(trans='log2') + scale_x_continuous(trans='log2') 
-
-test %>% filter(log(ForceV)>-21, log(ForceV) <=-10)
-
-Logtest <- test %>%
-  mutate(log_angles = log(angles),
-         log_ForceH = log(ForceH),
-         log_tan_angles = log(ratio)) 
-
-#creates a very accurate model for a large range of values
-Log_Mod <-lm(log_angles~log(ForceV), Logtest)
-
-test2 <- Logtest %>% mutate(Log_preds_angles = predict(Log_Mod),
-                            preds_angles = exp(Log_preds_angles),
-                            preds_H = sqrt(1 + tan(preds_angles)^2),
-                            preds_ForceT = k*(preds_H-1),
-                            preds_ForceV = preds_ForceT*sin(preds_angles),
-                            angles_error = preds_angles -angles,
-                            angles_perc_error = angles_error/angles,
-                            ForceV_error = preds_ForceV-ForceV,
-                            ForceV_perc_error = ForceV_error/ForceV)
-
-test2 %>%
-  ggplot(aes(x = degs, y = angles_perc_error)) + geom_line()
-
-metrics(test2, truth = angles, estimate = preds_angles)
-metrics(test2, truth = ForceV, estimate = preds_ForceV)
-
-
-test3 <- test2 %>% select(angles, degs, preds_angles, H, preds_H, ForceV, preds_ForceV) %>%
-  mutate(angle_perc = preds_angles/angles, 
-         ForceV_perc = preds_ForceV/ForceV)
-
-summary(Log_Mod)
-
-#how do I set the intercept of the model?
-
-coefficients(Log_Mod)
-
-#Finding the intercept for a variable distance and variable k
-edge_distance <-c(0.5, 1:50 )
-
-joint_tab<- expand.grid(distance = edge_distance, k = seq(1, 2000, 10))
-
-Intercept_data_edge <- map2_df(.x = joint_tab$k, .y = joint_tab$distance, ~{
-
-  H <- .y/cos(angles)
-  
-  #find the pattern of the intercepts
-test <- tibble(ForceT = .x*(H-.y), angles, degs = angles*180/pi, H, ratio = tan(angles), ratio2 = ratio^2,
-               O = ratio*.y,
-               ForceV = ForceT*sin(angles), ForceH = ForceT*cos(angles),
-               distance = .y)
-
-Logtest <- test %>%
-  mutate(log_angles = log(angles),
-         log_ForceH = log(ForceH),
-         log_ForceV = log(ForceV),
-         log_distance = log(distance))
-
-Log_Mod <-lm(log_angles~log_ForceV, Logtest)
-
-#predict results
-test2 <- Logtest %>% mutate(Log_preds_angles = predict(Log_Mod),
-                            preds_angles = exp(Log_preds_angles),
-                            preds_H = sqrt(1 + tan(preds_angles)^2),
-                            preds_ForceT = k*(preds_H-1),
-                            preds_ForceV = preds_ForceT*sin(preds_angles),
-                            angles_error = preds_angles -angles,
-                            angles_perc_error = angles_error/angles,
-                            ForceV_error = preds_ForceV-ForceV,
-                            ForceV_perc_error = ForceV_error/ForceV)
-
-perf <- metrics(test2, truth = ForceV, estimate = preds_ForceV) %>%
-  select(-.estimator) %>% spread(key = .metric, .estimate)
-
-
-coefficients(Log_Mod) %>% enframe() %>%
-  mutate(k = .x,
-         distance = .y) %>% 
-  spread(., key = name, value) %>%
-  rename(Intercept = '(Intercept)') %>%
-  bind_cols(perf)
-}) 
-
-
-Log_Int <-lm(Intercept~log(k) + log(distance), Intercept_data_edge)
-coefficients(Log_Int)
-
-test2 <- Intercept_data_edge %>% mutate(preds_Int = predict(Log_Int))
-
-#essentially pure linear relations
-metrics(test2, truth = Intercept, estimate = preds_Int)
-
-
-#When the angle is guarenteed to be small there is a linear relationship between force v and height z 
-
-#What is the cross over point for Fh and FV for different values of k?
-
-Kcross <- 1:1000 %>%
-  map2_df(~{
-    
-    
-    
-    test <- tibble(ForceT = k*(H-.x), angles, degs = angles*180/pi, H, ratio = tan(angles), ratio2 = ratio^2,
-               ForceV = ForceT*sin(angles), ForceH = ForceT*cos(angles),
-               distance = .x,
-               k = y)
-    
-    tibble(ref = which.min((test$ForceV-test$ForceH)), max_diff = test$angles[ref], d = .x)
-      })
-
-Kcross %>%
-  ggplot(aes(x = (d), y = max_diff)) + geom_line()
-
-
-midpoint <- map2_df(.x = joint_tab$k, .y = joint_tab$distance, ~{
-    
-    test <- tibble(H =.y/cos(angles), ForceT = .x*(H-.y), angles, degs = angles*180/pi, ratio = tan(angles), ratio2 = ratio^2,
-               ForceV = ForceT*sin(angles), ForceH = ForceT*cos(angles)
-               )
-    
-    test %>% filter(degs == 45) %>%
-      mutate(distance = .y,
-             k = .x)
-      })
-
-
-test_mid <- midpoint %>%
-  mutate(fv2 = k*distance*(1-sqrt(2)/2))
-  filter(distance == 1)
-
-
-
-```
-
-
-#estimate forceH
-```{r}
-Logtest <- test %>%
-  mutate(log_angles = log(angles),
-         log_ForceH = log(ForceH),
-         log_tan_angles = log(ratio),
-         log_ForceV = log(ForceV)) %>%
-  filter( degs<60 )
-
-Log_Mod_ForceH <-lm(log_ForceH~log_ForceV, Logtest)
-test2 <- Logtest %>% mutate(Log_preds_ForceH = predict(Log_Mod_ForceH),
-                            preds_ForceH = exp(Log_preds_ForceH),
-                            preds_angles = atan(ForceV/ForceH),
-                            angles_error = preds_angles -angles,
-                            angles_perc_error = angles_error/angles,
-                            ForceH_error = preds_ForceH-ForceH,
-                            ForceH_perc_error = ForceH_error/ForceH)
-
-test2 %>%
-#  filter(degs<45) %>%
-  ggplot(aes(x = degs, y = ForceH_perc_error)) + geom_line()
-
-
-
-x <- tibble(x = seq(0.001, 10, 0.001)) %>%
-  mutate(id = 1:nrow(.))
-
-
-x %>%
-  ggplot(aes(x = id, y = 1/(x))) + geom_line()
-
-joint_tabH <- expand.grid(distance = c(0.5, 1:50 ), k = c(10, seq(1, 2000, 10)))
-
-#the rsq is converted to pi/2 when put in a data frame why?
-kd_coeffs <- pi/2*seq(0.0,1,0.01) %>% map_df(~{
-  target_angle <- .x
-  
-  balance <- tibble(H =joint_tabH$distance/cos(angle), 
-                    ForceT = joint_tab$k*(H-joint_tabH$distance), 
-                    angles = target_angle, 
-                    degs = angles*180/pi, 
-                    ratio = tan(target_angle), 
-                    ratio2 = ratio^2,
-                    ForceV = ForceT*sin(target_angle), 
-                    ForceH = ForceT*cos(target_angle),
-                    k = joint_tabH$k,
-                    distance = joint_tabH$distance,
-                    kd = k*distance,
-                    B = k*distance*(1-1/sqrt(2)))
-  
-  
-  mid_mod <-lm(ForceV~ kd +0, balance)
-  
-  mod_test <- balance %>% select(ForceV) %>%
-    mutate(preds_ForceV = predict(mid_mod))
-  
-  perf <- metrics(mod_test, truth = ForceV, estimate = preds_ForceV) %>%
-    select(-.estimator) %>% spread(key = .metric, .estimate)
-  
-  Out <- perf %>% mutate(angles = target_angle, 
-                coeff = coefficients(mid_mod)[1]) 
-  
-  return(Out)
-
-}) %>%
-  mutate(degs = angles*360/(2*pi))
-
-balance %>%
-  filter( k ==10) %>%
-  ggplot(aes(y = ForceV, x = distance)) + geom_line()
-
-balance %>%
-  filter( distance == 1) %>%
-  ggplot(aes(y = ForceV, x = k)) + geom_line()
-
-
-coefficients(mid_mod)
-summary(mid_mod)
-test <- balance %>% 
-  select(k, distance, ForceV) %>%
-  mutate(preds = predict(mid_mod))
-
-kd_coeffs %>% 
-  ggplot(aes(y = (angles), x = (coeff))) + geom_line()
-
-
-coeff_mod <-  lm(coeff~angles^2, kd_coeffs)
-
-summary(coeff_mod)
-
-
-```
-
-
-#non-linear attmpts to map angle
-```{r}
-
-d <- 1
-
-dummy <- tibble(H = sqrt(d^2 + tan(angles)^2),
-                ForceT = k*(H-d), angles, degs = angles*180/pi, ratio = tan(angles), ratio2 = ratio^2,
-               ForceV = ForceT*sin(angles), 
-               ForceH = ForceT*cos(angles),
-               ForcesquareArea = ForceV*ForceH,
-               ForceArea = ForcesquareArea/2,
-               AreaRatio = ForceArea/ratio2) %>%
-  mutate(y = log(angles),
-         x = log(ForceV),
-         L = pi/2,
-         distance= d,
-         x0 = log(k*distance*(1-sqrt(2)/2)))
-
-Out <- minpack.lm::nlsLM(y ~ L / (1 + exp( -growth* (x-x0 )))+p, start=c( growth=-.1, p =3 ), data=dummy)
-Out
-names(Out)
-
-dummy2 <- dummy %>% mutate(preds = predict(Out))
-
-summary(Out)
-
-Out2 <- seq(0.1, 0.8, 0.1) %>%
-  map_df(~{
-    
-    dummy %>% mutate(pred_angles = L / (1 + exp( -.x*(x-x0))),
-                     pred_angles= pred_angles*360/(2*pi),
-                     growth = .x) %>%
-      select(angles = pred_angles, ForceV, growth)
-    
-  }) %>%
-  bind_rows(dummy %>% mutate(growth = 0) %>% select(angles = degs, ForceV, growth))
-
-
-Out2 %>%
-  filter(growth == 0, angles == 45) %>%
-  ggplot(aes(x = -log(ForceV), y = 90-(angles), colour = factor(growth))) + geom_line() +
-  geom_hline(yintercept = (45))
-
-
-Gompertz_func <- function(K, B, C, x){
-#K is the carrying capacity
-  #B displacement
-  #C other growth factor
-  #x the input variable
-  K*exp(-B*exp(-C*x))
-  
-}
-
-
-Generalised_logistic_func <- function(K, C, Q, B, V, x){
-  K2 <- K*C^(1/V)
-  
-  K2/(C+Q*exp(-B*x))^(1/V)
-  
-  
-}
-
-Genalised_verhulst_func <- function(Q, n, k, x, x0){
-  #http://www.roperld.com/science/minerals/VerhulstFunction.htm
-    #Q is the carrying capacity previously called K
-  #n is an assymetry number
-  
-  Q/(1+(2^n-1)*exp(k*(x-x0)))^(1/n)
-  
-}
-
-  
-  
-
-
-tune_gom <- function(df, K,B,C, min = 0, max = pi/2){
-  
-  
-  Gomp_df <-   df %>%
-    filter(angles>=min, angles<=max)%>%
-    mutate(Gompertz = Gompertz_func(pi/2, B, C, -log(ForceV)))
-  
-  Gomp_df  %>% mutate(type = "Gompertz", Gompertz  = pi/2-Gompertz) %>% select(ForceV, angles = Gompertz, type)  %>%
-    pull(angles)
-  
-}
-
-
-tune_gen_log <- function(df,K, C, Q, B, V, min = 0, max = pi/2){
-  
-  
-  Gomp_df <-   df %>%
-    filter(angles>=min, angles<=max)%>%
-    mutate(Gompertz = Generalised_logistic_func(K, C, Q, B, V, -log(ForceV)))
-  
-  Gomp_df  %>% mutate(type = "Gompertz", Gompertz  = pi/2-Gompertz) %>% select(ForceV, angles = Gompertz, type)  %>%
-    pull(angles) %>% log
-  
-}
-
-
-
-tune_gen_ver <- function(df1, Q, n, k, x0, min1 = 0, max1 = pi/2){
-  
-  
-  Gomp_df <-   df1 %>%
-    filter(angles>=min1, angles<=max1)%>%
-    mutate(Gompertz = Genalised_verhulst_func(Q, n, k, log(ForceV), x0))
-  
-  Gomp_df  %>% mutate(type = "Gompertz", Gompertz  = pi/2-Gompertz) %>% select(ForceV, angles = Gompertz, type)  %>%
-    pull(angles)
-  
-}
-
-
-B <- 0.4566
-C<- 0.4049
-
-
-
-Out <- minpack.lm::nlsLM(angles ~ tune_gom(dummy, pi/2, B, C, max = pi/8), start=c( B=.1, C =3 ), data=dummy %>% filter(angles<=pi/8))
-Out <- minpack.lm::nlsLM(y ~tune_gen_log(dummy, pi/2, C, Q, B, V), start=c(C =2, B = 0.1, Q = 2, V = 1), data=dummy)
-Out <- minpack.lm::nlsLM(angles ~tune_gen_ver(dummy, Q =pi/2, n, k, x0), start=c(n = 0.8, k = 0.8, x0 = -0.5), data=dummy)
-
-Out
-
-#GOmerts
-Gomp_df <-   dummy %>%
-  mutate(Gompertz = Gompertz_func(pi/2, coefficients(Out)[1], coefficients(Out)[2], -log(ForceV)))
-#generalised linear
-Gomp_df <-   dummy %>%
-  mutate(Gompertz =  Generalised_logistic_func(pi/2, C= coefficients(Out)[1],
-                                               Q = coefficients(Out)[3],  
-                                               B= coefficients(Out)[2], 
-                                               V = coefficients(Out)[4], -log(ForceV)))
-#Generalised verhulst
-Gomp_df <-   dummy %>%
-    mutate(Gompertz =   Genalised_verhulst_func(pi/2, n=0.8, k=0.8, log(ForceV), x0 =-0.5))
-  
-Gomp_df <- bind_rows(Gomp_df  %>% mutate(type = "Gompertz", Gompertz  = pi/2-Gompertz) %>% select(ForceV, angles = Gompertz, type),
-                      Gomp_df %>% select(ForceV, angles) %>% mutate(type = "real"))
-
-Gomp_df %>%
- # filter(angles <= pi/8) %>%
-  ggplot(aes(x = log(ForceV), y = angles, colour = type)) + geom_line()
-
-Gomp_df_angles <- Gomp_df %>%
- #   filter(angles <= pi/8) %>%
-  spread(key = type, value = angles) %>%
-  mutate(ratio = Gompertz/real,
-         error = (Gompertz-real),
-         perc_error = error/real,
-         degs = real*360/(2*pi),
-         degs_error = error*360/(2*pi))%>%
-  filter(angles <= pi/8)
-
-Gomp_df_angles %>%
-  ggplot(aes(x = log(ForceV), y = ratio)) + geom_line()
-
-Gomp_df_angles %>%
-  ggplot(aes(x = degs, y = perc_error)) + geom_line()
-
-metrics(Gomp_df_angles, truth = real, estimate = Gompertz)
-mape(Gomp_df_angles, truth = real, estimate = Gompertz)
-
-#The halfway point, this is the point where Fv= Fh
-log(log(2)/B)/C
-
-#The point on x of the maximum increase
-log(B)/C
-
-
-Gomp_df %>%
-  filter(degs == 45)
-         
-  dummy %>%
-  mutate(Gompertz = Gompertz_func(pi/2, B, C, log(ForceV))) %>%
-  ggplot(aes(x = log(ForceV), y = Gompertz)) + geom_line()
-
-Gompertz <- seq(0.1, 0.8, 0.1) %>%
-  map_df(~{
-    
-    dummy %>% mutate(pred_angles = L / (1 + exp( -.x*(x-x0))),
-                     pred_angles= pred_angles*360/(2*pi),
-                     growth = .x) %>%
-      select(angles = pred_angles, ForceV, growth)
-    
-  }) %>%
-  bind_rows(dummy %>% mutate(growth = 0) %>% select(angles = degs, ForceV, growth))
-
-```
-
-
-#generate angles
-
-I have found a direct mapping between a fixed angle and force using the product of k and distance.
-I can't do the reverse however as I generated my data by choosing and angle and finding the force
-
-This next section finds the angle from a set force using non-linear optimisation
-
-```{r}
-
-ForceV <- 1:100
-
-target_angle <-pi/3
-
-ForceV_from_angle <- function(target_angle, k, d){
-  #allows us to tune an angle to get a specific force. alternatively we can tune k and d!
-  tibble(H = sqrt(d^2 * (1 + tan(target_angle)^2)),
-         ForceT = k*(H-d), 
-         ForceV = ForceT*sin(target_angle)) %>%
-    pull(ForceV)
-  
-}
-
-
-
-
-library(minpack.lm)
-
-Force_vect <- c(1:100, sqrt(2), pi, 10000)
-
-Force_data <- expand.grid(ForceV =c(Force_vect, 1/Force_vect), distance = 1, k = 1) 
-
-constant_ForceV <- 1:nrow(Force_data) %>% map_df(~{
-  print(.x)
-  temp <-Force_data %>%
-    slice(.x)
-
-  
-  Out <- nlsLM(ForceV ~ ForceV_from_angle(target_angle, k = k, d = distance), 
-               start=c(target_angle = pi/4), 
-               data = temp, 
-               upper = pi/2)
-  
-  temp %>% mutate(angle = coefficients(Out))
-}) %>%
-  mutate(
-    relation = k*distance/ForceV,
-    degs = angle*360/(2*pi),
-    diff_with_crit_ang = angle -{.} %>% slice(which(ForceV ==1)[1]) %>% pull(angle))
-
-constant_ForceV %>%
-  filter(ForceV<10) %>%
-ggplot(aes(x = (ForceV), y = 1-angle*2/pi)) + geom_point() +
-  geom_vline(xintercept = 1)
-
-constant_ForceV  %>% slice(which(ForceV ==1)[1]) %>% pull(angle)
-
-sprintf("%.20f",constant_ForceV$angle[1])
-
-const_mod <-lm(angle~k*distance, data = constant_ForceV)
-
-
-summary(const_mod)
-
-constant_ForceV2 %>%
-
-  ggplot(aes(x =(relation), y = (angle)))  + geom_line() + scale_color_viridis_c()
-
-constant_ForceV %>%
-  ggplot(aes(x = distance, y = degs, colour = k, group = k))  + geom_line() + scale_color_viridis_c()
-
-
-constant_ForceV %>%
-  ggplot(aes(x = distance, y = k, fill = angle))  + geom_tile() + scale_fill_viridis_c()
-
-finite.differences <- function(x, y) {
-  if (length(x) != length(y)) {
-    stop('x and y vectors must have equal length')
-  }
-   
-  n <- length(x)
-   
-  # Initialize a vector of length n to enter the derivative approximations
-  fdx <- vector(length = n)
-   
-  # Iterate through the values using the forward differencing method
-  for (i in 2:n) {
-    fdx[i-1] <- (y[i-1] - y[i]) / (x[i-1] - x[i])
-  }
-   
-  # For the last value, since we are unable to perform the forward differencing method 
-  # as only the first n values are known, we use the backward differencing approach
-  # instead. Note this will essentially give the same value as the last iteration 
-  # in the forward differencing method, but it is used as an approximation as we 
-  # don't have any more information
-  fdx[n] <- (y[n] - y[n - 1]) / (x[n] - x[n - 1])
-   
-  return(fdx)
-}
-
-
-
-
-test <- constant_ForceV2 %>%
-  filter(distance == 46) 
-
-test <- test  %>%
-  mutate(deriv = finite.differences(test$k, test$angle))%>% #very close to 45
-mutate(#preds = atan((pi/2)*2^(-k/2203.107)),
-      # preds2 = 7.663*(214.4329087+k)^(-0.3120014), #survival rate... but why?
-      # preds3 = -0.121678*log(k) + 1.697758,
-      # atanPred = atan(15.695590/(k)^0.381001),
-       atanPred2 = atan(17.47143959/(k)^0.41099285)+0.04450842,
-       atanPred3 = atan(22.30801341/(k)^0.44057660+0.05586745),
-       survival = atan(22.08024799*(-0.78780649+k)^(-0.43905433)+0.05512312)
-       )
-
-
-  Out <- nlsLM(angle ~ tan(a/(k)^b)+c, 
-               start=c(a=1, b=1, c= 1), 
-               data = test)
-
-  summary(Out)
-  coefficients(Out)
-  
-test %>%
-  select(-distance, -ForceV, -degs,-deriv) %>%
-  gather(key = type, value = angle, -k) %>%
-  filter(k<100) %>%
-  ggplot(aes(x= k, y = angle*360/(2*pi), colour = type)) + geom_line()
-
-test %>%
-  ggplot(aes(x= k, y = deriv)) + geom_line()
-
-
-test2 <- constant_ForceV2 %>%
-  mutate(diff = (degs-45)^2)
-
-```
-
-
-##constant k and force
-
-```{r}
-
-Force_data2 <- expand.grid(ForceV = c(1, 2, 10, 50, 100),  d = c(1, seq(0, 2000, 10)[-1])) #, seq(2000,1e6, 10000) 
-
-constant_k<-(1:nrow(Force_data2))%>% map_df(~{
-  print(.x)
-  temp <-Force_data %>%
-    slice(.x)
-  
-  ForceV_from_angle <- function(target_angle = 5*pi/12, k, d=temp$d){
-    
-    tibble(H = sqrt(d^2 * (1 + tan(target_angle)^2)),
-           ForceT = k*(H-d), 
-           ForceV = ForceT*sin(target_angle)) %>%
-      pull(ForceV)
-    
-  }
-  
-  Out <- nlsLM(y ~ ForceV_from_angle(k=k), 
-               start=c(k = 1), 
-               data = list(y = temp$ForceV), 
-               lower = 0)
-  
-  temp %>% mutate(k = coefficients(Out))
-})
-
-
-test <- constant_k %>%
-  mutate(dInv =1/d,
-         d_pi = d^2)
-
-
-Force_data <- expand.grid(ForceV = c(1, 5, 100),  d = c(1, seq(0, 2000, 100)[-1]), k = c(1, seq(0, 2000, 100)[-1]))
-
-constant_k<-( 1:nrow(Force_data))%>% map_df(~{
-  print(.x)
-  temp <-Force_data %>%
-    slice(.x)
-  
-  ForceV_from_angle <- function(target_angle, k = temp$k, d=temp$d){
-    
-    tibble(H = sqrt(d^2 * (1 + tan(target_angle)^2)),
-           ForceT = k*(H-d), 
-           ForceV = ForceT*sin(target_angle)) %>%
-      pull(ForceV)
-    
-  }
-  
-  Out <- nlsLM(y ~ ForceV_from_angle(target_angle), 
-               start=c(target_angle=1), 
-               data = list(y = temp$ForceV), 
-               lower = 0,
-               upper = pi/2)
-  
-  temp %>% mutate(angle = coefficients(Out))
-}) %>%
-  mutate(degs = angle*360/(2*pi),
-         rational = angle/pi,
-         relation = ((k*d)/(ForceV)),
-         angle_norm = angle*2/pi)
-
-
-constant_k %>%
-  mutate(relation = ((k*d)/(ForceV)),
-         row = 1:n()) %>%
-  filter(relation < 1000) %>%
-  ggplot(aes(x = row, y = pi-atan(row))) + geom_point()
-
-
-  #There is no point repeating the angles as their is a 1 to 1 mapping
-  #angle_data <- expand.grid( target_angle =(pi/2)*seq(0.1,.99,0.01),  d = c(1, seq(0,100, 10)[-1]), k = c(1, seq(200,1000, 100)))
-
-  angle_data <- expand.grid( angle =c((pi/2)*seq(0.01,.99,0.001), pi/3, pi/6, 3.4/pi, 0.3535*pi),  d = c(1,10), k = 1)
-
-  
-  angle_data2 <-( 1:nrow(angle_data))%>% map_df(~{
-    print(.x)
-    temp <-angle_data %>%
-      slice(.x) %>%
-      mutate(H = sqrt(d^2 * (1 + tan(angle)^2)),
-             ForceT = k*(H-d), 
-             ForceV = ForceT*sin(angle))
-  }) %>%
-    mutate(
-      ForceH = sqrt(ForceT^2-ForceV^2),
-      degs = angle*360/(2*pi),
-           rational = angle/pi,
-           relation = ((k*d)/(ForceV)),
-           angle_norm = angle*2/pi,
-           z = d*tan(angle),
-           sqrt_rel = relation^0.5,
-           inv_rel = 1/relation,
-           hypotenuse = sqrt(z^2+d^2),
-           bal_rel = (relation^2-1)/relation,
-           fract = cos(angle),
-           log_rel  = log(relation),
-      ForceVnear1 = (ForceV-1)^2)
-  
-
-  
-    Out <- nlsLM(fract ~a/relation^c+b,
-               start=c(a=-1, b= 1, c = -1), 
-               data = test)
-
-  summary(Out)
-    
-  acos(d/hypotenuse)
-
-  
-    angle_data2 %>%
- filter(relation>1) %>%
-    ggplot(aes(x = ForceV, y = (angle), colour = z)) + geom_point() + 
-    scale_color_viridis_c()
-
-    #You fit this curve youo solve the problem
-    angle_data2 %>%
-#filter(relation<1010) %>%
-      filter(fract >0.45, fract <0.55) %>%
-    ggplot(aes(x = (relation)^2+1/relation^2, y = (angle))) + geom_point() + 
-    scale_color_viridis_c()
-
-    
-        angle_data2 %>%
-filter( 1/relation<1) %>%
-    ggplot(aes(x =(1/(relation)), y = tan(angle), colour = d*k)) + geom_point() + 
-    scale_color_viridis_c()
-        
-        angle_data2 %>%
-         filter(bal_rel<10) %>%
-          ggplot(aes(x = log_rel, y= fract)) + geom_point() + 
-          scale_color_viridis_c()
-        
-        
-  angle_data2 %>%
-   # mutate() %>%
-    select(fract, rel,  )
-        
-        tune_gom <- function(df, K,B,C, min = 0, max = pi/2){
-          
-          
-          Gomp_df <-   df %>%
-           # filter(angles>=min, angles<=max) %>%
-            mutate(Gompertz = Gompertz_func(K, B, C, log_rel))
-          
-          Gomp_df   %>%
-            pull(Gompertz)
-          
-        }
-        
-        tune_gom2 <- function(df, K,B, min = 0, max = pi/2, g_max= ){
-          #g_max is the maximum growth point, aka thata weird number 
-              C <-log(B)/
-          
-          Gomp_df <-   df %>%
-            # filter(angles>=min, angles<=max) %>%
-            mutate(Gompertz = Gompertz_func(K, B, C, log_rel))
-          
-          Gomp_df   %>%
-            pull(Gompertz)
-          
-        }
-        
-        sprintf("%.100f",constant_ForceV$angle[1])
-        
-         Out <- minpack.lm::nlsLM(angle ~ tune_gom(angle_data2, 1, B, C), start=c( B=.1, C = 1 ), data=angle_data2)
-         
-         gamma_mod <- minpack.lm::nlsLM(angle ~ (pi/2)*pgamma(1/log(relation), shape = A, rate = B), start=c( A=1, B = 1 ), data=angle_data2)
-        
-         #This model has very very low error (0.0007257) for less than 45 degreee. It is still not the true model however
-         #Do not delete or change!
-         Out <- minpack.lm::nlsLM(angle ~ A*(tanh(B/relation))^(C)+D, start=c(A = 1, B=.1, C=.1, D = -1 ), 
-                                  data=angle_data2 %>% filter(degs<45))
-         
-         summary(Out)
-         
-         test <- angle_data2 %>%
-           #   filter(degs<45) %>%
-           mutate(
-             gamma_mod = (pi/2)*pgamma(1/log(relation), shape = coefficients(gamma_mod)[1], rate = coefficients(gamma_mod)[2]),
-             tanh_mod = coefficients(Out)[1]*tanh(coefficients(Out)[2]/relation)^(coefficients(Out)[3])+coefficients(Out)[4]
-             #Gompertz = Gompertz_func(1, coefficients(Out)[1], coefficients(Out)[2], log_rel),
-           ) %>%
-           select(angle, relation, tanh_mod, gamma_mod) %>%
-           gather(type, angle, -relation ) 
-         
-         test %>%
-           ggplot(aes(x = 1/relation, y = angle*360/(2*pi), colour = type)) + geom_point()
-        
-  
-        #combines fixed forceV with fixed angle to get all critical forces and points
-        key_values  <- bind_rows(select(constant_ForceV, angle, d= distance, k, ForceV),   
-                                 select(angle_data2, angle, d, k, ForceV)) %>%
-          distinct( .keep_all = TRUE) %>%
-          filter(d==1) %>%
-          mutate(z = d*tan(angle),
-                 ForceH = ForceV/tan(angle),
-                 degs = angle*360/(2*pi),
-                 diff_FV1_angle = abs(angle- {.} %>% filter(ForceV==1) %>% pull(angle)),
-                 diff_ForceV_z = ForceV-z,
-                 test = ForceH -1/z,
-                 ForceH_differential = finite.differences((ForceV), ForceH))
-        
-        
-        #set up the generalised logistic function
-        Generalised_logistic_func2 <- function(K, Q, B, V, xm = key_values %>% 
-                                                 filter(angle/pi == 0.3535) %>% pull(ForceV) %>% log, x){
- 
-          K/(1+Q*exp(-B*(x-xm)))^(1/V)
-          
-          
-        }
-
-        
-       funny_nums<- tibble(number = c(
-          (sqrt(6)-sqrt(2))/4,
-          (sqrt(2)-sqrt(2))/2,
-          1/2,
-          sqrt(2)/2,
-          sqrt(3)/2,
-          (sqrt(6)+sqrt(2))/4,
-          (sqrt(2)+sqrt(2))/2,
-          2-sqrt(3),
-          sqrt(2)-1,
-          sqrt(3)/3,
-          sqrt(3),
-          2+sqrt(3),
-          sqrt(2)+1,
-          sqrt(6)-2,
-          sqrt(2)*sqrt(2-sqrt(2)),
-          2*sqrt(3)/3,
-          sqrt(2),
-          2,
-          sqrt(6)+sqrt(2),
-          sqrt(2)*sqrt(2+sqrt(2))
-               )
-        )
-        
-       #Gams don't seem to work
-       library(mgcv)
-       gam_mod_k3 <- gam(ForceH ~ ForceV, data = key_values)
-       summary(gam_mod_k3)
-        
-                inv_angle <- minpack.lm::nlsLM(angle ~ (pi/2)*(1-1/((sqrt(1)*sqrt(2+sqrt(2))*ForceV^B+ C*ForceV^D))), start=c( B= 0.38, C=1, D=1),
-                                        data=key_values %>% filter(degs>45), control=list(maxiter=100))
-        
-        inv_angle <- minpack.lm::nlsLM(ForceH ~ (pi/2)*(1-1/((A*ForceV^B+ C*ForceV^D))), start=c(A=1, B= 0.38, C=1, D=1),
-                                        data=key_values, control=list(maxiter=100))
-        
-        logis_angle_double <- minpack.lm::nlsLM(angle ~ (pi/2)/(1+exp(-A*(ForceV-B))+exp(-C*(ForceV-D))), 
-                                                start=c(A=1, B= 1, C=1, D=1),
-                                                data=key_values, control=list(maxiter=100))
-        
-        atan_angle <- minpack.lm::nlsLM(angle ~ atan(B*ForceV^D+C), start=c( B= 1, C = 1, D=1),
-                                        data=key_values)
-        
-        atan_angle2 <- minpack.lm::nlsLM(angle ~ atan(B*ForceV^C+D)+E, start=c( B= 1, C = 1, D=1, E= 1),
-                                         data=key_values)
-        
-        atan_angle3 <- minpack.lm::nlsLM(angle ~ (A*atan(B*ForceV^C+D)+E), start=c(A=-0.6, B= -22, C = .03, D=10, E= 1),
-                                         data=key_values, control=list(maxiter=100))
-        
-        exp_dec <- minpack.lm::nlsLM(cos(angle) ~ 1- exp(A*ForceV), start=c(A=-0.6),
-                                     data=key_values, control=list(maxiter=100))
-        
-        weib_FH <- minpack.lm::nlsLM(ForceH ~ pweibull(ForceV, shape = A, scale = B), start=c( A=1, B= 1 ),
-                                         data=angle_data2, lower = c(0, 0))
-             
-              weib_FH2 <- minpack.lm::nlsLM(ForceH ~ pweibull(ForceV/3, shape = A, scale = B), start=c( A=0.5, B= 0.55 ),
-                                         data=angle_data2)
-             
-             Gen_mod1 <- minpack.lm::nlsLM(ForceH ~ Generalised_logistic_func2(K = 1, Q = A, B = B, V = A, x = log(ForceV) ), 
-                                           start=c( A=1/2.3, B= ),
-                                          data=angle_data2 %>%
-                                            filter((ForceV)<5, log(ForceV)>-5))
-             
-             Gen_mod2 <- minpack.lm::nlsLM(ForceH ~ Generalised_logistic_func2(K = 1, Q = A, B = B, V = C, xm = D, x = log(ForceV) ), 
-                                           start=c( A=1, B= 2, C = 1, D = 1),
-                                           data=angle_data2)
-             
-             gamma_mod <- minpack.lm::nlsLM(ForceH ~(1-A*dgamma(ForceV, shape = B, rate = C)), 
-                                                  start=c( A=1, B = 1, C = .1 ), data=angle_data2)
-
-    test <-   key_values %>%
-        select(ForceH, ForceV, angle) %>%
-           mutate(test1 = pweibull(ForceV, coef(weib_FH)[1], coef(weib_FH)[2]),
-                  test2= pweibull(ForceV/3, coef(weib_FH)[1]/2, coef(weib_FH)[2]*1),
-                  test3 =(pi/2)*(1-1/((coef(inv_angle)["A"]*ForceV^coef(inv_angle)["B"]+ coef(inv_angle)["C"]*ForceV^coef(inv_angle)["D"] + coef(inv_angle)["E"]))))
-    
-    coefficients(weib_FH)
-    metrics(test, truth = ForceH, estimate = test1)
-    metrics(test, truth = ForceH, estimate = test2)
-    metrics(test, truth = angle, estimate = test3)
-       
-
-    key_values %>%
-   filter(ForceV < 10) %>%
-      ggplot(aes(x = ForceV, y = 1-ForceH)) + geom_line() + #angle*360/(2*pi)
-      geom_vline(xintercept = 1, colour = "red") + #FV = 1
-      geom_vline(xintercept = key_values %>% filter(degs == 45) %>% pull(ForceV) , colour = "blue" )
-    
-
- key_values %>%
-        select(ForceV, ForceH = angle) %>%
-        mutate(ForceH = cos(ForceH),
-               #          weib_FH1 = pweibull(ForceV, coef(weib_FH)[1], coef(weib_FH)[2]),
-               #weib_FH2 = pweibull(ForceV/3, coef(weib_FH)[1]/2.3, coef(weib_FH)[2]*1.3),
-               #         atan_mod = atan(coef(atan_angle)[1]*ForceV^coef(atan_angle)[3] + coef(atan_angle)[2]),
-               #         atan_mod2 = atan(coef(atan_angle2)[1]*ForceV^coef(atan_angle2)[2]+coef(atan_angle2)[3])+coef(atan_angle2)[4],
-               #   atan_mod3 = coef(atan_angle3)[1]*atan(coef(atan_angle3)[2]*ForceV^coef(atan_angle3)[3]+
-               #                                            coef(atan_angle3)[4])+coef(atan_angle3)[5],
-               #   inv = (pi/2)*(1-1/((coef(inv_angle)["A"]*ForceV^coef(inv_angle)["B"]+ coef(inv_angle)["C"]*ForceV^coef(inv_angle)["D"] + coef(inv_angle)["E"])))
-               exp_dec = 1-exp( -0.3244*ForceV-19.2738)
-      
-               # gen_mod = Generalised_logistic_func2(K = 1, Q = coefficients(Gen_mod1)[1], 
-               #                                      B = coefficients(Gen_mod1)[2], 
-               #                                      V = coefficients(Gen_mod1)[1], x = log(ForceV) ),
-               # gen_mod2 = Generalised_logistic_func2(K = 1, Q = coefficients(Gen_mod2)[1], 
-               #                                      B = coefficients(Gen_mod2)[2], 
-               #                                      V = coefficients(Gen_mod2)[3],
-               #                                      xm = coefficients(Gen_mod2)[4], 
-               #                                      x = log(ForceV) ),
-               #  gen_mod3 = Generalised_logistic_func2(K = 1, 
-               #                                        Q = 5,
-               #                                      B =2,
-               #                                      V = 2,
-               #                                      xm = log(1.121194),
-               #                                      x = log(ForceV) ),
-           ) %>%
-       filter(1/ForceV<10) %>%
-        gather(key = type, values, -ForceV) %>%
-        ggplot(aes(x = ForceV, y = (values), colour = type)) + geom_line()#+
-        geom_vline(xintercept = 0, colour = "red") +
-        geom_vline(xintercept = log(sqrt(3/4)), colour = "blue") +
-        NULL
-          
-        
-        test <- key_values %>%
-          select(ForceV, angle) %>%
-          mutate(
-            degs = angle*360/(2*pi),
-            inv = (pi/2)*(1-1/((coef(inv_angle)["A"]*ForceV^coef(inv_angle)["B"]+ 
-                                  coef(inv_angle)["C"]*ForceV^coef(inv_angle)["D"] + 
-                                  coef(inv_angle)["E"]))),
-            diff = angle-inv,
-            abs_diff = abs(diff),
-            perc_diff = (diff-angle)/angle,
-            ratio = inv/angle)
-      
-          test <- angle_data2 %>%
-            select(angle:z) %>%
-            mutate(
-              FZ_ratio = ForceV/z,
-              FZ_prod = ForceV*z,
-              z_relation = k*ForceV/d,
-                   tan_angle = (1/relation)/tan(angle),
-                   cos_angle  = (1/relation)/cos(angle),
-                   sin_angle =(1/relation)/sin(angle),
-                   z_tan_angle = (relation)/tan(angle),
-                   z_cos_angle  = (relation)/cos(angle),
-                   z_sin_angle =(relation)/sin(angle)
-            )
-
-           #This shows that there is a double asymptote centeres around the critical angle
-          #when ForceV = 1, this could mean that a logistic curve with the critical angle as the point of inflection
-          #would match the model.
-         key_values %>%
-            filter(d==1, k ==1) %>%
-            ggplot(aes(y = (ForceH), x = log(ForceV+1/ForceV))) + geom_point()
-         
-         key_values %>%
-           filter(d==1, k ==1, ForceV<10) %>%
-           ggplot(aes(x = ForceV, y = cos(angle))) + geom_point()
-         
-         key_values %>%
-            filter(d==1, k ==1, ) %>%
-            ggplot(aes(x = log(ForceV), y = ForceH)) + geom_point()+
-             geom_point(aes(y = (ForceH), x = -log(ForceV+1/ForceV)), colour = "red")
-
-        
-```
-
