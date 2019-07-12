@@ -12,12 +12,13 @@ https://github.com/schochastics/graphlayouts
 https://github.com/hackl/tikz-network
 
 
-#some IEEE datasets
+some IEEE datasets
 https://icseg.iti.illinois.edu/power-cases/
 
-#annpotate points with rectangles
+annpotate points with rectangles
 https://ggforce.data-imaginist.com/reference/geom_mark_rect.html
 
+#Set up
 ```{r Setup}
 
 packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp", "yardstick", "minpack.lm", "gganimate")
@@ -74,263 +75,6 @@ VertexMetaData2 <- VertexMetaData %>%
     Demand>0 & Generation>0 ~"Hybrid",
     TRUE ~ NodeType
   )) %>% select(Name, NodeType, NodeType2, BalencedPower)
-
-```
-
-
-#Set up Graph
-```{r}
-
-g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
-#Ensure there is powerflow
-SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
-g <- PowerFlow(g, SlackRef$name) #calculate power flow
-
-```
-
-#UK map 
-```{r}
-
-#create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
-
-if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
-  final_z <- read_rds(file.path(PLwd, "UK_power_grid_3d.rds"))
-} else{
-  
-  g <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
-  g <-set.edge.attribute(g, "distance", value = 1) %>%
-    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 400, 40) %>%
-    set.edge.attribute(., "Area", value = 1)
-  
-  # block 83 single iteration to complete
-  
-  
-  List_of_BiConComps <- Create_balanced_blocks(g, force = "BalencedPower")
-  
-  #use the largest block to set the simulation parameters k and m.
-  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-  OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.15, tol = 1e-10, distance = "distance", 
-                                      maxIter = 8000, mass = 5000)
-
-  final_z <- Create_stabilised_blocks(g, OriginBlock, 147, tstep = 0.15, tol = 1e-10, distance = "distance", maxIter = 4000, mass = 5000)
-  
-  write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
-  
-}
-mean(final_z$z)
-median(final_z$z)
-
-#Is the strain power law distributed?
-line_strain <-as_data_frame(g) %>% as_tibble %>%
-  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
-  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
-  mutate(D = 1,
-         dz = abs(z.x-z.y),
-         mean_z = (z.x+z.y)/2,
-         H = sqrt(dz^2 +D^2),
-         strain = (H-D)/D,
-         alpha = Link.Limit/abs(PowerFlow),
-         line_load = abs(PowerFlow)/Link.Limit,
-         percentile_strain = percent_rank(strain)) %>%
-  select(Link, alpha, line_load, dz, H, strain, percentile_strain, mean_z)
-
-cor(line_strain$dz, line_strain$strain)
-cor(line_strain$line_load, line_strain$strain)
-
-z_network_map <-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
-  left_join(line_strain, by = c("Link"))%>%
-   left_join(., final_z %>% select(node, z), by = c("Node"= "node")) 
-
-z_network_map %>%
-  #filter(!is.na(Perc)) %>%
-    ggplot(aes(x = Longitude, y = Latitude)) + 
-  geom_line(aes(group = Link, colour = percentile_strain), size = 0.8) + 
-   facet_grid(~PositionType) + 
- # geom_point( aes(x = Latitude, y = Longitude, colour = percent_rank(z))) + 
-  scale_color_viridis_c()+
-  ggtitle("Strain map")
-
-
-node_z <-z_network_map %>% as_tibble %>%
-  filter(PositionType=="Geo Space") %>%
-  select(Node, Longitude, Latitude, z) %>%
-  distinct(.keep_all = T) 
-
-
-edge_z <-z_network_map %>% as_tibble %>%
-  filter(PositionType=="Geo Space") %>%
-  select(Longitude, Latitude, z, Link) %>%
-  group_by(Link) %>%
-  summarise_all(mean)
-
-#This is the strain of the network on each edge. It allows us to see the slope of the network
-edge_strain <- z_network_map %>% as_tibble %>%
-  filter(PositionType=="Geo Space") %>%
-  select(Longitude, Latitude, z = strain, Link) %>%
-  group_by(Link) %>%
-  summarise_all(mean)
-
-
-#Find the shortest path between the highest and lowest points
- extrema <- node_z %>%
-  filter(z %in% c(max(z), min(z)))
-
-nodes_shortest_path <- shortest_paths(g, from = "GRUB", to = "INDQ", output = "vpath", weights = NA)[[1]] %>% unlist %>%
-  get.vertex.attribute(g, index = .) %>% .$name
-
-nodes_shortest_path_df <- z_network_map %>%select(-type) %>%
-  filter(PositionType=="Geo Space", 
-         Node %in% nodes_shortest_path)
-
-
-
-node_z2 <- node_z %>%
-  left_join(VertexMetaData %>% rename(Node = Name)) %>%
-  arrange(Latitude) %>%
-  mutate(lat_cumsum = cumsum(ifelse(BalencedPower>0, BalencedPower, 0)),
-         lat_rev_cumsum = rev(lat_cumsum),
-         lat_diff = lat_cumsum - lat_rev_cumsum,
-         lat_abs_diff = abs(lat_diff)) %>%
-    arrange(Longitude) %>%
-  mutate(lon_cumsum = cumsum(ifelse(BalencedPower>0, BalencedPower, 0)),
-         lon_rev_cumsum = rev(lon_cumsum),
-         lon_diff = lon_cumsum - lon_rev_cumsum,
-         lon_abs_diff = abs(lon_diff))  %>%
-  arrange(Latitude) %>% 
-  mutate(mass = 1) %>%
-  mutate(mass_lat_cumsum = cumsum(mass),
-         mass_lat_rev_cumsum = rev(mass_lat_cumsum),
-         mass_lat_diff = mass_lat_cumsum - mass_lat_rev_cumsum,
-         mass_lat_abs_diff = abs(mass_lat_diff)) %>%
-    arrange(Longitude) %>%
-  mutate(mass_lon_cumsum = cumsum(mass),
-         mass_lon_rev_cumsum = rev(mass_lon_cumsum),
-         mass_lon_diff = mass_lon_cumsum - mass_lon_rev_cumsum,
-         mass_lon_abs_diff = abs(mass_lon_diff))
-
-```
-
-##UK network plot
-```{r}
-shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
-                       "Countries_December_2017_Ultra_Generalised_Clipped_Boundaries_in_UK_WGS84.shp")
-
-
-GB <- st_read(shapefile) %>%
-  filter(ctry17cd !="N92000002") %>%
-  st_union()
-
-#plots the uk network with the shortest path between the highest and lowest points as well as the midpoint
-ggplot(GB) +
-  geom_sf() +
- # scale_fill_viridis("Area") +
-  ggtitle("Node locations in the UK") +
- # theme_bw() +
-  geom_line(data = z_network_map %>%
-              filter(PositionType=="Geo Space"),  aes(x = Longitude, y = Latitude, group = Link)) +
-   geom_point(data =node_z, aes(x = Longitude, y = Latitude, colour = z), alpha  = 0.7)+
-  coord_sf(ylim = c(50,58.9)) +
-    geom_line(data = nodes_shortest_path_df,
-            aes(x = Longitude, y = Latitude, group = Link),
-            colour = "red") +
-  scale_color_viridis_c() +
-  geom_point(data = node_z2 %>% filter(lat_abs_diff== min(lat_abs_diff)),
-             aes(x = Longitude, y = Latitude), 
-             colour = "red")+
-    geom_point(data = node_z2 %>% filter(lon_abs_diff== min(lon_abs_diff), Generation>0),
-             aes(x = Longitude, y = Latitude), 
-             colour = "cyan") +
-  geom_hline(aes(yintercept = node_z2 %>% filter(Node == "BLAC") %>% pull(Latitude)), colour = "red") +
-    geom_hline(aes(yintercept = node_z2 %>% filter(Node == "MOFF") %>% pull(Latitude)), colour = "red")+
-    geom_vline(aes(xintercept = node_z2 %>% filter(Node == "CONQ") %>% pull(Longitude)), colour = "cyan") 
-```
-
-
-##Kriging
-```{r}
-
-spdf <- as(GB, "Spatial") %>% st_as_sf %>%
-  st_crop(c(xmin = -7.5, ymin = 50, xmax = 2, ymax = 59)) %>%
-  as_Spatial()
-
-kriged_df <- Create_kriged_df(node_z, "z", spdf, 8e4) %>% mutate(type = "node z")
-kriged_df_strain <- Create_kriged_df(edge_strain, "z", spdf, 8e4) %>% mutate(type = "strain")
-
-bind_rows(kriged_df, kriged_df_strain) %>%
-mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
-  group_by(type) %>%
-   mutate(z = percent_rank(z)) %>%
-# mutate(z = z/max(z)) %>%
-  rename(Height = z) %>%
-  ggplot(aes(x=Longitude, y=Latitude)) + 
-  geom_tile(aes(fill=Height)) + coord_equal() +
-  #plot shortest path in red as an overlay
- # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
-  #          aes(group = Link),
-   #         colour = "red")+
-  facet_grid(~type) +
-  scale_fill_viridis_c() +
-scale_colour_viridis_c(option = "plasma") +
-  labs(title = "Height and Strain map of the UK when represented as a spring system in equilibrium", fill = "Percentile") +
-  theme(axis.title = element_blank(),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-        legend.position = "right") #the legend position may want changing back to the more convential side.
-  ggsave(file.path(FiguresFolder, "BritainKrigedTopology.pdf"))
-
-
-```
-
-##Voronoi tessaltion
-What does the height map look like with a vonoi tesselation instead of kriging?
-
-The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix.
-I'm not sure what I want to use the Voronoi for if at all, but it will be useful at some point so I am keeping it
-```{r}
-#convert the dataframe to an sf object
-node_z_sf <- node_z %>%
-  mutate(z = percent_rank(z))%>% 
-  st_as_sf(., coords = c("Longitude", "Latitude")) 
-#add in the correct projection data to align with the map
-st_crs(node_z_sf) <- st_crs(GB)$proj4string
-
-#create the tessellation
-v <- st_voronoi(st_combine(node_z_sf)) 
-
-#clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
-#the key simple feature is of course z
-clipped_tess_node <- st_intersection(st_cast(v), st_union(GB)) %>% 
-  st_sf(geom=.) %>%
-  st_join(node_z_sf) %>% 
-  mutate(type = "node")
-
-#plot the tesselation of the UK with the fill and lines both having the same colour system.
-#grey areas occure when the node is accidently offshore and clippied out of the map. This can be easily fixed.
-bind_rows(clipped_tess_edge, clipped_tess_node) 
-
-#voronoi of the nodes is pretty good
-clipped_tess_node %>%
-ggplot() + geom_sf(aes(fill = z, colour = z)) +
-   scale_fill_viridis_c()+
-  scale_colour_viridis_c() +
-  facet_grid(~type)
-
-#voronoi of the mid point of the edges is just a chaos
-# edge_z_sf <- edge_strain %>%
-#   mutate(z = percent_rank(z))%>% 
-#   st_as_sf(., coords = c("Longitude", "Latitude")) 
-# #add in the correct projection data to align with the map
-# st_crs(edge_z_sf) <- st_crs(GB)$proj4string
-# 
-# #create the tessellation
-# v_edge <- st_voronoi(st_combine(edge_z_sf))
-# 
-# #clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
-# #the key simple feature is of course z
-# clipped_tess_edge <- st_intersection(st_cast(v_edge), st_union(GB)) %>% 
-#   st_sf(geom=.) %>%
-#   st_join(edge_z_sf) %>% 
-#   mutate(type = "edge")
 
 ```
 
@@ -450,7 +194,6 @@ select(groupID, edge, flow, alpha) %>%
 "Relationship between alpha, excess capacity and theta"
 ```
 
-
 ##Entropic degree
 ```{r}
 
@@ -486,8 +229,111 @@ ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
 rm(entropy_data)
 ```
 
+##The square
+```{r}
+
+alpha_values <- c(1,Inf, 1.05, 1.1, 2, 5)
+
+edge_alpha <- expand.grid(AB_alpha =alpha_values, AC_alpha =alpha_values, BD_alpha =alpha_values, CD_alpha =alpha_values) %>% 
+  as_tibble  %>%
+  mutate(ID = 1:nrow(.),
+         alpha = (AB_alpha+AC_alpha+BD_alpha+CD_alpha)/4,
+         capacity = (AB_alpha*15+AC_alpha*15+BD_alpha*5+CD_alpha*5) ) 
+%>%
+  filter(AB_alpha >=AC_alpha)
+
+grid_search_alpha <- 1:nrow(edge_alpha) %>% map_df(~{
+  #set up graph
+square_g <- tibble(from = c("A", "A", "B", "C"), 
+                   to = c("B","C", "D", "D"), 
+                   Link = paste0(from, to),
+                   flow = c(15,15,5,5),
+                   alpha = edge_alpha[.x,1:4] %>% as.numeric(), #545 is a good choice of row for testing
+                   capacity = flow*alpha) %>%
+  graph_from_data_frame(directed = FALSE)
+
+#addin missing attributes
+ square_g2 <-set.vertex.attribute(square_g, "Generation", value = c(30,-10,-10,-10))%>%
+   set.edge.attribute(., "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., Force = "flow", Capacity = "capacity", 400, 40) %>%
+    set.edge.attribute(., "Area", value = 1)
+
+  #this needs to be normalised
+
+#find equilibrium
+ ptm <- proc.time()
+ Square_heights <- Find_network_balance(square_g2, force = "Generation",
+                                        flow = "flow",
+                                        capacity = "capacity",
+                                        tstep = 0.001, tol = 1e-10, distance = "distance", 
+                                        maxIter = 4000, mass = 1)
+
+# Stop the clock
+elapsed_time <-proc.time() - ptm
+#add iteration number and return
+ Out <- Square_heights$NodeList %>%
+   mutate(ID = .x,
+          elapsed_time = elapsed_time[3])
+ 
+ return(Out)
+ 
+ })
+ 
+write_rds(grid_search_alpha,file.path(PLwd, "grid_search_alpha.rds"))
+
+ Square_heights$results %>%
+   ggplot(aes(x = t, y = z)) + geom_line()
+   
+ grid_search_alpha %>%
+  ggplot(aes(x = z, colour = node)) + geom_density() +
+   labs(title = "Density of node height for the square graph")
+ 
+test <- grid_search_alpha %>% as_tibble %>%
+  select(node, z, ID) %>%
+  spread(key = node, value = z) %>%
+   mutate(AB_strain = sqrt((A-B)^2+1)-1,
+          AC_strain = sqrt((A-C)^2+1)-1,
+          BD_strain = sqrt((B-D)^2+1)-1,
+          CD_strain = sqrt((C-D)^2+1)-1,
+          strain = (AB_strain+AC_strain+BD_strain+CD_strain)/4) %>%
+   left_join(edge_alpha) %>%
+  mutate(joint = paste(alpha, capacity))
+
+test2 <- test %>%
+  group_by(joint) %>%
+  summarise(counts = n(),
+            strain_max = max(strain),
+            strain_min = min(strain)) %>%
+  mutate(diff = strain_max-strain_min)
+
+strain_sum = test %>%
+  mutate(strain = round(strain, 5)) %>%
+ # filter(strain ==0.01006)
+  group_by(strain, joint) %>%
+  summarise(counts = n())
+
+test %>%
+ # filter(alpha<1.2) %>%
+  ggplot(aes(colour = strain, y = alpha, x = (capacity), group = alpha)) +geom_point() +
+  scale_color_viridis_c()
+
+
+test2<- test %>%
+  filter(#capacity<50,
+         alpha<1.2)
+
+```
+
+
+##Convergance visualisation
+```{r}
+
+```
+
 
 #IEEE118
+
+This section uses the IEEE_118 network to demonstrate that strain is a proxy for the robustness of the network under random attack.
 
 ##plot IEEE118
 
@@ -519,17 +365,19 @@ IEEE118_heights <- IEEE_118 %>%
   ) %>%
   mutate(height_perc = percent_rank(z))
 
-extrema <- IEEE118_heights %>%
-  filter(z %in% c(max(z), min(z)))
 
-nodes_shortest_path <- shortest_paths(IEEE_118, from = "10", to = "112", output = "vpath", weights = NA)[[1]] %>% unlist %>%
-  get.vertex.attribute(IEEE_118, index = .) %>% .$name
+#The shortest path code is no longer necessary
+#extrema <- IEEE118_heights %>%
+#  filter(z %in% c(max(z), min(z)))
+
+#nodes_shortest_path <- shortest_paths(IEEE_118, from = "10", to = "112", output = "vpath", weights = NA)[[1]] %>% unlist %>%
+#  get.vertex.attribute(IEEE_118, index = .) %>% .$name
 
 #Plot IEEE118 with fruchtman reingold expansion 
 IEEE118_heights %>%
   ggplot(aes(x = V1, y = V2, group = Link)) + 
   geom_line() + #aes(colour = abs(PowerFlow)) 
-  geom_line(data = IEEE118_heights %>% filter(Node %in% nodes_shortest_path), colour = "red")+
+ # geom_line(data = IEEE118_heights %>% filter(Node %in% nodes_shortest_path), colour = "red")+
   geom_point(aes(colour = height_perc, shape = type ), size =3)+
   labs(title = "IEEE118 power flow and node type, using Fruchtman Reingold expansion",
        shape = "Node type",
@@ -540,27 +388,6 @@ IEEE118_heights %>%
         axis.text.x=element_blank(),
         axis.text.y=element_blank())
   ggsave(file.path(FiguresFolder, "IEE118_map.pdf"))
-  
-  
-  test <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha"), recursive = FALSE) %>%
-  map_df(~{
-
-    Out <- list.files(.x, full.names = TRUE) %>%
-      map_df(~{
-        read_rds(.x) %>%
-          mutate(alpha = basename(.x))  
-      }) %>%
-      rename(v = alpha) %>%
-      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
-              v = gsub("IEEE_118_v_", "", v) %>%
-                gsub(".rds", "",.) %>% as.numeric )%>% 
-      arrange(v) #%>% 
-     bind_cols(target_orders) #This is the target orders from the IEEE script
-    
-    return(Out)
-    
-  }) %>% left_join(as_data_frame(IEEE_118, what = "vertices") %>%
-  select(node =name, Net_Generation))
 ```
 
 
@@ -568,19 +395,31 @@ IEEE118_heights %>%
 
 This function allows the node power and edge capacities to be normalised to allow easier comparison across networks.
 ```{r}
-Normalize_load <- function(force = "PowerFlow", capacity = "Link.Limit")
-  
+
+
+test <- Proportional_Load(IEEE_118, alpha = 3, Link.Limit = "Link.Limit") %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
+
+test2 <-  Normalize_load(g, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                         Generation = Generation, Demand = Demand)
+
+
 ```
+
 
 ##Strain alpha relationship
 
 ```{r}
 target_orders  <- readRDS(file.path(IEEE_Project_folder, "target_orders.rds"))
 
+IEEE_118_dist <- IEEE_118 %>%
+  set.edge.attribute(., "distance", value = 1)%>%
+  set.edge.attribute(., "Link.Limit", value = Inf)
+
 IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE) %>%
   map_df(~{
     read_rds(.x) %>%
-    Calc_line_strain(IEEE_118_test , ., distance = distance) %>%
+    Calc_line_strain(IEEE_118_dist , ., distance = distance) %>%
       summarise(theta_degs = mean(strain)) %>%
     #angle_from_solved_heights(.) %>%
     mutate(alpha = basename(.x),
@@ -591,11 +430,10 @@ IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_
 
 IEEE_theta_by_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha"), recursive = FALSE) %>%
   map_df(~{
-
     Out <- list.files(.x, full.names = TRUE) %>%
       map_df(~{
         read_rds(.x) %>%
-    Calc_line_strain(IEEE_118_test , ., distance = distance) %>%
+    Calc_line_strain(IEEE_118_dist , ., distance = distance) %>%
       summarise(theta_degs = mean(strain)) %>%
     #angle_from_solved_heights(.) %>%
           mutate(alpha = basename(.x))  
@@ -610,7 +448,6 @@ IEEE_theta_by_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_f
     return(Out)
     
   })
-
 ```
 
 
@@ -797,33 +634,41 @@ theta_crit_thresh <- AttackRoundData %>%
   left_join(IEEE_theta_by_alpha) %>%
   mutate(alpha = 1/alpha,
          orig_strain = theta_degs,
-     theta_degs =   relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs) ) %>%
+     theta_degs =   relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs) 
+     ) %>%
   mutate(true_alpha = 1/alpha)
 
 #get the mean number of elements attacked for each of the hundred random attacks per scramble
 theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
- # group_by(alpha) %>%
-  #select(-v) %>%
-  #summarise_all(mean) %>%
   left_join(IEEE_theta_by_alpha_ec %>% 
               mutate(ec = ec %>% as.numeric(.)/100)) %>%
   mutate(alpha = 1/alpha,
                   orig_strain = theta_degs,
-         theta_degs =  relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs))
+         theta_degs =  relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs)
+         )
 
 #reshape so that the alpha and strain values can be plotted
+{
 PropLoad_line <- theta_crit_thresh %>%
   select(alpha, NodesAttacked, theta_degs) %>%
-  gather(key = type, value = value, -NodesAttacked)  %>%
-  mutate(type = type %>%factor(., labels = c("1/alpha[sys]", "epsilon~as~fraction~of~max~range")))
+  gather(key = type, value = value, -NodesAttacked) 
+  
+ PropLoad_line <-  bind_rows(PropLoad_line %>%
+  mutate(type = ifelse(type=="alpha" , "alpha[sys]", "1/kappa~strain"), 
+         bounded = FALSE),
+  PropLoad_line %>% 
+  mutate( type = ifelse(type=="alpha" , "1/alpha[sys]", "kappa~strain"), 
+          value = 1/value,
+          bounded = TRUE)) %>%
+   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")))
 
 #reshape so that the alpha and strain values can be plotted
-scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
+
+ scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
                select(alpha, NodesAttacked, theta_degs, ec, v) %>%
                gather(key = type, value = value, -NodesAttacked, -ec, -v) %>%
-  mutate(ec = factor(ec),
-         type = type %>%factor(., labels = c("1/alpha[sys]", "epsilon~as~fraction~of~max~range"))
-         #type = ifelse(type=="theta_degs", "Theta as fraction of range between max and min", "One over system alpha")
+  mutate(ec = factor(ec)#,
+         #type = type %>%factor(., labels = c("1/alpha[sys]", "kappa~strain"))
          ) %>%
   mutate(alpha_limit = case_when(
     v == 1~ "min",
@@ -831,17 +676,364 @@ scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
     TRUE ~"0ther"
   ))
 
-#plot the data to show that the strain value has a closer relationship to 
+  scrambled_ec_points <-  bind_rows(scrambled_ec_points %>%
+  mutate(type = ifelse(type=="alpha" , "alpha[sys]", "1/kappa~strain"),
+          bounded = FALSE),
+  scrambled_ec_points %>% 
+  mutate( type = ifelse(type=="alpha" , "1/alpha[sys]", "kappa~strain"), 
+          value = 1/value,
+          bounded = TRUE)) %>%
+   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")))
+
+ 
+}
+
+#plot the data to show that the strain value has a closer relationship to the proportional load than the alpha value does for both high and low values of strain.
 PropLoad_line %>%
+  filter(bounded) %>%
   ggplot(aes(y = 1/value, x = NodesAttacked)) + 
-  geom_line() +
+  geom_path() +
  # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
-  geom_point(data = scrambled_ec_points,# %>%  filter(ec !=100),
+  geom_point(data = scrambled_ec_points  %>%
+  filter(as.character(ec)%>% as.numeric()<30) %>% filter(bounded),# %>%  filter(ec !=100),
              aes(colour = ec)) +
-  facet_grid(~type, scales = "free_x", labeller = label_parsed) + #parsing shows the plotmath
+  facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
+  labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
+       x = "Edges Attacked", y = "metric value") 
+#scale_colour_viridis_c()+
+ggsave(file.path(FiguresFolder, "NodesAttacked_Strain_alpha_small_ec_118.pdf"))
+
+PropLoad_line %>%
+  filter(!bounded) %>%
+  ggplot(aes(y = 1/value, x = NodesAttacked)) + 
+  geom_path() +
+ # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
+  geom_point(data = scrambled_ec_points  %>%
+  filter(as.character(ec)%>% as.numeric()<30) %>% filter(!bounded),# %>%  filter(ec !=100),
+             aes(colour = ec)) +
+  facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
+  labs(title = "Analysing the spread of outcomes for alpha and one over relative strain", 
+       x = "Edges Attacked", y = "metric value") +
+  coord_cartesian(ylim = c(0,200))
+ggsave(file.path(FiguresFolder, "NodesAttacked_Strain_alpha_large_ec_118.pdf"))
+
+#This shows that the extrema from each group act as a boundary to the scrambled loads
+PropLoad_line %>%
+  filter(bounded) %>%
+  ggplot(aes(y = 1/value, x = NodesAttacked)) + 
+  geom_path() +
+ # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
+  geom_point(data = scrambled_ec_points %>%  filter(bounded),
+             aes(colour = alpha_limit)) +
+  facet_wrap(~type, scales = "free", labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Comparing strain for different alpha and excess capacity levels", 
-       y = "Edges Attacked")
-#scale_colour_viridis_d()
-ggsave(file.path(FiguresFolder, "Theta_vs_alpha_ec_118.pdf"))
+       y = "Edges Attacked") 
 
 ```
+
+
+#UK map 
+
+##Set up UK Graph
+```{r}
+
+g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
+#Ensure there is powerflow
+SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
+g <- PowerFlow(g, SlackRef$name) #calculate power flow
+
+```
+
+
+```{r}
+
+#create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
+
+if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
+  final_z <- read_rds(file.path(PLwd, "UK_power_grid_3d.rds"))
+} else{
+  
+  g2 <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
+  g2 <-set.edge.attribute(g2, "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+    set.edge.attribute(., "Area", value = 1)
+  g2 <-Normalize_load(g2, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                         Generation = Generation, Demand = Demand)
+  # block 83 single iteration to complete
+ test <- g2 %>% as_data_frame() 
+  
+  List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
+  
+test <- 1:length(List_of_BiConComps) %>% map_df(~{
+  compo <- List_of_BiConComps[[.x]] 
+  
+  #component 83 is the only block where there is no demand
+  compo %>% get.vertex.attribute(., "BalencedPower") %>% sum %>%
+    tibble(comp = .x, resid = ., nodes = vcount(compo), edges = ecount(compo), 
+           min = min(get.vertex.attribute(compo, "BalencedPower"))^2, #find closest to 0
+           max = max(get.vertex.attribute(compo, "BalencedPower")))
+  })
+  
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.03, tol = 1e-10, distance = "distance", 
+                                      maxIter = 20000, mass = 1)
+
+  final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.004, tol = 1e-10, 
+                                      distance = "distance", maxIter = 40000, mass = 1)
+  
+  write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
+  
+}
+
+OriginBlock2$results %>%
+  ggplot(aes(x = t, y = z)) + geom_line()
+
+
+test <-OriginBlock2$NodeList
+
+mean(final_z$z)
+median(final_z$z)
+
+#Is the strain power law distributed?
+line_strain <-as_data_frame(g) %>% as_tibble %>%
+  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
+  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
+  mutate(D = 1,
+         dz = abs(z.x-z.y),
+         mean_z = (z.x+z.y)/2,
+         H = sqrt(dz^2 +D^2),
+         strain = (H-D)/D,
+         alpha = Link.Limit/abs(PowerFlow),
+         line_load = abs(PowerFlow)/Link.Limit,
+         percentile_strain = percent_rank(strain)) %>%
+  select(Link, alpha, line_load, dz, H, strain, percentile_strain, mean_z)
+
+cor(line_strain$dz, line_strain$strain)
+cor(line_strain$line_load, line_strain$strain)
+
+z_network_map <-MakeMapDF(g2, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(line_strain, by = c("Link"))%>%
+   left_join(., final_z %>% select(node, z), by = c("Node"= "node")) 
+
+z_network_map %>%
+  #filter(!is.na(Perc)) %>%
+    ggplot(aes(x = Longitude, y = Latitude)) + 
+  geom_line(aes(group = Link, colour = percentile_strain), size = 0.8) + 
+   facet_grid(~PositionType) + 
+ # geom_point( aes(x = Latitude, y = Longitude, colour = percent_rank(z))) + 
+  scale_color_viridis_c()+
+  ggtitle("Strain map")
+
+
+node_z <-z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node, Longitude, Latitude, z) %>%
+  distinct(.keep_all = T) 
+
+
+edge_z <-z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Longitude, Latitude, z, Link) %>%
+  group_by(Link) %>%
+  summarise_all(mean)
+
+#This is the strain of the network on each edge. It allows us to see the slope of the network
+edge_strain <- z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Longitude, Latitude, z = strain, Link) %>%
+  group_by(Link) %>%
+  summarise_all(mean)
+
+
+#Find the shortest path between the highest and lowest points
+ extrema <- node_z %>%
+  filter(z %in% c(max(z), min(z)))
+
+nodes_shortest_path <- shortest_paths(g, from = "GRUB", to = "INDQ", output = "vpath", weights = NA)[[1]] %>% unlist %>%
+  get.vertex.attribute(g, index = .) %>% .$name
+
+nodes_shortest_path_df <- z_network_map %>%select(-type) %>%
+  filter(PositionType=="Geo Space", 
+         Node %in% nodes_shortest_path)
+
+
+
+node_z2 <- node_z %>%
+  left_join(VertexMetaData %>% rename(Node = Name)) %>%
+  arrange(Latitude) %>%
+  mutate(lat_cumsum = cumsum(ifelse(BalencedPower>0, BalencedPower, 0)),
+         lat_rev_cumsum = rev(lat_cumsum),
+         lat_diff = lat_cumsum - lat_rev_cumsum,
+         lat_abs_diff = abs(lat_diff)) %>%
+    arrange(Longitude) %>%
+  mutate(lon_cumsum = cumsum(ifelse(BalencedPower>0, BalencedPower, 0)),
+         lon_rev_cumsum = rev(lon_cumsum),
+         lon_diff = lon_cumsum - lon_rev_cumsum,
+         lon_abs_diff = abs(lon_diff))  %>%
+  arrange(Latitude) %>% 
+  mutate(mass = 1) %>%
+  mutate(mass_lat_cumsum = cumsum(mass),
+         mass_lat_rev_cumsum = rev(mass_lat_cumsum),
+         mass_lat_diff = mass_lat_cumsum - mass_lat_rev_cumsum,
+         mass_lat_abs_diff = abs(mass_lat_diff)) %>%
+    arrange(Longitude) %>%
+  mutate(mass_lon_cumsum = cumsum(mass),
+         mass_lon_rev_cumsum = rev(mass_lon_cumsum),
+         mass_lon_diff = mass_lon_cumsum - mass_lon_rev_cumsum,
+         mass_lon_abs_diff = abs(mass_lon_diff))
+
+```
+
+##UK network plot
+```{r}
+shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
+                       "Countries_December_2017_Ultra_Generalised_Clipped_Boundaries_in_UK_WGS84.shp")
+
+
+GB <- st_read(shapefile) %>%
+  filter(ctry17cd !="N92000002") %>%
+  st_union()
+
+#plots the uk network with the shortest path between the highest and lowest points as well as the midpoint
+ggplot(GB) +
+  geom_sf() +
+ # scale_fill_viridis("Area") +
+  ggtitle("Node locations in the UK") +
+ # theme_bw() +
+  geom_line(data = z_network_map %>%
+              filter(PositionType=="Geo Space"),  aes(x = Longitude, y = Latitude, group = Link)) +
+   geom_point(data =node_z, aes(x = Longitude, y = Latitude, colour = z), alpha  = 0.7)+
+  coord_sf(ylim = c(50,58.9)) +
+    geom_line(data = nodes_shortest_path_df,
+            aes(x = Longitude, y = Latitude, group = Link),
+            colour = "red") +
+  scale_color_viridis_c() +
+  geom_point(data = node_z2 %>% filter(lat_abs_diff== min(lat_abs_diff)),
+             aes(x = Longitude, y = Latitude), 
+             colour = "red")+
+    geom_point(data = node_z2 %>% filter(lon_abs_diff== min(lon_abs_diff), Generation>0),
+             aes(x = Longitude, y = Latitude), 
+             colour = "cyan") +
+  geom_hline(aes(yintercept = node_z2 %>% filter(Node == "BLAC") %>% pull(Latitude)), colour = "red") +
+    geom_hline(aes(yintercept = node_z2 %>% filter(Node == "MOFF") %>% pull(Latitude)), colour = "red")+
+    geom_vline(aes(xintercept = node_z2 %>% filter(Node == "CONQ") %>% pull(Longitude)), colour = "cyan") 
+```
+
+
+##Kriging
+```{r}
+
+spdf <- as(GB, "Spatial") %>% st_as_sf %>%
+  st_crop(c(xmin = -7.5, ymin = 50, xmax = 2, ymax = 59)) %>%
+  as_Spatial()
+
+kriged_df <- Create_kriged_df(node_z, "z", spdf, 8e4) %>% mutate(type = "node z")
+kriged_df_strain <- Create_kriged_df(edge_strain, "z", spdf, 8e4) %>% mutate(type = "strain")
+
+bind_rows(kriged_df, kriged_df_strain) %>%
+mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
+  group_by(type) %>%
+   mutate(z = percent_rank(z)) %>%
+# mutate(z = z/max(z)) %>%
+  rename(Height = z) %>%
+  ggplot(aes(x=Longitude, y=Latitude)) + 
+  geom_tile(aes(fill=Height)) + coord_equal() +
+  #plot shortest path in red as an overlay
+ # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
+  #          aes(group = Link),
+   #         colour = "red")+
+  facet_grid(~type) +bind_rows(kriged_df, kriged_df_strain) %>%
+mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
+  group_by(type) %>%
+   mutate(z = percent_rank(z)) %>%
+# mutate(z = z/max(z)) %>%
+  rename(Height = z) %>%
+  ggplot(aes(x=Longitude, y=Latitude)) + 
+  geom_tile(aes(fill=Height)) + coord_equal() +
+  #plot shortest path in red as an overlay
+ # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
+  #          aes(group = Link),
+   #         colour = "red")+
+  facet_grid(~type) +
+  scale_fill_viridis_c() +
+scale_colour_viridis_c(option = "plasma") +
+  labs(title = "Height and Strain of the UK high-voltage power grid after converting to a system of springs", fill = "Percentile") +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+
+  scale_fill_viridis_c() +
+scale_colour_viridis_c(option = "plasma") +
+  labs(title = "Height and Strain of the UK high-voltage power grid after converting to a system of springs", fill = "Percentile") +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right") #the legend position may want changing back to the more convential side.
+  ggsave(file.path(FiguresFolder, "BritainKrigedTopology.pdf"))
+
+
+```
+
+##Voronoi tessaltion
+What does the height map look like with a vonoi tesselation instead of kriging?
+
+The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix.
+I'm not sure what I want to use the Voronoi for if at all, but it will be useful at some point so I am keeping it
+```{r}
+#convert the dataframe to an sf object
+node_z_sf <- node_z %>%
+  mutate(z = percent_rank(z))%>% 
+  st_as_sf(., coords = c("Longitude", "Latitude")) 
+#add in the correct projection data to align with the map
+st_crs(node_z_sf) <- st_crs(GB)$proj4string
+
+#create the tessellation
+v <- st_voronoi(st_combine(node_z_sf)) 
+
+#clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+#the key simple feature is of course z
+clipped_tess_node <- st_intersection(st_cast(v), st_union(GB)) %>% 
+  st_sf(geom=.) %>%
+  st_join(node_z_sf) %>% 
+  mutate(type = "node")
+
+#plot the tesselation of the UK with the fill and lines both having the same colour system.
+#grey areas occure when the node is accidently offshore and clippied out of the map. This can be easily fixed.
+bind_rows(clipped_tess_edge, clipped_tess_node) 
+
+#voronoi of the nodes is pretty good
+clipped_tess_node %>%
+ggplot() + geom_sf(aes(fill = z, colour = z)) +
+   scale_fill_viridis_c()+
+  scale_colour_viridis_c() +
+  facet_grid(~type)
+
+#voronoi of the mid point of the edges is just a chaos
+# edge_z_sf <- edge_strain %>%
+#   mutate(z = percent_rank(z))%>% 
+#   st_as_sf(., coords = c("Longitude", "Latitude")) 
+# #add in the correct projection data to align with the map
+# st_crs(edge_z_sf) <- st_crs(GB)$proj4string
+# 
+# #create the tessellation
+# v_edge <- st_voronoi(st_combine(edge_z_sf))
+# 
+# #clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+# #the key simple feature is of course z
+# clipped_tess_edge <- st_intersection(st_cast(v_edge), st_union(GB)) %>% 
+#   st_sf(geom=.) %>%
+#   st_join(edge_z_sf) %>% 
+#   mutate(type = "edge")
+
+```
+
+##alpha vs strain
+```{r}
+
+line_strain %>%
+  ggplot(aes(x = line_load, y = strain)) + geom_point()
+
+```
+
+

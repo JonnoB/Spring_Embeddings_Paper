@@ -8,8 +8,10 @@ editor_options:
 ---
 
 
-
-
+Replace values on
+PL attack
+Edge Attack
+Scrambled edge angles
 
 
 ```{r}
@@ -141,8 +143,7 @@ NodePosition <- test2 %>%
 ```
 
 
-#IEEE 118 proportional attack
-
+#PL attack IEEE118
 
 ```{r}
 
@@ -150,13 +151,13 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 setwd(file.path(Project_folder, "IEEE118_edges"))
 
 rep <-5
-alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200)[c(0,6,12)+rep]
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)#[c(0,6,12)+rep]
 alpha_vector
 set.seed(21256)
 DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
 
 #Create the simulations for each of the alpha avalues using 100 simulations for each
-alpha_vector %>% walk(~{
+Inf %>% walk(~{
   gProp <- Proportional_Load(IEEE_118, alpha = .x)
   
   folder <- paste0("alpha_value_",  .x*100)
@@ -165,9 +166,11 @@ alpha_vector %>% walk(~{
     dir.create(folder)
   }
   
+  CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
+  
   SaveMultiAttacks(gProp, DeleteOrders, folder, 
                    TotalAttackRounds = 1000, 
-                   CascadeMode = TRUE,
+                   CascadeMode = CascadeMode,
                    Demand = "Load_MW",
                    Generation = "Generation_MW",
                    EdgeName = "Link", 
@@ -187,7 +190,6 @@ alpha_vector %>% walk(~{
 ```{r}
 set.seed(21256)
 DeleteOrders <- MultiAttackOrder(IEEE_118, Sims = 100)  
-
 
 #The vector of alpha values to be tested
 alpha_vector <- c(1, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
@@ -216,15 +218,10 @@ alpha_vector %>% walk(~{
 
 )
 
-
-
-
-
-
 alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
 setwd(file.path(Project_folder, "Max_vulnerability"))
 
-#Create the simulations for each of the alpha avalues using 100 simulations for each
+#Create the simulations for each of the alpha values using 100 simulations for each
 alpha_vector %>% walk(~{
   
   gProp <- Proportional_Load(IEEE_118, alpha = .x)
@@ -264,9 +261,10 @@ temp <- as_data_frame(gProp) %>%
 
 #Target orders
 
-
+Create the target orders for the scrambled edge values
+##ec values to attack
 ```{r}
-Scramble_ec_values <- c(1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 100) 
+Scramble_ec_values <- c(1.005, 1.01, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20, 100) 
 ```
 
 
@@ -302,16 +300,13 @@ if(!file.exists(file.path(Project_folder, "target_orders.rds"))){
   
 }
 
-
-
-
 ```
 
-#Do a multi-attack on each fixed ec
+#Fixed EC multi-attack
 
 ##Node attack
 ```{r}
-Scramble_ec_values[c(1,11)] %>% walk(~{
+Scramble_ec_values %>% walk(~{
   
   target_orders_x<- target_orders %>% 
     filter(ec == .x)
@@ -331,14 +326,12 @@ Scramble_ec_values[c(1,11)] %>% walk(~{
   Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders)
   
 })
-  
-  seed_alpha %>%
-  ggplot(aes(x = alpha)) + geom_density()
 ```
 
 ##Edge attack
 ```{r}
 IEEE_118<- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
+
 set.seed(21256)
 DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
 Scramble_ec_values %>% walk(~{
@@ -373,7 +366,7 @@ The below chunk was put in due to simulations being run with different parameter
 common_time <- 0.03
 common_Iter <- 25000
 common_tol <- 1e-10
-common_mass <- 5000
+common_mass <- 1
 ```
 
 
@@ -399,8 +392,9 @@ alpha_vector %>% walk(~{
   current_graph  <- IEEE_118 %>%
     Proportional_Load(., alpha = alpha) %>% 
     set.edge.attribute(. , "distance", value = 1) %>%
-    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
-    set.edge.attribute(., "Area", value = 1)
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+    set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
   
   List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
   
@@ -414,7 +408,7 @@ alpha_vector %>% walk(~{
                                       tstep = common_time, tol = common_tol, distance = "distance", 
                                       maxIter = common_Iter, mass = common_mass)
   
-  write_rds(final_z, file.path(IEEE_Project_folder, "Solved_height_networks", paste0("IEEE_118_alpha_", alpha, ".rds")))
+  write_rds(final_z, file.path(IEEE_Project_folder, "Solved_height_networks_norm", paste0("IEEE_118_alpha_", alpha, ".rds")))
 })
 
 
@@ -429,13 +423,14 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 
 ```{r}
 
-for(n in Scramble_ec_values){
+#for(n in Scramble_ec_values){
+  for(n in Scramble_ec_values){
   print(n)
   target_orders2 <- target_orders %>% 
     filter(ec == n)
   
   alpha_folder <-  paste0("Solved_height_networks_alpha_", n*100) %>%
-    file.path(Project_folder, "constant_ec_from_alpha", .)
+    file.path(Project_folder, "constant_ec_from_alpha_norm", .)
   #create folder if it doesn't already exist
   if(!file.exists(alpha_folder)){
     dir.create(alpha_folder)
@@ -463,8 +458,9 @@ for(n in Scramble_ec_values){
     current_graph <- Scrambled_edge_cap %>%
       set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
       set.edge.attribute(. , "distance", value = 1) %>%
-      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", 100, 10) %>%
-      set.edge.attribute(., "Area", value = 1)
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+      set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
     
     List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
     
@@ -551,8 +547,7 @@ It seems that the algorithm is not converging properly.
 I am getting large difference between the infinite model and the a = 10 random ex model.
 This below chunk tries to test if 16k and t = 0.3 is good enough, or just what is going on
 
-
-
+The algorithm is converging properly. The vairability in the number of nodes needed for complete collapse is so high for low values of alpha that even 100 simualtion has a few dodgy values
 ```{r}
 
 #calculate theta for all values of alpha
