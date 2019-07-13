@@ -759,8 +759,6 @@ if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
     set.edge.attribute(., "Area", value = 1)
   g2 <-Normalize_load(g2, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
                          Generation = Generation, Demand = Demand)
-  # block 83 single iteration to complete
- test <- g2 %>% as_data_frame() 
   
   List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
   
@@ -776,17 +774,17 @@ test <- 1:length(List_of_BiConComps) %>% map_df(~{
   
   #use the largest block to set the simulation parameters k and m.
   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.03, tol = 1e-10, distance = "distance", 
-                                      maxIter = 20000, mass = 1)
+OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, distance = "distance", 
+                                      maxIter = 5000, mass = 1)
 
-  final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.004, tol = 1e-10, 
-                                      distance = "distance", maxIter = 40000, mass = 1)
+final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.01, tol = 1e-10, 
+                                      distance = "distance", maxIter = 20000, mass = 1)
   
   write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
   
 }
 
-OriginBlock2$results %>%
+OriginBlock$results %>%
   ggplot(aes(x = t, y = z)) + geom_line()
 
 
@@ -812,7 +810,7 @@ line_strain <-as_data_frame(g) %>% as_tibble %>%
 cor(line_strain$dz, line_strain$strain)
 cor(line_strain$line_load, line_strain$strain)
 
-z_network_map <-MakeMapDF(g2, read_csv(file.path(basewd, "point.csv")))  %>%
+z_network_map <-MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
   left_join(line_strain, by = c("Link"))%>%
    left_join(., final_z %>% select(node, z), by = c("Node"= "node")) 
 
@@ -943,29 +941,11 @@ mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
  # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
   #          aes(group = Link),
    #         colour = "red")+
-  facet_grid(~type) +bind_rows(kriged_df, kriged_df_strain) %>%
-mutate(type = ifelse("node z"==type, "Height", "Strain")) %>%
-  group_by(type) %>%
-   mutate(z = percent_rank(z)) %>%
-# mutate(z = z/max(z)) %>%
-  rename(Height = z) %>%
-  ggplot(aes(x=Longitude, y=Latitude)) + 
-  geom_tile(aes(fill=Height)) + coord_equal() +
-  #plot shortest path in red as an overlay
- # geom_line(data = nodes_shortest_path_df, # shortest path no longer necessary as angle is no longer used
-  #          aes(group = Link),
-   #         colour = "red")+
   facet_grid(~type) +
   scale_fill_viridis_c() +
 scale_colour_viridis_c(option = "plasma") +
-  labs(title = "Height and Strain of the UK high-voltage power grid after converting to a system of springs", fill = "Percentile") +
-  theme(axis.title = element_blank(),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-
-  scale_fill_viridis_c() +
-scale_colour_viridis_c(option = "plasma") +
-  labs(title = "Height and Strain of the UK high-voltage power grid after converting to a system of springs", fill = "Percentile") +
+  labs(title = "Height and Strain of the UK high-voltage power grid 
+       after converting to a system of springs", fill = "Percentile") +
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
@@ -981,6 +961,7 @@ What does the height map look like with a vonoi tesselation instead of kriging?
 The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix.
 I'm not sure what I want to use the Voronoi for if at all, but it will be useful at some point so I am keeping it
 ```{r}
+
 #convert the dataframe to an sf object
 node_z_sf <- node_z %>%
   mutate(z = percent_rank(z))%>% 
@@ -1000,7 +981,7 @@ clipped_tess_node <- st_intersection(st_cast(v), st_union(GB)) %>%
 
 #plot the tesselation of the UK with the fill and lines both having the same colour system.
 #grey areas occure when the node is accidently offshore and clippied out of the map. This can be easily fixed.
-bind_rows(clipped_tess_edge, clipped_tess_node) 
+bind_rows(clipped_tess_node, clipped_tess_node) 
 
 #voronoi of the nodes is pretty good
 clipped_tess_node %>%
@@ -1036,4 +1017,138 @@ line_strain %>%
 
 ```
 
+#MSOA yearly data
+
+This section uses data from https://www.gov.uk/government/statistics/lower-and-middle-super-output-areas-electricity-consumption
+https://www.gov.uk/government/statistical-data-sets/stacked-electricity-consumption-statistics-data
+which gives yearly average energy consumption. 
+I can use this data to match the centroid of each MSOA to the Voronoi cell created by nodes with demand.
+This then gives me the change in demand across 10 years.
+I can then calculated a time series of line strain
+
+England and wales MSOA centroids available from
+https://data.gov.uk/dataset/c3e4b3c8-28ec-4599-bb61-dafe18525b4c/middle-layer-soa-with-names-geometric-centroid-population-weighted-centroid-local-alternative-names-lookup-table
+
+LSOA centroids are from
+https://data.cdrc.ac.uk/dataset/cdrc-2011-population-weighted-centroids-gb
+
+Data zone and intermedia zone look ups are from 
+https://www.nrscotland.gov.uk/statistics-and-data/geography/our-products/census-datasets/2011-census/2011-indexes
+
+LSOA to MSOA lookups from
+https://geoportal.statistics.gov.uk/datasets/output-area-to-lower-layer-super-output-area-to-middle-layer-super-output-area-to-local-authority-district-december-2011-lookup-in-england-and-wales/data
+
+
+```{r}
+
+
+elec_stacked <- file.path(basewd, "MSOA_demand", "elec_MSOA_dom_stacked.csv") %>% read_csv() %>%
+  rename(MSOA11CD = msoa.code) %>% mutate(user_type = "domestic") %>%
+  bind_rows(file.path(basewd, "MSOA_demand", "elec_MSOA_nondom_stacked.csv") %>% read_csv() %>%
+  rename(MSOA11CD = msoa.code) %>% mutate(user_type = "non-domestic")) %>%
+  group_by(MSOA11CD, user_type, year) %>%
+  summarise(total.kwh = sum(total.kwh, na.rm = TRUE)) %>%
+  mutate(mean_Mw = total.kwh/(365*24*1000))
+
+
+LSOA_centroids <- file.path(basewd,  "MSOA_demand","englandwelshscotlandpwc2011.csv") %>% read_csv()
+
+DZ_IZ_lookup <- file.path(basewd, "MSOA_demand", "OA_DZ_IZ_2011.xlsx") %>%
+  read_xlsx() %>%
+  select(-OutputArea2011Code) %>%
+  set_names(c("LSOA11CD", "MSOA11CD"))
+
+#load england wales data and bind with scottish data
+LSOA_MSOA_lookup <- file.path(basewd, "MSOA_demand", "Output_Area_to_Lower_Layer_Super_Output_Area_to_Middle_Layer_Super_Output_Area_to_Local_Authority_District_December_2011_Lookup_in_England_and_Wales.csv") %>%
+  read_csv() %>%
+  group_by(LSOA11CD) %>%
+  summarise(MSOA11CD = first(MSOA11CD)) %>%
+  bind_rows(DZ_IZ_lookup)
+  
+
+#the UK grid system
+ukgrid <- "+init=epsg:27700"
+
+#create centroids spatial points
+LSOA_centroids_sf <- LSOA_centroids %>% 
+  select(CODE, Easting, Northing) %>%
+  st_as_sf(., coords = c("Easting", "Northing") )
+#add in the correct projection data to align with the map
+st_crs(LSOA_centroids_sf) <- ukgrid
+LSOA_centroids_sf <- st_transform(LSOA_centroids_sf, st_crs(GB)$proj4string)
+
+
+#get the demand nodes data
+ Demand_nodes <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv"))) %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node:Latitude) %>%
+  distinct(.keep_all = TRUE) %>%
+  left_join( as_data_frame(g, what = "vertices"), by = c("Node"="name")) %>%
+  filter(Demand>0)
+ 
+ sum(Demand_nodes$Demand)
+
+ #create spatial points out of the demand nodes
+Demand_nodes_sf <-Demand_nodes %>% 
+  st_as_sf(., coords = c("Longitude", "Latitude")) 
+#add in the correct projection data to align with the map
+st_crs(Demand_nodes_sf) <- st_crs(GB)$proj4string
+ 
+#create the voronoi tesselation using the demand nodes
+v <- Demand_nodes_sf  %>% st_union() %>% st_voronoi()
+
+all_nodes<- st_cast(v) 
+
+#This finds what voronoi cell each lsoa is in but I don't know what ID each Voronoi refers to.
+voronoi_intersection <- st_intersects(st_cast(v), LSOA_centroids_sf, sparse = FALSE)
+
+#Here I reshape the binary intersection matrix add back LSOA names and keep only rows that tell me that an LSOA is present.
+Node_dictionary <- voronoi_intersection %>% as_tibble(.) %>%
+  bind_cols(Demand_nodes %>% select(Node)) %>%
+  set_names(c(LSOA_centroids$CODE, "Node")) %>%
+  gather(key = lsoa, value = value, -Node) %>%
+  filter(value) %>%
+  select(-value)
+  
+
+test <- Node_dictionary %>% rename(LSOA11CD = lsoa) %>%
+  left_join(LSOA_centroids %>% select(LSOA11CD = CODE, Pop = TotPop2011)) %>%
+   left_join(LSOA_MSOA_lookup) %>% #get the lookup of LSOA to MSOA
+  group_by(Node, MSOA11CD) %>% 
+  summarise(counts = n(),
+            Pop = sum(Pop)) %>%
+  group_by(MSOA11CD) %>%
+  mutate(Pop_perc = Pop/sum(Pop)) %>%
+  ungroup
+
+#weight the MW by 
+test2 <- test %>%
+  left_join(elec_stacked) %>%
+  mutate(weighted_MW = Pop_perc*mean_Mw)
+
+test_time <- test2 %>%
+  group_by(year, Node) %>%
+  summarise(total_MW = sum(weighted_MW))
+
+early_nodes <- test_time %>%
+  filter(year<2012) %>% pull(Node) %>%  unique
+
+
+test3 <- test_time %>%
+  filter(!(Node %in% early_nodes))
+
+
+#A test time plot.
+#A large number of nodes do not appeara before 2012
+test_time %>%
+  ggplot(aes(x = year, y = total_MW, group = Node),) + geom_line(alpha = 0.2)
+
+```
+
+
+#ETYS projections
+This data can be used to project node demand into the future and so predict future system strain.
+```{r}
+
+```
 
