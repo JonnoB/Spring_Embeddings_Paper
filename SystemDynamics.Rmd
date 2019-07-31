@@ -54,6 +54,7 @@ Tariff <- file.path(basewd,"Tariff and Transport")
 PLwd <- "/media/jonno/Seagate Expansion Drive/System_Dynamics"
 Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
 IEEE_Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+base_attack_folder <-"/media/jonno/Seagate Expansion Drive/System_Dynamics/Profile_attacks"
 
 #Load necessary datasets and great the base powergrid network
 source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
@@ -76,7 +77,40 @@ VertexMetaData2 <- VertexMetaData %>%
     TRUE ~ NodeType
   )) %>% select(Name, NodeType, NodeType2, BalencedPower)
 
+
+
 ```
+
+#Toy examples
+The values created by this chunk are used for the toys examples in the paper
+```{r}
+    
+all_toys <- tibble(flow = c(10,10,10,10, 0.5, 1, 1,1, 0.5, 0.5), k = c(250,500, 100, 1100, 500,500, 100, 1100,100, 1100))
+toy_res <- 1:nrow(all_toys) %>% 
+  map_df(~{  
+current_settings <- all_toys %>% slice(.x)
+
+    solution_angle <- nlsLM(Force ~ ForceV_from_angle(target_angle, k = k, d = 1), 
+                            start = c(target_angle = pi/4), 
+                            data = list(Force = current_settings$flow, k = current_settings$k), 
+                            upper = pi/2)
+   
+    Out <- current_settings %>%
+      mutate( theta_rads = coef(solution_angle)[1],
+              theta_degs = theta_rads*360/(2*pi),
+              delta_z = tan(theta_rads),
+              delta_h = sqrt(delta_z^2 + 1)-1,
+              strain = signif(delta_h,3) # this is because the distance is 1 and strain = (H-d)/d and H = delta_h+d
+      ) %>%
+      select( theta_rads, theta_degs, delta_z, flow, k, delta_h, strain)
+    
+    return(Out)
+  })       
+
+rm(all_toys); rm(toy_res) #deleted so they don't clutter the work space. They are quick to calculate and are never used again
+   
+```
+
 
 
 #Psychadelic beard/boat
@@ -146,17 +180,18 @@ Edge_combos_delta_z <- Edge_combos$groupID2  %>%
               theta_degs = theta_rads*360/(2*pi),
               delta_z = tan(theta_rads),
               delta_h = sqrt(delta_z^2 + 1)-1,
-              strain = delta_z # this is because the distance is 1 and strain = (H-d)/d and H = delta_h+d
+              strain = delta_h # this is because the distance is 1 and strain = (H-d)/d and H = delta_h+d
       ) %>%
       select(groupID, theta_rads, theta_degs, delta_z, flow, alpha, k, delta_h, strain)
   })  
 
 #calculate the ratio of excess capacity split between B and C then join with the alpha value by group
-  toy_theta_temp <-  fixed_mean_alpha %>%
+#using capcity or 1/alpha gives the same value 
+toy_theta_temp <-  fixed_mean_alpha %>%
   select(groupID, edge, alpha, counts) %>%
   spread(key = edge, value = alpha) %>%
   mutate(
-    B= 1/B,
+   B= 1/B,
     C = 1/C,
     ratio = (B)/(C+B)) %>%
   left_join(fixed_mean_alpha %>%
@@ -183,15 +218,24 @@ select(groupID, edge, flow, alpha) %>%
     ggplot(aes(x = ratio, y = mean_strain, colour = mean_alpha, group = mean_alpha)) + 
     geom_line(size = 1) +
     scale_colour_viridis_c() +
-    labs(title =latex2exp::TeX(paste("The relationship between strain and ", 
-                                     "$\\alpha \\,$", 
-                                     " in terms of ec fraction in edge B" )), 
-         y = "system strain", 
-         x= latex2exp::TeX("$\\frac{ec_{B}}{ec_{B}+ec_{C}}$"),
-         colour = latex2exp::TeX(paste("system", "$\\alpha$")))
+    labs(title ="Strain and System Tolerance in terms of capacity fraction in edge B", 
+         y = "System Strain", 
+         x= latex2exp::TeX("$\\frac{\\tau_{B}}{\\tau_{B}+\\tau_{C}}$"),
+         colour = "System \ntolerance") #latex2exp::TeX(paste("system", "$\\alpha$"))
   ggsave(file.path(FiguresFolder, "Constant_excess_capacity.pdf"))
 
 "Relationship between alpha, excess capacity and theta"
+
+latex2exp::TeX(paste("The relationship between strain and ", 
+                                     "$\\alpha \\,$", 
+                                     " in terms of capacity fraction in edge B" ))
+
+toy_height_data %>%
+  filter((mean_strain == min(mean_strain)))
+
+fixed_mean_alpha %>%
+  filter(groupID==2879)
+
 ```
 
 ##Entropic degree
@@ -218,13 +262,14 @@ toy_height_data %>%
   geom_line(size = 1) +
   scale_colour_viridis_c() +
   facet_grid(~type) +
-  labs(title = latex2exp::TeX(paste("Exploring the relationship between strain", 
-                                    ",", 
-                                    "$\\alpha$", "and entropy")), 
+  labs(title = "The relationship between strain, system tolerance and entropy", 
        x = "Normalised entropy", 
        y ="system strain", 
-       colour =  latex2exp::TeX(paste("system", "$\\alpha$")))
+       colour =  "Sytem
+       tolerance")
 ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
+
+
 
 rm(entropy_data)
 ```
@@ -328,6 +373,109 @@ test2<- test %>%
 ##Convergance visualisation
 ```{r}
 
+nodes_4_3 <- tibble(name = 1:4, Generation = c(20, 0,0,0), Demand = c(0,0,10,10), force = c(20, 0, -10, -10),
+                    norm_force = c(1, 0, -0.5, -0.5))
+
+nodes_pre_names <- tibble(name = c("Generation", "Transfer", "Demand 1", "Demand 2"), Generation = c(20, 0,0,0), Demand = c(0,0,10,10), force = c(20, 0, -10, -10),
+                    norm_force = c(1, 0, -0.5, -0.5))
+
+
+g_4_3 <- matrix(c(0, 1, 0,0,
+          1,0,1,1,
+         0,1,0,0,
+         0,1,0,0), nrow = 4) %>%
+  graph_from_adjacency_matrix(., mode = "undirected") %>%
+  as_data_frame() %>% as_tibble %>%
+  mutate(Link = LETTERS[1:3],#c("M_1", "Z_2", "A_3"),#LETTERS[1:3], #this is to check edge ordering the alpha ordering is A, M,Z
+         alpha = c(1,1,7),
+         flow = c(20,10,10),
+         norm_flow = c(1,0.5,0.5),
+         capacity = alpha*flow,
+         norm_capacity = norm_flow*alpha) %>%
+  graph_from_data_frame(., directed = FALSE, vertices = nodes_4_3) %>% 
+  set.edge.attribute(., "distance", value = 1) %>%
+  Calc_Spring_Youngs_Modulus(., "flow", "capacity", minimum_value = 10, stretch_range = 100) %>%
+  set.edge.attribute(., "Area", value = 1) %>%
+  set.edge.attribute(., "Y", value = 1/c(1:3))%>%
+  set.vertex.attribute(., "name", value = c("Generation", "Transfer", "Demand 1", "Demand 2"))
+
+
+g_post_names <- g_4_3 %>%
+  set.vertex.attribute(., "name", value = c("Generation", "Transfer", "Demand 1", "Demand 2"))
+
+test2 <- as_data_frame(g_4_3)
+
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+simple_converge <- Find_network_balance_expanded(g_4_3, force = "force", flow ="flow", 
+                                                 #capacity = "capacity", 
+                                                 tstep = 0.1,
+                                                 distance = "distance", 
+                                                 mass = 100, 
+                                                 maxIter = 3,
+                                                 frctmultiplier = 1)
+
+
+
+test <- Find_network_balance_expanded(g_4_3, force = "force", 
+                                      flow ="flow", 
+                                     # capacity = "capacity", 
+                                      tstep = 0.1,
+                                      distance = "distance", 
+                                      mass = 100, 
+                                      maxIter = 3000,
+                                      frctmultiplier = 1) %>%
+  mutate(type = "base")
+
+test2_raw <- Find_network_balance(g_4_3, force = "force", 
+                              flow ="flow", 
+                              capacity = "capacity", 
+                              tstep = 0.1,
+                              distance = "distance", 
+                              mass = 100, 
+                              maxIter = 3000,
+                              frctmultiplier = 1,
+                              TwoNodeSolution =F,
+                              tol = 1e-15,
+                              verbose = T)
+
+test2 <- test2_raw$NodeList %>%
+  mutate(type = "base2")
+
+
+test_post <- Find_network_balance_expanded(g_post_names, 
+                                           force = "force", 
+                                           flow ="flow", 
+#                                           capacity = "capacity", 
+                                           tstep = 0.1,
+                                           distance = "distance", 
+                                           mass = 100, 
+                                           maxIter = 3000,
+                                           frctmultiplier = 1) %>%
+  mutate(type = "post")
+
+
+bind_rows(test2, test_post) %>%
+  group_by(type) %>%
+  filter(t==max(t)) %>%
+    ungroup %>%
+  ggplot(aes(y = z, x = t, colour = node)) + geom_point() +
+  facet_wrap(~type)
+
+
+bind_rows(test, test_post) %>%
+  ggplot(aes(y = z, x = t, colour = node)) + geom_line() +
+  facet_wrap(~type)
+
+final <- bind_rows(test2, test_post) %>%
+  group_by(type) %>%
+  filter(t==max(t)) %>%
+    ungroup
+
+simple_converge %>%
+  filter(t<400) %>%
+  ggplot(aes(y = z, x = t, colour = node)) + geom_line()
+ 
 ```
 
 
@@ -388,24 +536,10 @@ IEEE118_heights %>%
         axis.text.x=element_blank(),
         axis.text.y=element_blank())
   ggsave(file.path(FiguresFolder, "IEE118_map.pdf"))
+  
+#system strain is 
+  
 ```
-
-
-###normalising the load
-
-This function allows the node power and edge capacities to be normalised to allow easier comparison across networks.
-```{r}
-
-
-test <- Proportional_Load(IEEE_118, alpha = 3, Link.Limit = "Link.Limit") %>%
-  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
-
-test2 <-  Normalize_load(g, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
-                         Generation = Generation, Demand = Demand)
-
-
-```
-
 
 ##Strain alpha relationship
 
@@ -660,7 +794,8 @@ PropLoad_line <- theta_crit_thresh %>%
   mutate( type = ifelse(type=="alpha" , "1/alpha[sys]", "kappa~strain"), 
           value = 1/value,
           bounded = TRUE)) %>%
-   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")))
+   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")),
+          Edge_perc = NodesAttacked/ecount(IEEE_118))
 
 #reshape so that the alpha and strain values can be plotted
 
@@ -683,15 +818,16 @@ PropLoad_line <- theta_crit_thresh %>%
   mutate( type = ifelse(type=="alpha" , "1/alpha[sys]", "kappa~strain"), 
           value = 1/value,
           bounded = TRUE)) %>%
-   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")))
+   mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")),
+          Edge_perc = NodesAttacked/ecount(IEEE_118))
 
  
 }
 
 #plot the data to show that the strain value has a closer relationship to the proportional load than the alpha value does for both high and low values of strain.
-PropLoad_line %>%
+PropLoad_line  %>%
   filter(bounded) %>%
-  ggplot(aes(y = 1/value, x = NodesAttacked)) + 
+  ggplot(aes(y = 1/value, x = Edge_perc)) + 
   geom_path() +
  # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
   geom_point(data = scrambled_ec_points  %>%
@@ -699,7 +835,8 @@ PropLoad_line %>%
              aes(colour = ec)) +
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
-       x = "Edges Attacked", y = "metric value") 
+       x = "Fraction of Edges Attacked", y = "metric value",
+       colour = "Original\nsystem\ntolerance")  
 #scale_colour_viridis_c()+
 ggsave(file.path(FiguresFolder, "NodesAttacked_Strain_alpha_small_ec_118.pdf"))
 
@@ -742,10 +879,68 @@ g <- RemoveDeadEnds(gbase) #remove non-valid ends from the graph
 SlackRef <- SlackRefFunc(g) #find the most appropriate node to be the slack bus
 g <- PowerFlow(g, SlackRef$name) #calculate power flow
 
+test <- as_data_frame(g, what = "vertices")
+
+#useful at various stages
+energy_types <- c("Coal", "Gas", "Renewable", "Nuclear")
+sim_names <- paste0("No_", energy_types)
 ```
 
-Shoe that there is low corellation betweeen line strain and alpha
+##UK strain
 
+###PL
+```{r}
+
+mean_alpha <- as_data_frame(g) %>%
+  mutate(alpha = abs(PowerFlow/Link.Limit) ) %>%
+  pull(alpha) %>% mean(.) %>%
+  {1/.} %>% signif(.,3)
+
+c(1, Inf, mean_alpha) %>% walk(~{
+  
+  alpha <- .x
+  
+  filename <- file.path(PLwd, paste0("base_load_", alpha, ".rds"))
+  
+  print(paste("alpha value", alpha))
+  if(!file.exists(filename)){
+    
+  current_graph  <- g %>%
+    Proportional_Load(., alpha = alpha) %>% 
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+    set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                         Generation = Generation, Demand = Demand)
+  
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "BalencedPower")
+
+  #Finds which of the components is the giant component so it can be used as the baseline
+      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+      
+      #use the largest block to set the simulation parameters k and m.
+      #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(List_of_BiConComps[[giant_componant]], 
+                                          tstep = 0.05, tol = 1e-10, distance = "distance", 
+                                          maxIter = 20000, mass = 1)
+      
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          tstep = 0.01, tol = 1e-10, 
+                                          distance = "distance", maxIter = 20000, mass = 1)
+  
+  write_rds(final_z, filename)
+  
+  }#end if statement
+  
+})
+
+```
+
+
+Shoe that there is low corellation betweeen line strain and alpha
+###Base Load
 ```{r}
 
 #create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
@@ -790,6 +985,9 @@ final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.01, tol = 1e
 line_strain <-set.edge.attribute(g, "distance", value = 1) %>%
   Calc_line_strain(., final_z, distance)
 
+
+mean(line_strain$strain)
+
 cor(line_strain$dz, line_strain$strain)
 cor(line_strain$line_load, line_strain$strain)
 
@@ -818,7 +1016,8 @@ test2 <- test$edge_strain
 node_z <-z_network_map %>% as_tibble %>%
   filter(PositionType=="Geo Space") %>%
   select(Node, Longitude, Latitude, z) %>%
-  distinct(.keep_all = T) 
+  distinct(.keep_all = T) %>%
+  left_join(Generator_details)
 
 #only used for edge voronoi
 # edge_z <-z_network_map %>% as_tibble %>%
@@ -873,6 +1072,8 @@ node_z2 <- node_z %>%
 
 ```
 
+
+
 ##UK network plot
 ```{r}
 shapefile <- file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ShapeFiles UK",
@@ -922,13 +1123,14 @@ kriged_height_strain_data <- krige_height_strain_maps(set.edge.attribute(g, "dis
                                                       spdf)
 
 kriged_height_strain_data %>%
+  mutate(type = fct_relevel(type, "Line Load", after = Inf)) %>%
   ggplot(aes(x=Longitude, y=Latitude)) + 
-  geom_tile(aes(fill=Height)) + coord_equal() +
+  geom_tile(aes(fill=value_perc)) + coord_equal() +
   facet_grid(~type) +
   scale_fill_viridis_c() +
 scale_colour_viridis_c(option = "plasma") +
-  labs(title = "Height and Strain of the UK high-voltage power grid 
-       after converting to a system of springs", fill = "Percentile") +
+  labs(title = "Height and Strain of the UK high-voltage power grid under base load generation", 
+       fill = "Percentile") +
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
@@ -950,7 +1152,13 @@ Generator_details <-GenerationData %>%
   select(Node = Site, Station, Generator.Type, Max_power = "Max.Contracted.TEC.at.Peak..Transport.Model.TEC.",
          Base_power = "Generation.Base....Tariff.Model.TEC.",
          Carbon_type = "Carbon...Low.Carbon") %>%
-  filter(!is.na(Node), Max_power>0) #get rid of nodes without generation
+  filter(!is.na(Node), Max_power>0)  %>% #get rid of nodes without generation
+  mutate(G_type2 = case_when(
+    Generator.Type %in% c("Biomass", "Hydro", "Pump Storage", "Tidal", "Wind Offshore", "Wind Onshore") ~"Renewable",
+    Generator.Type %in% c("CCGT", "CHP", "OCGT") ~"Gas",
+    TRUE~Generator.Type
+  ),
+  power_diff = Max_power-Base_power) 
   
 test %>%
   group_by(Carbon_type) %>%
@@ -968,7 +1176,7 @@ Generator_details %>%
             Base_power = sum(Base_power),
             Carbon_type = first(Carbon_type)) %>%
   left_join(., Carbon_intensity) %>%
-  arrange(Carbon_intensity)  %>%
+  arrange(Max_power)  %>%
   mutate(Per_tot = Max_power/sum(Max_power)*100,
           Per_Dem = Max_power/sum(trans1$Demand)*100,
          cum_sum = cumsum(Max_power))
@@ -990,102 +1198,68 @@ Profile_graph <- g %>%
 
 #Ensure there is powerflow
 Profile_graph<- BalencedGenDem(Profile_graph, "Demand", "Generation")
+Profile_graph_list <- Cascade(list(Profile_graph)) #ensure grid is stable
+Profile_graph <- Profile_graph_list[[length(Profile_graph_list)]] #take the final graph
+Profile_graph <- RemoveDeadEnds(Profile_graph) #the removal of power stations can create dead zones in the network, these need to be remvoed
+Profile_graph<- BalencedGenDem(Profile_graph, "Demand", "Generation")
 SlackRef <- SlackRefFunc(Profile_graph) #find the most appropriate node to be the slack bus
 Profile_graph <- PowerFlow(Profile_graph, SlackRef$name) #calculate power flow
 
 return(Profile_graph)
   
 }
-```
-
-
-##No Coal
-```{r}
-{
-  #NO coal partial CCGT
-  simulation_power <- Generator_details %>%
-    mutate(Power_code = 
-             case_when(
-               Generator.Type=="Coal" ~ "2",
-               Generator.Type=="CCGT" ~ "1",
-               TRUE ~"0")) %>%
-    arrange(Max_power) %>% #order from smallest to largest
-    arrange(Power_code) %>%#then order by the power codes I just defined
-    mutate(power_sum = cumsum(Max_power)/sum(trans1$Demand))
-  
-  critical_point <- simulation_power %>%
-    pull(power_sum) %>% .[min(which(simulation_power$power_sum > 1))]
-  
-  simulation_power <- simulation_power %>%
-    mutate(Active_gen = power_sum<= critical_point,
-           Max_power = ifelse(Active_gen, Max_power, 0)) %>%
-    group_by(Node) %>%
-    summarise(Sim_power = sum(Max_power))
-  }
-
-
-No_Coal <- create_profile_g(simulation_power, VertexMetaData, g)
 
 ```
 
 
-##No Renewables
+##Create profile networks
 ```{r}
-{
-  #NO coal partial CCGT
-  simulation_power <- Generator_details %>%
-    mutate(Power_code = 
-             case_when(
-               Carbon_type=="Carbon" ~ "0",
-               TRUE ~"1")) %>%
-    arrange(Max_power) %>% #order from smallest to largest
-    arrange(Power_code) %>%#then order by the power codes I just defined
-    mutate(power_sum = cumsum(Max_power)/sum(trans1$Demand))
-  
-  critical_point <- simulation_power %>%
-    pull(power_sum) %>% .[min(which(simulation_power$power_sum > 1))]
-  
-  simulation_power <- simulation_power %>%
-    mutate(Active_gen = power_sum<= critical_point,
-           Max_power = ifelse(Power_code==0, Max_power, 0)) %>%
-    group_by(Node) %>%
-    summarise(Sim_power = sum(Max_power))
-}
+#there are many more renewable sources than any other, as they are so much smaller
+table(Generator_details$G_type2)
 
-No_Renewables <- create_profile_g(simulation_power, VertexMetaData, g)
+energy_types <- c("Coal", "Gas", "Renewable", "Nuclear")
+sim_names <- paste0("No_", energy_types)
 
-```
 
-##No Nuclear
-```{r}
-{
-  #NO coal partial CCGT
-  simulation_power <- Generator_details %>%
-    mutate(Power_code = 
-             case_when(
-               Generator.Type=="Nuclear" ~ "0",
-               TRUE ~"1")) %>%
-    arrange(Max_power) %>% #order from smallest to largest
-    arrange(Power_code) %>%#then order by the power codes I just defined
-    mutate(power_sum = cumsum(Max_power)/sum(trans1$Demand))
-  
-  critical_point <- simulation_power %>%
-    pull(power_sum) %>% .[min(which(simulation_power$power_sum > 1))]
-  
-  simulation_power <- simulation_power %>%
-    mutate(Active_gen = power_sum<= critical_point,
-           Max_power = ifelse(Power_code==0, Max_power, 0)) %>%
-    group_by(Node) %>%
-    summarise(Sim_power = sum(Max_power))
-}
+#Max power is used as otherwise edges are lost on No_coal and No_Nuclear.
+#No gas is causes overloads in both cases and there is a substantial power deficit
+energy_types  %>%
+  walk(~{
+    print(.x)
+    simulation_power <- Generator_details %>%
+      mutate(
+        Active_power = ifelse(G_type2== .x ,0, Max_power)) %>% #change specified type of power to 0 
+      group_by(Node) %>%
+      summarise(Sim_power = sum(Active_power))
+    
+    g2 <- create_profile_g(simulation_power, VertexMetaData, g)
+    
+    assign(x = paste0("No_",.x), value = g2 , envir = .GlobalEnv ) #assign to global environment with identifiable name
+    
+  })
 
-No_Nuclear <- create_profile_g(simulation_power, VertexMetaData, g)
+sim_names %>%
+  map_df(~{ 
+    g <-get(.x)
+    
+    g_df <- g %>% as_data_frame() %>%
+      mutate(alpha = Link.Limit/abs(PowerFlow),
+             line_load = 1/alpha)
+    
+    tibble(
+      type = .x,
+      
+      edges = ecount(g), 
+           nodes = vcount(g),
+           GW_Gen = get.vertex.attribute(g, "BalencedPower") %>% ifelse(.>0,.,0) %>%sum(.)/1000,
+            GW_Dem = get.vertex.attribute(g, "Demand") %>% ifelse(.>0,.,0) %>%sum(.)/1000,
+      line_load = mean(g_df$line_load))
+    })
+
 ```
 
 ##simulation strains
 ```{r}
-
-sim_names <- c("No_Coal", "No_Renewables", "No_Nuclear")
 
 sim_names %>%
   walk(~{
@@ -1106,12 +1280,15 @@ sim_names %>%
       
       List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
 
+      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x))
+      
       #use the largest block to set the simulation parameters k and m.
       #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-      OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.05, tol = 1e-10, distance = "distance", 
-                                          maxIter = 10000, mass = 1)
+      OriginBlock <- Find_network_balance(List_of_BiConComps[[which.max(giant_componant)]], 
+                                          tstep = 0.05, tol = 1e-10, distance = "distance", 
+                                          maxIter = 20000, mass = 1)
       
-      final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.01, tol = 1e-10, 
+      final_z <- Create_stabilised_blocks(g2, OriginBlock, which.max(giant_componant), tstep = 0.01, tol = 1e-10, 
                                           distance = "distance", maxIter = 20000, mass = 1)
       
       write_rds(final_z, strain_file_path)
@@ -1140,29 +1317,46 @@ height_profile_type %>%
 
 strain_profile_type <- sim_names %>%
   map_df(~{
-    
+    print(.x)
       strain_file_path <- file.path(PLwd,"Generation_types" , paste0(.x,".rds"))
     
     read_rds(strain_file_path) %>%
-      Calc_line_strain(set.edge.attribute(g, "distance", value = 1), ., distance) %>%
-      mutate(sim = .x)
+      Calc_line_strain(set.edge.attribute(get(.x), "distance", value = 1), ., distance) %>%
+      mutate(sim = .x,
+             edges = ecount(get(.x)))
     
-  })
+  }) %>%
+  bind_rows( final_z %>%
+               Calc_line_strain(set.edge.attribute(g, "distance", value = 1), ., distance) %>%
+               mutate(sim = "base_load",
+             edges = ecount(g)))
 
-strain_profile_type %>%
+#mean and median strain
+mean_strain <- strain_profile_type %>%
+ # filter(sim != "No_Gas") %>%
   group_by(sim) %>%
-  summarise(mean = mean(strain),
-            median = median(strain))
+  summarise(mean_strain = mean(strain, na.rm = T),
+            median_strain = median(strain, na.rm = T),
+            mean_LL = mean(line_load),
+            median_LL = median(line_load),
+         edges = first(edges)) %>%
+  mutate(rank_strain = rank(mean_strain),
+         rank_LL = rank(mean_LL))
+print(mean_strain)
 
 
-kriged_sim <- sim_names %>%
+ggplot(strain_profile_type, aes( x = sim, y = (strain), colour = sim)) +
+  geom_boxplot()
+
+
+kriged_sim <- sim_names[-2] %>%
   map_df(~{
-    
+    print(.x)
     strain_file_path <- file.path(PLwd,"Generation_types" , paste0(.x,".rds"))
     
-    Out2 <- kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(g, "distance", value = 1), 
+    Out2 <- kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(get(.x), "distance", value = 1), 
                                                       height_df = read_rds(strain_file_path), 
-                                                      coords = MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+                                                      coords = MakeMapDF(get(.x), read_csv(file.path(basewd, "point.csv")))  %>%
                                                         filter(PositionType=="Geo Space"), distance,
                                                       spatial_df = spdf) %>%
       mutate(simulation = .x)
@@ -1171,27 +1365,187 @@ kriged_sim <- sim_names %>%
   })
 
 
-kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(g, "distance", value = 1), 
-                                                      height_df = final_z, 
-                                                      coords = MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
-                                                        filter(PositionType=="Geo Space"), distance,
-                                                      spatial_df = spdf)
-
-
 kriged_sim %>%
-  mutate(simulation = gsub("_", " ", simulation)) %>%
+  filter(simulation !="No_Gas") %>%
+  mutate(type = fct_relevel(type, "Line Load", after = Inf)) %>%
+  group_by(type) %>%
+  mutate(simulation = gsub("_", " ", simulation),
+         value_perc = percent_rank(value)) %>%
   ggplot(aes(x=Longitude, y=Latitude)) + 
-  geom_tile(aes(fill=Height)) + coord_equal() +
+  geom_tile(aes(fill=value_perc)) + coord_equal() +
   facet_grid(type~simulation) +
   scale_fill_viridis_c() +
-scale_colour_viridis_c(option = "plasma") +
-  labs(title = "Height and Strain of the UK high-voltage power grid 
-       after converting to a system of springs", fill = "Percentile") +
+  labs(title = "Height and Strain of the UK high-voltage power grid in three different simulations", fill = "Percentile") +
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         legend.position = "right") #the legend position may want changing back to the more convential side.
+  ggsave(file.path(FiguresFolder, "BritainKrigedTopology_simulations.pdf"))
+```
+
+
+#Attack profiles
+```{r}
+
+{
+  AttackRounds <- 1000
+set.seed(1589)
+DeleteOrders <- MultiAttackOrder(g, Target = "Edges", Sims =  100)  }
+```
+
+
+##baseload
+```{r}
+
+folder <- file.path(base_attack_folder, "base_load")
+ 
+ if(!file.exists(folder)){
+    dir.create(folder)
+  }
+SaveMultiAttacks(g, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T, Target = "Edges")   
 
 ```
 
+
+
+##Pl
+```{r}
+
+mean_alpha <- as_data_frame(g) %>%
+  mutate(alpha = abs(PowerFlow/Link.Limit) ) %>%
+  pull(alpha) %>% mean(.) %>%
+  {1/.} %>% signif(.,3)
+
+#The two PL models
+c(1, mean_alpha) %>% walk(~{
+  
+  gProp <- Proportional_Load(g, alpha = .x)
+  
+  folder <-  file.path(base_attack_folder, paste0("alpha_value_",  .x*100))
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+
+SaveMultiAttacks(gProp, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T, Target = "Edges")    
+})
+
+#Topological
+
+  folder <-  file.path(base_attack_folder, "Topological")
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+
+SaveMultiAttacks(g, DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = F, Target = "Edges")   
+
+```
+
+
+##generation type
+Attack each generation profile until complete collapse, and summarise the data.
+```{r}
+setwd("/media/jonno/Seagate Expansion Drive/System_Dynamics/Profile_attacks") #clean this up
+
+sim_names %>%
+  walk(~{
+    
+folder <- .x
+
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+
+SaveMultiAttacks(get(.x), DeleteOrders, folder, TotalAttackRounds = AttackRounds, CascadeMode = T, Target = "Edges")    
+    
+  })
+
+
+
+
+####
+#### Extract the attacks into Summary data
+####
+ExtractAttackStats(file.path(PLwd,"Profile_attacks"), file.path(PLwd, "SummaryData"))
+
+#Load the saved files
+AttackRoundData <- list.files(path = file.path(PLwd,"SummaryData"), 
+                              pattern = ".rds", 
+                              full.names = TRUE)  %>%
+   map_df(~read_rds(.x))   %>%
+  arrange(-TotalNodes) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  group_by(simulationID, alpha) %>%
+  summarise_all(first) %>%
+  mutate(alpha = ifelse(alpha=="Real_Limits", "base_load", alpha))
+
+AttackRoundData %>%
+  group_by(alpha) %>%
+  summarise_all(mean)
+
+AttackRoundData %>%
+  left_join(mean_strain, by = c("alpha"="sim")) %>% 
+  mutate(perc_edges = NodesAttacked/edges) %>%
+  ggplot(aes(x = alpha, y = perc_edges, fill = alpha)) + geom_boxplot()
+
+AttackRoundData %>%
+  rename(sim = alpha) %>%
+  group_by(sim) %>%
+  summarise(mean_edges = mean(NodesAttacked)) %>%
+  left_join(mean_strain) %>% 
+  mutate(perc_edges = mean_edges/edges) %>%
+  filter(sim != "No_Gas") %>%
+  filter(complete.cases(.)) %>%
+  ggplot(aes(y = perc_edges, x = mean_strain, colour = sim)) + geom_point()
+
+
+AttackRoundData %>%
+  rename(sim = alpha) %>%
+  group_by(sim) %>%
+  summarise(mean_edges = mean(NodesAttacked)) %>%
+  left_join(mean_strain) %>% 
+  mutate(perc_edges = mean_edges/edges) %>%
+  filter(sim != "No_Gas") %>%
+  filter(complete.cases(.)) %>%
+  mutate(sim = sim %>% gsub("_", " ", .) %>% gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2", ., perl=TRUE)
+) %>%
+  select(`Generation profile` = sim, `Edge fraction attacked` = perc_edges, `Strain` = mean_strain) %>%
+xtable(.,  
+       caption = "Relationship between strain and number of edges attacked before giant component collapse on UK power-grid", 
+       label = "tab:UK_power") %>%
+   print(type = "latex", file = file.path(FiguresFolder, "UK_power_strain.txt"))
+
+```
+
+
+```{r}
+node_z_Generator <-z_network_map %>% as_tibble %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node, Longitude, Latitude, z) %>%
+  distinct(.keep_all = T) %>%
+  left_join(Generator_details) %>%
+  mutate(G_type2 = case_when(
+    Generator.Type %in% c("Biomass", "Hydro", "Pump Storage", "Tidal", "Wind Offshore", "Wind Onshore") ~"Renewable",
+    Generator.Type %in% c("CCGT", "CHP", "OCGT") ~"Gas",
+    TRUE~Generator.Type
+  ))
+
+test <- node_z_Generator %>%
+  filter(Latitude<52, Longitude>0, !is.na(Generator.Type))
+  
+
+
+ggplot(GB) +
+  geom_sf() +
+  ggtitle("Generator locations in the UK") +
+  geom_line(data = z_network_map %>%
+              filter(PositionType=="Geo Space"),  aes(x = Longitude, y = Latitude, group = Link)) +
+   geom_point(data =node_z_Generator %>%
+                filter(!is.na(Generator.Type)) %>%
+                filter(Generator.Type=="Interconnectors"), aes(x = Longitude, y = Latitude, colour = G_type2), alpha  = 0.7)+
+  coord_sf(ylim = c(50,58.9)) 
+
+```
 

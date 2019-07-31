@@ -8,11 +8,7 @@ editor_options:
 ---
 
 
-Replace values on
-PL attack
-Edge Attack
-Scrambled edge angles
-
+This code needs to be run after the SytemDynamics set up chunk
 
 ```{r}
 IEEE_data_folder <- file.path(basewd, "IEEE power flow data")
@@ -47,8 +43,7 @@ nodes <- read_delim(file = file.path(IEEE_data_folder, "ieee118cdf.txt"),
                        col_names = FALSE,
                                        trim_ws = TRUE,
                    n_max = card_end[1]-1-skip) %>%
-  set_names(c("Bus_Number", "Name", "Area_Number", "drop", "Loss_zone", "Type" , "final_voltage_pu", "final_angle_degs", "Load_MW", "LOAD_MVAR", "Generation_MW", "Generation_MVAR", "Base_KV", "Desired_volts_pu", "Max_MVAR", "Min_MVAR", "Conductance", "Susceptance", "Remote_controlled_Bus_number" ))
-
+  set_names(c("Bus_Number", "Name", "Area_Number", "drop", "Loss_zone", "Type" , "final_voltage_pu", "final_angle_degs", "Load_MW", "LOAD_MVAR", "Generation_MW", "Generation_MVAR", "Base_KV", "Desired_volts_pu", "Max_MVAR", "Min_MVAR", "Conductance", "Susceptance", "Remote_controlled_Bus_number" )) 
 
 #A couple of node names appear twice, so I use the Bus number as the official name of the node
 #This causes issues to do with the edge name
@@ -85,7 +80,11 @@ edges2 <- edges %>%
   
 
   nodes2 <-nodes %>% select(-nearZeroVar(.)) %>%
-    mutate(Net_Generation = Generation_MW - Load_MW)
+      #A substantial amount of the generation is negative aka load, I move it into the load column
+    mutate(
+      Load_MW = if_else( Generation_MW<0,Load_MW-Generation_MW, Load_MW),
+      Generation_MW = if_else(Generation_MW<0, 0, Generation_MW),
+      Net_Generation = Generation_MW - Load_MW)
 
 
 IEEE_118 <- graph_from_data_frame(edges2, vertices = nodes2, directed = FALSE)
@@ -144,20 +143,20 @@ NodePosition <- test2 %>%
 
 
 #PL attack IEEE118
-
+##Edges
 ```{r}
 
 IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 setwd(file.path(Project_folder, "IEEE118_edges"))
 
 rep <-5
-alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)#[c(0,6,12)+rep]
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
 alpha_vector
 set.seed(21256)
-DeleteOrders <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
+DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
 
 #Create the simulations for each of the alpha avalues using 100 simulations for each
-Inf %>% walk(~{
+alpha_vector %>% walk(~{
   gProp <- Proportional_Load(IEEE_118, alpha = .x)
   
   folder <- paste0("alpha_value_",  .x*100)
@@ -168,7 +167,7 @@ Inf %>% walk(~{
   
   CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
   
-  SaveMultiAttacks(gProp, DeleteOrders, folder, 
+  SaveMultiAttacks(gProp, DeleteOrders_Edges, folder, 
                    TotalAttackRounds = 1000, 
                    CascadeMode = CascadeMode,
                    Demand = "Load_MW",
@@ -186,14 +185,14 @@ Inf %>% walk(~{
 
 ```
 
-
+##Nodes
 ```{r}
 set.seed(21256)
-DeleteOrders <- MultiAttackOrder(IEEE_118, Sims = 100)  
+DeleteOrders_Nodes <- MultiAttackOrder(IEEE_118, Sims = 100)  
 
 #The vector of alpha values to be tested
-alpha_vector <- c(1, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
-setwd(file.path(Project_folder, "IEEE118"))
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
+setwd(file.path(Project_folder, "IEEE118_nodes"))
 
 #Create the simulations for each of the alpha avalues using 100 simulations for each
 alpha_vector %>% walk(~{
@@ -217,44 +216,6 @@ alpha_vector %>% walk(~{
 }
 
 )
-
-alpha_vector <- c(1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10)
-setwd(file.path(Project_folder, "Max_vulnerability"))
-
-#Create the simulations for each of the alpha values using 100 simulations for each
-alpha_vector %>% walk(~{
-  
-  gProp <- Proportional_Load(IEEE_118, alpha = .x)
-  
-  folder <- paste0("alpha_value_",  .x*100)
-  #create folder if it doesn't already exist
-  if(!file.exists(folder)){
-    dir.create(folder)
-  }
-  
-Total_Flow <- get.edge.attribute(gProp, "PowerFlow") %>% abs %>% sum
-
-Total_Capacity <- Total_Flow*.x  
-
-Excess_Capacity <- Total_Capacity - Total_Flow
-
-temp <- as_data_frame(gProp) %>%
-  mutate(Link.Limit = ifelse(abs(PowerFlow) == min(abs(PowerFlow)), abs(PowerFlow) + Excess_Capacity, abs(PowerFlow)),
-         alpha = Link.Limit/abs(PowerFlow))
-
-  SaveMultiAttacks(gProp, DeleteOrders, folder, 
-                   TotalAttackRounds = 1000, 
-                   CascadeMode = TRUE,
-                   Demand = "Load_MW",
-                   Generation = "Generation_MW",
-                   EdgeName = "Link", 
-                   VertexName = "name", 
-                   Net_generation = "Net_Generation")
-  
-}
-
-)
-
 
 
 ```
@@ -323,7 +284,7 @@ Scramble_ec_values %>% walk(~{
   #create network
   Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
   #attack!
-  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders)
+  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders_Nodes)
   
 })
 ```
@@ -351,7 +312,7 @@ Scramble_ec_values %>% walk(~{
   #create network
   Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
   #attack!
-  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders, Target = "Edges")
+  Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, "constant_ec_v", DeleteOrders_Edges, Target = "Edges")
   
 })
 
@@ -419,7 +380,7 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 ```
 
 
-##Scrambled edge angles
+##Scrambled edge strain
 
 ```{r}
 
@@ -478,6 +439,67 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
   })
   
 }
+```
+
+#Strain and quantity
+
+I beleive that strains link to robustness is mediated throught the concentration of demand and generation nodes.
+I will test this by doing the following on the largest block of the IEEE 118 network
+Using the largest component prevents dead areas of the network and ensures that the all the experiments are topologically identical
+
+5 levels of generator fraction is used either 17, 12, 8, 4, 1, or a single generator 
+20 random samples of each generator level
+5 alpha levels 1, 1.5, 2, 5, Inf
+
+This makes 500 different combinations to try + 5 at 100% of all generators
+
+I then 
+
+```{r}
+
+ List_of_BiConComps <- Create_balanced_blocks(IEEE_118, force = "Net_Generation")
+
+ giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+
+ exp_IEEE <- List_of_BiConComps[[giant_componant]]
+
+ test <- as_data_frame(exp_IEEE, what = "vertices")
+  
+
+gen_id <- test %>% filter(Generation_MW >0) %>% pull(name) 
+ #randomly generate x samples 20 times
+ 
+combs <- expand.grid(x = c(4,8,12), y = 1:20) %>%
+  as_tibble 
+
+active_gen_df <- map2_df(.x  = combs$x, .y = combs$y, ~{
+
+  tibble(active_gen_id =  sample(gen_id, .x, replace = FALSE), sample = .y, level = .x)
+
+  }) %>%
+  bind_rows(tibble(active_gen_id =  gen_id, sample = 1, level = 17)) %>%
+  bind_rows(tibble(active_gen_id =  gen_id, sample = 1:17, level = 1))
+ 
+#trn off all gens>0 that are not in the list
+active_gen_id <-active_gen_df %>%
+  filter(sample == 1, level == 4) %>%#BOTH OF THESE NEED TO BE .X .Y OR SUFFERING!
+pull(active_gen_id)
+
+test <- as_data_frame(exp_IEEE, what = "vertices") %>%
+  mutate(Generation_MW = case_when(
+    Generation_MW<0 ~Generation_MW,
+    name %in% active_gen_id ~ Generation_MW,
+    TRUE ~0
+  ))
+
+
+#proportionally balance the network over the remaining generators
+
+#set alpha level
+
+#attack grid
+
+ n
 ```
 
 
