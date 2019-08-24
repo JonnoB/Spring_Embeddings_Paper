@@ -21,23 +21,13 @@ https://ggforce.data-imaginist.com/reference/geom_mark_rect.html
 #Set up
 ```{r Setup}
 
-packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp", "yardstick", "minpack.lm", "gganimate")
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp", "yardstick", "minpack.lm", "gganimate", "tmaptools", "rgeos", "raster")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
-#ggtree needs to be installed seperatly 
-# if (!requireNamespace("BiocManager", quietly = TRUE))
-#     install.packages("BiocManager")
-# BiocManager::install("ggtree", version = "3.8")
-#devtools::install_github("eliocamp/ggnewscale@v0.1.0")
-#devtools::install_github("eliocamp/ggnewscale")
-
-# library(ggtree)
-# library(ape)
-# library(ggnewscale)
-
-
+select <- dplyr::select
+arrange <- dplyr::arrange
 sapply(packages, library, character.only = TRUE)
 
 library(PowerGridNetworking)
@@ -371,12 +361,10 @@ test2<- test %>%
 
 
 ##Convergance visualisation
+I am not sure if I really need to have this in the paper
 ```{r}
 
 nodes_4_3 <- tibble(name = 1:4, Generation = c(20, 0,0,0), Demand = c(0,0,10,10), force = c(20, 0, -10, -10),
-                    norm_force = c(1, 0, -0.5, -0.5))
-
-nodes_pre_names <- tibble(name = c("Generation", "Transfer", "Demand 1", "Demand 2"), Generation = c(20, 0,0,0), Demand = c(0,0,10,10), force = c(20, 0, -10, -10),
                     norm_force = c(1, 0, -0.5, -0.5))
 
 
@@ -397,83 +385,23 @@ g_4_3 <- matrix(c(0, 1, 0,0,
   Calc_Spring_Youngs_Modulus(., "flow", "capacity", minimum_value = 10, stretch_range = 100) %>%
   set.edge.attribute(., "Area", value = 1) %>%
   set.edge.attribute(., "Y", value = 1/c(1:3))%>%
-  set.vertex.attribute(., "name", value = c("Generation", "Transfer", "Demand 1", "Demand 2"))
-
-
-g_post_names <- g_4_3 %>%
-  set.vertex.attribute(., "name", value = c("Generation", "Transfer", "Demand 1", "Demand 2"))
-
-test2 <- as_data_frame(g_4_3)
+  set.vertex.attribute(., "name", value = c("Generation", "Transfer", "Demand 1", "Demand 2")) 
 
   #use the largest block to set the simulation parameters k and m.
   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-simple_converge <- Find_network_balance_expanded(g_4_3, force = "force", flow ="flow", 
+simple_converge <- Find_network_balance_expanded(g_4_3, 
+                                                 force = "force", 
+                                                 flow ="flow", 
                                                  #capacity = "capacity", 
-                                                 tstep = 0.1,
+                                                 tstep = 0.01,
                                                  distance = "distance", 
-                                                 mass = 100, 
-                                                 maxIter = 3,
+                                                 mass = 1, 
+                                                 maxIter = 250,
                                                  frctmultiplier = 1)
 
 
-
-test <- Find_network_balance_expanded(g_4_3, force = "force", 
-                                      flow ="flow", 
-                                     # capacity = "capacity", 
-                                      tstep = 0.1,
-                                      distance = "distance", 
-                                      mass = 100, 
-                                      maxIter = 3000,
-                                      frctmultiplier = 1) %>%
-  mutate(type = "base")
-
-test2_raw <- Find_network_balance(g_4_3, force = "force", 
-                              flow ="flow", 
-                              capacity = "capacity", 
-                              tstep = 0.1,
-                              distance = "distance", 
-                              mass = 100, 
-                              maxIter = 3000,
-                              frctmultiplier = 1,
-                              TwoNodeSolution =F,
-                              tol = 1e-15,
-                              verbose = T)
-
-test2 <- test2_raw$NodeList %>%
-  mutate(type = "base2")
-
-
-test_post <- Find_network_balance_expanded(g_post_names, 
-                                           force = "force", 
-                                           flow ="flow", 
-#                                           capacity = "capacity", 
-                                           tstep = 0.1,
-                                           distance = "distance", 
-                                           mass = 100, 
-                                           maxIter = 3000,
-                                           frctmultiplier = 1) %>%
-  mutate(type = "post")
-
-
-bind_rows(test2, test_post) %>%
-  group_by(type) %>%
-  filter(t==max(t)) %>%
-    ungroup %>%
-  ggplot(aes(y = z, x = t, colour = node)) + geom_point() +
-  facet_wrap(~type)
-
-
-bind_rows(test, test_post) %>%
-  ggplot(aes(y = z, x = t, colour = node)) + geom_line() +
-  facet_wrap(~type)
-
-final <- bind_rows(test2, test_post) %>%
-  group_by(type) %>%
-  filter(t==max(t)) %>%
-    ungroup
-
 simple_converge %>%
-  filter(t<400) %>%
+ # filter(t<400) %>%
   ggplot(aes(y = z, x = t, colour = node)) + geom_line()
  
 ```
@@ -514,18 +442,11 @@ IEEE118_heights <- IEEE_118 %>%
   mutate(height_perc = percent_rank(z))
 
 
-#The shortest path code is no longer necessary
-#extrema <- IEEE118_heights %>%
-#  filter(z %in% c(max(z), min(z)))
-
-#nodes_shortest_path <- shortest_paths(IEEE_118, from = "10", to = "112", output = "vpath", weights = NA)[[1]] %>% unlist %>%
-#  get.vertex.attribute(IEEE_118, index = .) %>% .$name
 
 #Plot IEEE118 with fruchtman reingold expansion 
 IEEE118_heights %>%
   ggplot(aes(x = V1, y = V2, group = Link)) + 
   geom_line() + #aes(colour = abs(PowerFlow)) 
- # geom_line(data = IEEE118_heights %>% filter(Node %in% nodes_shortest_path), colour = "red")+
   geom_point(aes(colour = height_perc, shape = type ), size =3)+
   labs(title = "IEEE118 power flow and node type, using Fruchtman Reingold expansion",
        shape = "Node type",
@@ -900,18 +821,18 @@ c(1, Inf, mean_alpha) %>% walk(~{
   
   alpha <- .x
   
-  filename <- file.path(PLwd, paste0("base_load_", alpha, ".rds"))
+  filename <- file.path(PLwd, "UK_strains", paste0("base_load_", alpha, ".rds"))
   
   print(paste("alpha value", alpha))
   if(!file.exists(filename)){
     
   current_graph  <- g %>%
-    Proportional_Load(., alpha = alpha) %>% 
     set.edge.attribute(. , "distance", value = 1) %>%
     Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
     set.edge.attribute(., "Area", value = 1) %>%
   Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
-                         Generation = Generation, Demand = Demand)
+                         Generation = Generation, Demand = Demand)#%>%
+#set.edge.attribute(., "flow", value = get.edge.attribute(., "PowerFlow"))
   
   List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "BalencedPower")
 
@@ -920,15 +841,27 @@ c(1, Inf, mean_alpha) %>% walk(~{
       
       #use the largest block to set the simulation parameters k and m.
       #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-      OriginBlock_complete <- Find_network_balance(List_of_BiConComps[[giant_componant]], 
-                                          tstep = 0.05, tol = 1e-10, distance = "distance", 
-                                          maxIter = 20000, mass = 1)
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="BalencedPower",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = 0.05, 
+                                                   tol = 1e-10, 
+                                                   maxIter = 20000, 
+                                                   mass = 1)
       
       final_z <- Create_stabilised_blocks(g = current_graph, 
                                           OriginBlock = OriginBlock_complete,
                                           OriginBlock_number = giant_componant, 
-                                          tstep = 0.01, tol = 1e-10, 
-                                          distance = "distance", maxIter = 20000, mass = 1)
+                                          force ="BalencedPower",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = 0.01, 
+                                          tol = 1e-10, 
+                                          maxIter = 20000, 
+                                          mass = 1)
   
   write_rds(final_z, filename)
   
@@ -945,45 +878,64 @@ Shoe that there is low corellation betweeen line strain and alpha
 
 #create a sub graph that includes all the bicomponent of a node except the one that includes the active bi-comp
 
-if(file.exists(file.path(PLwd, "UK_power_grid_3d.rds"))){
-  final_z <- read_rds(file.path(PLwd, "UK_power_grid_3d.rds"))
+filename <- file.path(PLwd, "UK_strains", "UK_power_grid_base.rds")
+
+if(file.exists(filename)){
+  final_z <- read_rds(filename)
 } else{
   
-  g2 <-set.edge.attribute(g, "Imp", value = 1/get.edge.attribute(g, "Y"))
-  g2 <-set.edge.attribute(g2, "distance", value = 1) %>%
+ current_graph  <- g %>%
+    set.edge.attribute(. , "distance", value = 1) %>%
     Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
-    set.edge.attribute(., "Area", value = 1)
-  g2 <-Normalize_load(g2, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
-                         Generation = Generation, Demand = Demand)
+    set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                         Generation = Generation, Demand = Demand)#%>%
+#set.edge.attribute(., "flow", value = get.edge.attribute(., "PowerFlow"))
   
-  List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
-  
-test <- 1:length(List_of_BiConComps) %>% map_df(~{
-  compo <- List_of_BiConComps[[.x]] 
-  
-  #component 83 is the only block where there is no demand
-  compo %>% get.vertex.attribute(., "BalencedPower") %>% sum %>%
-    tibble(comp = .x, resid = ., nodes = vcount(compo), edges = ecount(compo), 
-           min = min(get.vertex.attribute(compo, "BalencedPower"))^2, #find closest to 0
-           max = max(get.vertex.attribute(compo, "BalencedPower")))
-  })
-  
-  #use the largest block to set the simulation parameters k and m.
-  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.05, tol = 1e-10, distance = "distance", 
-                                      maxIter = 10000, mass = 1)
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "BalencedPower")
 
-final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.01, tol = 1e-10, 
-                                      distance = "distance", maxIter = 20000, mass = 1)
+  #Finds which of the components is the giant component so it can be used as the baseline
+      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+      
+      #use the largest block to set the simulation parameters k and m.
+      #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="BalencedPower",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = 0.05, 
+                                                   tol = 1e-10, 
+                                                   maxIter = 20000, 
+                                                   mass = 1)
+      
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="BalencedPower",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = 0.01, 
+                                          tol = 1e-10, 
+                                          maxIter = 20000, 
+                                          mass = 1)
   
-  write_rds(final_z, file.path(PLwd, "UK_power_grid_3d.rds"))
+  write_rds(final_z, filename)
   
 }
 
 
+
+
+```
+
+##Fiddle with strain
+```{r}
+
 #Is the strain power law distributed?
 line_strain <-set.edge.attribute(g, "distance", value = 1) %>%
-  Calc_line_strain(., final_z, distance)
+  Calc_line_strain(., final_z, distance= "distance", "Link.Limit", flow = "PowerFlow")
 
 
 mean(line_strain$strain)
@@ -1026,24 +978,12 @@ node_z <-z_network_map %>% as_tibble %>%
 #   group_by(Link) %>%
 #   summarise_all(mean)
 
-#This is the strain of the network on each edge. It allows us to see the slope of the network
+#Thifs is the strain of the network on each edge. It allows us to see the slope of the network
 edge_strain <- z_network_map %>% as_tibble %>%
   filter(PositionType=="Geo Space") %>%
   select(Longitude, Latitude, z = strain, Link) %>%
   group_by(Link) %>%
   summarise_all(mean)
-
-
-#Find the shortest path between the highest and lowest points
- extrema <- node_z %>%
-  filter(z %in% c(max(z), min(z)))
-
-nodes_shortest_path <- shortest_paths(g, from = "GRUB", to = "INDQ", output = "vpath", weights = NA)[[1]] %>% unlist %>%
-  get.vertex.attribute(g, index = .) %>% .$name
-
-nodes_shortest_path_df <- z_network_map %>%select(-type) %>%
-  filter(PositionType=="Geo Space", 
-         Node %in% nodes_shortest_path)
 
 node_z2 <- node_z %>%
   left_join(VertexMetaData %>% rename(Node = Name)) %>%
@@ -1069,9 +1009,7 @@ node_z2 <- node_z %>%
          mass_lon_rev_cumsum = rev(mass_lon_cumsum),
          mass_lon_diff = mass_lon_cumsum - mass_lon_rev_cumsum,
          mass_lon_abs_diff = abs(mass_lon_diff))
-
 ```
-
 
 
 ##UK network plot
@@ -1083,7 +1021,7 @@ GB <- st_read(shapefile) %>%
   filter(ctry17cd !="N92000002") %>%
   st_union()
 
-#plots the uk network with the shortest path between the highest and lowest points as well as the midpoint
+#plots the uk network with the midpoint
 ggplot(GB) +
   geom_sf() +
  # scale_fill_viridis("Area") +
@@ -1091,21 +1029,20 @@ ggplot(GB) +
  # theme_bw() +
   geom_line(data = z_network_map %>%
               filter(PositionType=="Geo Space"),  aes(x = Longitude, y = Latitude, group = Link)) +
-   geom_point(data =node_z, aes(x = Longitude, y = Latitude, colour = z), alpha  = 0.7)+
-  coord_sf(ylim = c(50,58.9)) +
-    geom_line(data = nodes_shortest_path_df,
-            aes(x = Longitude, y = Latitude, group = Link),
-            colour = "red") +
+   geom_point(data =node_z, aes(x = Longitude, y = Latitude, colour = z), alpha  = 0.7) +
+  coord_sf(ylim = c(50,58.9))+
   scale_color_viridis_c() +
   geom_point(data = node_z2 %>% filter(lat_abs_diff== min(lat_abs_diff)),
              aes(x = Longitude, y = Latitude), 
              colour = "red") +
     geom_point(data = node_z2 %>% filter(lon_abs_diff== min(lon_abs_diff), Generation>0),
              aes(x = Longitude, y = Latitude), 
-             colour = "cyan") +
-  geom_hline(aes(yintercept = node_z2 %>% filter(Node == "BLAC") %>% pull(Latitude)), colour = "red") +
-    geom_hline(aes(yintercept = node_z2 %>% filter(Node == "MOFF") %>% pull(Latitude)), colour = "red")+
-    geom_vline(aes(xintercept = node_z2 %>% filter(Node == "CONQ") %>% pull(Longitude)), colour = "cyan") 
+             colour = "cyan") #+
+#These bits aren't working I don't know why but it doesn't really matter either
+ # geom_hline(aes(yintercept = node_z2 %>% filter(Node == "BLAC") %>% pull(Latitude)[1]), colour = "red") +
+   # geom_hline(aes(yintercept = node_z2 %>% filter(Node == "MOFF") %>% pull(Latitude)), colour = "red")+
+    #geom_vline(aes(xintercept = node_z2 %>% filter(Node == "CONQ") %>% pull(Longitude)), colour = "cyan") 
+
 ```
 
 
@@ -1116,11 +1053,14 @@ spdf <- as(GB, "Spatial") %>% st_as_sf %>%
   st_crop(c(xmin = -7.5, ymin = 50, xmax = 2, ymax = 59)) %>%
   as_Spatial()
 
-kriged_height_strain_data <- krige_height_strain_maps(set.edge.attribute(g, "distance", value = 1), 
-                                                      final_z, 
-                                                      MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
-                                                        filter(PositionType=="Geo Space"), distance,
-                                                      spdf)
+kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(g, "distance", value = 1), 
+                                                      height_df = final_z, 
+                                                      coords = MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+                                                        filter(PositionType=="Geo Space"), 
+                                                      distance = "distance", 
+                                                      capacity = "Link.Limit",
+                                                      flow = "PowerFlow",
+                                                      spatial_df = spdf)
 
 kriged_height_strain_data %>%
   mutate(type = fct_relevel(type, "Line Load", after = Inf)) %>%
@@ -1271,25 +1211,42 @@ sim_names %>%
       
       g2 <- get(.x)
       
-      g2 <-set.edge.attribute(g2, "Imp", value = 1/get.edge.attribute(g, "Y"))
-      g2 <-set.edge.attribute(g2, "distance", value = 1) %>%
+      current_graph  <- g2 %>%
+        set.edge.attribute(. , "distance", value = 1) %>%
         Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
-        set.edge.attribute(., "Area", value = 1)
-      g2 <-Normalize_load(g2, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
-                          Generation = Generation, Demand = Demand)
+        set.edge.attribute(., "Area", value = 1) %>%
+        Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                       Generation = Generation, Demand = Demand)#%>%
+      #set.edge.attribute(., "flow", value = get.edge.attribute(., "PowerFlow"))
       
-      List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
-
-      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x))
+      List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "BalencedPower")
+      
+      #Finds which of the components is the giant component so it can be used as the baseline
+      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
       
       #use the largest block to set the simulation parameters k and m.
       #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-      OriginBlock <- Find_network_balance(List_of_BiConComps[[which.max(giant_componant)]], 
-                                          tstep = 0.05, tol = 1e-10, distance = "distance", 
-                                          maxIter = 20000, mass = 1)
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="BalencedPower",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = 0.05, 
+                                                   tol = 1e-10, 
+                                                   maxIter = 20000, 
+                                                   mass = 1)
       
-      final_z <- Create_stabilised_blocks(g2, OriginBlock, which.max(giant_componant), tstep = 0.01, tol = 1e-10, 
-                                          distance = "distance", maxIter = 20000, mass = 1)
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="BalencedPower",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = 0.01, 
+                                          tol = 1e-10, 
+                                          maxIter = 20000, 
+                                          mass = 1)
       
       write_rds(final_z, strain_file_path)
       
@@ -1321,13 +1278,13 @@ strain_profile_type <- sim_names %>%
       strain_file_path <- file.path(PLwd,"Generation_types" , paste0(.x,".rds"))
     
     read_rds(strain_file_path) %>%
-      Calc_line_strain(set.edge.attribute(get(.x), "distance", value = 1), ., distance) %>%
+      Calc_line_strain(set.edge.attribute(get(.x), "distance", value = 1), ., "distance", "Link.Limit") %>%
       mutate(sim = .x,
              edges = ecount(get(.x)))
     
   }) %>%
   bind_rows( final_z %>%
-               Calc_line_strain(set.edge.attribute(g, "distance", value = 1), ., distance) %>%
+               Calc_line_strain(set.edge.attribute(g, "distance", value = 1), ., "distance", "Link.Limit") %>%
                mutate(sim = "base_load",
              edges = ecount(g)))
 
@@ -1355,10 +1312,14 @@ kriged_sim <- sim_names[-2] %>%
     strain_file_path <- file.path(PLwd,"Generation_types" , paste0(.x,".rds"))
     
     Out2 <- kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(get(.x), "distance", value = 1), 
-                                                      height_df = read_rds(strain_file_path), 
-                                                      coords = MakeMapDF(get(.x), read_csv(file.path(basewd, "point.csv")))  %>%
-                                                        filter(PositionType=="Geo Space"), distance,
-                                                      spatial_df = spdf) %>%
+                                                                  height_df = read_rds(strain_file_path), 
+                                                                  coords = MakeMapDF(get(.x), 
+                                                                                     read_csv(file.path(basewd, "point.csv")))  %>%
+                                                                    filter(PositionType=="Geo Space"),
+                                                                  distance = "distance",
+                                                                  capacity = "Link.Limit",
+                                                                  flow = "PowerFlow",
+                                                                  spatial_df = spdf) %>%
       mutate(simulation = .x)
 
     
@@ -1498,7 +1459,7 @@ AttackRoundData %>%
   mutate(perc_edges = mean_edges/edges) %>%
   filter(sim != "No_Gas") %>%
   filter(complete.cases(.)) %>%
-  ggplot(aes(y = perc_edges, x = mean_strain, colour = sim)) + geom_point()
+  ggplot(aes(x = perc_edges, y = mean_strain, colour = sim)) + geom_point()
 
 
 AttackRoundData %>%
@@ -1546,6 +1507,327 @@ ggplot(GB) +
                 filter(!is.na(Generator.Type)) %>%
                 filter(Generator.Type=="Interconnectors"), aes(x = Longitude, y = Latitude, colour = G_type2), alpha  = 0.7)+
   coord_sf(ylim = c(50,58.9)) 
+
+```
+
+#Airline network
+
+the database is from "Database Name: Air Carrier Statistics (Form 41 Traffic)- All Carriers" a T-100 form data
+main website, under the traffic section
+https://www.bts.dot.gov/topics/airlines-and-airports-0
+
+accessed 23-08-19
+
+
+Airport codes and coords from
+https://datahub.io/core/airport-codes#r
+
+
+I had jqr package installation problems. jqr is a package buried deep in the dependencies of the GIS packages. THe librarires necessary for it can be installed on ubuntu like this
+
+```{r}
+
+#This function removes small polygons. small islands often dot the landscape of a country making the shape files much larger than may typically be needed. This function removes those small islands leaving only the larger polygons and can potentially greatly reduce shape file size.
+#The function was taken from  https://gis.stackexchange.com/questions/62292/how-to-speed-up-the-plotting-of-polygons-in-r
+  getSmallPolys <- function(poly, minarea=0.01) {
+  # Get the areas
+  areas <- lapply(poly@polygons, 
+                  function(x) sapply(x@Polygons, function(y) y@area))
+
+  # Quick summary of the areas
+  print(quantile(unlist(areas)))
+
+  # Which are the big polygons?
+  bigpolys <- lapply(areas, function(x) which(x > minarea))
+  length(unlist(bigpolys))
+
+  # Get only the big polygons and extract them
+  for(i in 1:length(bigpolys)){
+    if(length(bigpolys[[i]]) >= 1 && bigpolys[[i]] >= 1){
+      poly@polygons[[i]]@Polygons <- poly@polygons[[i]]@Polygons[bigpolys[[i]]]
+      poly@polygons[[i]]@plotOrder <- 1:length(poly@polygons[[i]]@Polygons)
+    }
+  }
+  return(poly)
+}
+```
+
+
+
+```{r}
+library(tigris)
+
+us_map_raw <- states(cb = TRUE, class = "sf")
+
+
+test <- tibble(NAME =  us_map_raw %>%pull(NAME), STUSPS = us_map_raw %>% pull(STUSPS))
+
+exclude <- c("AK","AS","MP","GU", "HI", "PR", "VI")
+
+test <- us_map_raw %>%
+  filter(!(STUSPS %in% exclude)) 
+
+us_map <- test %>% st_union()
+
+us_map
+
+```
+
+
+```{r}
+us_airline_raw <- read_csv(file.path(PLwd, "US-AirlineData", "934510551_T_T100_SEGMENT_ALL_CARRIER.csv"))
+airport_codes.raw <- read_csv(file.path(PLwd, "US-AirlineData", "airport-codes_csv.csv"))
+
+#get us map and process to make a manageble size
+if(file.exists(file.path( PLwd, "US-AirlineData", "us_map.rds"))){
+  
+  us_map <- readRDS( file.path( PLwd, "US-AirlineData", "us_map.rds"))
+  
+}else{
+us_map_raw<- getData('GADM', country='USA', level=1)  #Get the County Shapefile for the US
+
+
+  us_map <- subset(us_map2, !(NAME_1 %in% c("Alaska", "Hawaii"))) %>% #Keep only continental united states
+    aggregate() %>% #dissolve internal borders
+    #simplify borders
+    gSimplify(., tol=0.01, topologyPreserve=TRUE)  %>% 
+    #remove tiny islands
+    getSmallPolys(.) 
+  
+saveRDS(us_map, file.path( PLwd, "US-AirlineData", "us_map.rds"))
+rm(us_map_raw)
+}
+
+#helper graph
+#the graph is used to remove all nodes that are not in the giant component. isolated sub component are not relevent to the overall analysis
+pre_g <-us_airline_raw   %>%
+  filter(SEATS>0, PASSENGERS>0, SEATS> PASSENGERS, #remove all lines with no passengers and the 1 line where there are more passengers than seats
+         ) %>%
+  select(ORIGIN, DEST, everything()) %>%
+  graph_from_data_frame(., directed = FALSE)
+
+#All nodes in component 1. This is the component with the vast majority of nodes. Only component 1 will be analysed
+membership_df <- tibble(names = names(components(pre_g)$membership), membership= components(pre_g)$membership) %>%
+  filter(membership==1)
+
+us_airline_edge <- pre_g %>%
+  as_data_frame() %>%
+  group_by(from, to) %>%
+  summarise(SEATS = sum(SEATS),
+            PASSENGERS = sum(PASSENGERS)) %>%
+  ungroup %>%
+  arrange(SEATS) %>%
+  mutate(alpha = SEATS/PASSENGERS,
+         cumsum = cumsum(SEATS)/sum(SEATS),
+         perc_count = (1:n())/n(),
+         Link = paste(from, to, sep = "-")) %>% 
+    filter(to != from,
+           from %in% membership_df$names,
+           to %in% membership_df$names,
+           cumsum>0.05) #there are about 40 self loops these are also removed
+
+#remove the helper data.
+rm(pre_g); rm(membership_df)
+
+us_airline_node <- us_airline_edge %>% 
+  {bind_rows(select(., name = from, PASSENGERS), 
+             select(., name = to, PASSENGERS))} %>%
+  group_by(name) %>%
+  summarise_all(sum) %>%
+  mutate(passen_center = PASSENGERS - mean(PASSENGERS),
+         Generation = ifelse(passen_center>0, passen_center, 0),
+         Demand = ifelse(passen_center<0, passen_center, 0),
+         #Normalising the load and gen. 
+         norm_factor = sum(Generation), #
+         Generation = Generation/norm_factor,
+         Demand = Demand/norm_factor,
+         passen_center  = Generation + Demand) 
+
+mean(us_airline_node$PASSENGERS)
+
+us_airline_g <- graph_from_data_frame(us_airline_edge %>%
+                                        mutate(passen_norm = PASSENGERS/ us_airline_node$norm_factor[1],
+                                               seats_norm = SEATS/us_airline_node$norm_factor[1]), directed = FALSE, 
+                                      vertices = us_airline_node)
+
+
+if(file.exists(file.path(PLwd, "US-AirlineData", "airline_final_z.rds"))){
+airline_final_z <- readRDS(file.path(PLwd, "US-AirlineData", "airline_final_z.rds"))
+}else{
+
+#By making this code run as a block I ensure that the network is only a single component
+{  
+  current_graph  <- us_airline_g %>%
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "seats_norm", "passen_norm", minimum_value = 100, stretch_range = 1000) %>%
+    set.edge.attribute(., "Area", value = 1) 
+
+  comps_vect <- components(current_graph)$membership
+  
+  current_graph <- delete_vertices(current_graph, names(comps_vect)[comps_vect==2])
+  }
+  
+    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "passen_center", flow = "passen_norm")
+
+  #Finds which of the components is the giant component so it can be used as the baseline
+      giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+      
+      #use the largest block to set the simulation parameters k and m.
+      #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="passen_center",
+                                                   flow = "passen_norm",
+                                                   distance = "distance",
+                                                   capacity = "seats_norm",
+                                                   tstep = 0.05, 
+                                                   tol = 1e-10, 
+                                                   maxIter = 20000, 
+                                                   mass = 1)
+      
+      airline_final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="passen_center",
+                                          flow = "passen_norm",
+                                          distance = "distance",
+                                          capacity = "seats_norm",
+                                          tstep = 0.05, 
+                                          tol = 1e-10, 
+                                          maxIter = 20000, 
+                                          mass = 1)
+  
+  write_rds(airline_final_z, file.path(PLwd, "US-AirlineData", "airline_final_z.rds"))
+  
+}
+
+airline_strain  <-Calc_line_strain(current_graph, airline_final_z, "distance", "seats_norm", flow = "passen_norm")
+  
+
+
+      mean(airline_strain$strain)/mean(line_strain$strain)
+    (1/(mean(1/airline_strain$alpha)))/(1/(mean(1/line_strain$alpha)))
+      
+      tibble(strain = c(mean(airline_strain$strain),mean(line_strain$strain)), 
+             load = c(mean(1/airline_strain$alpha),mean(1/line_strain$alpha)),
+             type = c("Airline", "power")) %>%
+        ggplot(aes(y = strain, x = load, colour = type)) + geom_point()
+        
+      test2 %>%
+    ggplot(aes(x = t, y = velocity)) + geom_line()
+      
+  
+airport_codes <-  airport_codes.raw %>%
+  filter(iata_code %in% unique(airline_final_z$node),
+         type !="closed") %>%
+   separate(coordinates, into = c("Longitude", "Latitude"), sep = ",", convert = TRUE) %>%
+        rename(node = iata_code,
+               airport_type = type) 
+ 
+airport_codes %>%
+   left_join(airline_final_z, .) %>%
+   filter(iso_country %in% c("US", "AS"),
+          iso_region != "US-AK",
+          iso_region != "US-HI")  %>%
+   ggplot(aes(x = Longitude, y = Latitude, colour = percent_rank(z))) + 
+   geom_point() +
+   scale_color_viridis_c()
+
+ airline_coords <-  as_data_frame(us_airline_g) %>%
+   select(Link, from, to) %>%
+   gather(key = type, value = node, -Link) %>%
+   left_join(., airport_codes) %>%
+  select(Link, type, Node = node, Longitude, Latitude) %>%
+   filter(Node !="PPG", Node != "FGI")
+
+
+ airline_kriged_height_strain_data <- krige_height_strain_maps(g = set.edge.attribute(us_airline_g, "distance", value = 1), 
+                                                      height_df = airline_final_z, 
+                                                      coords = airline_coords, 
+                                                      distance = "distance", 
+                                                      capacity = "seats_norm",
+                                                      flow = "passen_norm",
+                                                      spatial_df =us_map)
+ 
+ 
+ 
+ airline_kriged_height_strain_data  %>%
+  mutate(type = fct_relevel(type, "Line Load", after = Inf)) %>%
+  ggplot(aes(x=Longitude, y=Latitude)) + 
+  geom_tile(aes(fill=value_perc)) + coord_equal() +
+  facet_grid(type~.) +
+  scale_fill_viridis_c() +
+scale_colour_viridis_c(option = "plasma") +
+  labs(title = "Height and Strain of the UK high-voltage power grid under base load generation", 
+       fill = "Percentile") +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right") #the legend position may want changing back to the more convential side.
+
+```
+
+
+```{r}
+
+airport_route_aggregates <- airline_coords %>%
+  left_join(airline_strain) %>%
+  select(Node, alpha, strain) %>%
+  group_by(Node) %>%
+  summarise_all(list(~mean(.), ~max(.),~min(.), ~median(.)))
+
+#convert the dataframe to an sf object
+node_z_sf <- airline_coords %>% 
+  select(-Link) %>% #remove the link as this is irrelevant for knowing the airport coords
+  group_by(Node) %>% 
+  summarise_all(first) %>% #take only the first coordinates as all the others are the same #I should prob have an eaiser veriosn of this
+  select(-type) %>%
+  left_join(select(airline_final_z, Node = node, z)) %>%
+  left_join(airport_route_aggregates %>% select(Node, alpha = alpha_median, strain = strain_median)) %>%
+  mutate(z = percent_rank(z),
+         alpha = percent_rank(alpha),
+         strain = percent_rank(strain)) %>% 
+  gather(key = type, value = value, -Node,-Longitude, -Latitude ) %>%
+  st_as_sf(., coords = c("Longitude", "Latitude")) 
+#add in the correct projection data to align with the map
+st_crs(node_z_sf) <- CRS("+proj=longlat +datum=WGS84")
+node_z_sf <- st_transform(node_z_sf, st_crs(us_map))
+
+#create the tessellation
+v <- st_voronoi(st_combine(node_z_sf)) 
+
+#clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+#the key simple feature is of course z
+clipped_tess_node <- st_intersection(st_cast(v), st_union(us_map)) %>% 
+  st_sf(geom=.) %>%
+  st_join(node_z_sf) %>%
+  filter(!is.na(type))
+
+#voronoi of the nodes is pretty good
+clipped_tess_node %>%
+ggplot() + geom_sf(aes(fill = value, colour = value)) +
+   scale_fill_viridis_c()+
+    scale_colour_viridis_c() +
+  facet_grid(type~.)+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+
+test <- node_z_sf %>%
+  left_join(airport_codes, by = c("Node" = "node")) %>%
+  filter(iso_country =="US",
+         !(iso_region %in% paste("US", exclude, sep = "-"))) 
+
+
+tibble(Node = pull(node_z_sf, Node), type = pull(node_z_sf, type), value = pull(node_z_sf, value)) %>%
+  spread(key = type, value = value) %>%
+  select(-Node) %>%
+  cor
+
+#basically no corellation between alpha and strain
+airline_strain %>%
+  select(alpha, strain) %>%
+  cor
 
 ```
 

@@ -319,13 +319,13 @@ Scramble_ec_values %>% walk(~{
 ```
 
 
-#calculate the angle of the selected networks
+#calculate strain of the selected networks
 
 
 The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
 ```{r}
 common_time <- 0.03
-common_Iter <- 25000
+common_Iter <- 20000
 common_tol <- 1e-10
 common_mass <- 1
 ```
@@ -357,23 +357,40 @@ alpha_vector %>% walk(~{
     set.edge.attribute(., "Area", value = 1) %>%
   Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
   
+
   List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-  
+
+    giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+    
   #use the largest block to set the simulation parameters k and m.
   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-  OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation", 
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
-  
-  final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation", 
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="Net_Generation",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = common_time, 
+                                                   tol = common_tol, 
+                                                   maxIter = common_Iter, 
+                                                   mass = common_mass)
+      
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="Net_Generation",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = common_time, 
+                                          tol = common_tol, 
+                                          maxIter = common_Iter, 
+                                          mass = common_mass)
   
   write_rds(final_z, file.path(IEEE_Project_folder, "Solved_height_networks_norm", paste0("IEEE_118_alpha_", alpha, ".rds")))
 })
 
 
-test <-OriginBlock$results
+  test <-OriginBlock$results
 
 test %>% ggplot(aes(x = t, y = z)) + geom_line()
 
@@ -384,8 +401,13 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 
 ```{r}
 
-#for(n in Scramble_ec_values){
-  for(n in Scramble_ec_values){
+cpu_id <- 2
+number_of_cpus <- 2
+cpu_vector <- rep(1:number_of_cpus, length.out =length(Scramble_ec_values))
+cpu_sims <-(1:length(Scramble_ec_values))[cpu_vector==cpu_id]
+
+
+  for(n in Scramble_ec_values[cpu_sims]){
   print(n)
   target_orders2 <- target_orders %>% 
     filter(ec == n)
@@ -423,17 +445,33 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
       set.edge.attribute(., "Area", value = 1) %>%
   Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
     
-    List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+
+    giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
     
-    #use the largest block to set the simulation parameters k and m.
-    #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-    OriginBlock <- Find_network_balance(List_of_BiConComps[[11]], force = "Net_Generation",
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
-    
-    final_z <- Create_stabilised_blocks(current_graph, OriginBlock, 11, force = "Net_Generation",
-                                      tstep = common_time, tol = common_tol, distance = "distance", 
-                                      maxIter = common_Iter, mass = common_mass)
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="Net_Generation",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = common_time, 
+                                                   tol = common_tol, 
+                                                   maxIter = common_Iter, 
+                                                   mass = common_mass)
+      
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="Net_Generation",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = common_time, 
+                                          tol = common_tol, 
+                                          maxIter = common_Iter, 
+                                          mass = common_mass)
     
     write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds")))
   })
@@ -447,7 +485,7 @@ I beleive that strains link to robustness is mediated throught the concentration
 I will test this by doing the following on the largest block of the IEEE 118 network
 Using the largest component prevents dead areas of the network and ensures that the all the experiments are topologically identical
 
-5 levels of generator fraction is used either 17, 12, 8, 4, 1, or a single generator 
+5 quantities of generator fraction is used either 17, 12, 8, 4, 1, or a single generator 
 20 random samples of each generator level
 5 alpha levels 1, 1.5, 2, 5, Inf
 
@@ -457,49 +495,150 @@ I then
 
 ```{r}
 
- List_of_BiConComps <- Create_balanced_blocks(IEEE_118, force = "Net_Generation")
+IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 
- giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+#alpha levels of the concentrator
+alpha_conc <- c(1, 1.5, 2, 5, Inf)
 
- exp_IEEE <- List_of_BiConComps[[giant_componant]]
+List_of_BiConComps <- Create_balanced_blocks(IEEE_118, force = "Net_Generation")
 
- test <- as_data_frame(exp_IEEE, what = "vertices")
-  
+giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
 
-gen_id <- test %>% filter(Generation_MW >0) %>% pull(name) 
- #randomly generate x samples 20 times
- 
+exp_IEEE <- List_of_BiConComps[[giant_componant]]
+
+#In this case the base slack ref will be the largest power consumer
+SlackRef_conc <- "59"
+
+#Generate Attack orders
+set.seed(21256)
+DeleteOrders_Concentrator_Edges <- MultiAttackOrder(exp_IEEE, Target ="Edges", Sims = 100, Name = "Link")  
+
+
+#get the node id of all the generators
+gen_id <- as_data_frame(exp_IEEE, what = "vertices") %>% filter(Generation_MW >0) %>% pull(name) 
+
+#make a df of all combinations of sample size and sample iteration
 combs <- expand.grid(x = c(4,8,12), y = 1:20) %>%
   as_tibble 
 
+quant_alpha_comb <- expand.grid(quant = c(17, 12, 8, 4, 1), alpha = alpha_conc) %>%
+  as_tibble
+
+
 active_gen_df <- map2_df(.x  = combs$x, .y = combs$y, ~{
+  
+  tibble(active_gen_id =  sample(gen_id, .x, replace = FALSE), sample = .y, quant = .x)
+  
+}) %>%
+  bind_rows(tibble(active_gen_id =  gen_id, sample = 1, quant = 17)) %>% #there is only 1 combination of all generators
+  bind_rows(tibble(active_gen_id =  gen_id, sample = 1:17, quant = 1)) %>% #there are only 17 for sample size of 1 so this is added on after the others
+left_join(quant_alpha_comb,., by = "quant" ) #join so that each specific quant-sample combo is represented at each alpha quant
 
-  tibble(active_gen_id =  sample(gen_id, .x, replace = FALSE), sample = .y, level = .x)
+#the unique simulation combos to be calculated
+simulation <-active_gen_df %>% 
+  select(-active_gen_id) %>%
+  distinct()
 
-  }) %>%
-  bind_rows(tibble(active_gen_id =  gen_id, sample = 1, level = 17)) %>%
-  bind_rows(tibble(active_gen_id =  gen_id, sample = 1:17, level = 1))
- 
-#trn off all gens>0 that are not in the list
-active_gen_id <-active_gen_df %>%
-  filter(sample == 1, level == 4) %>%#BOTH OF THESE NEED TO BE .X .Y OR SUFFERING!
-pull(active_gen_id)
-
-test <- as_data_frame(exp_IEEE, what = "vertices") %>%
-  mutate(Generation_MW = case_when(
-    Generation_MW<0 ~Generation_MW,
-    name %in% active_gen_id ~ Generation_MW,
-    TRUE ~0
-  ))
+cpu_id <- 4
+number_of_cpus <- 4
+cpu_vector <- rep(1:number_of_cpus, length.out = nrow(simulation))
+cpu_sims <-(1:nrow(simulation))[cpu_vector==cpu_id]
 
 
-#proportionally balance the network over the remaining generators
+cpu_sims %>% walk(~{
+  #set the simulation to calculate
+  current_sim <- simulation %>%
+    slice(.x)
+  
+  #folder name is 
+  folder <- file.path(Project_folder, 
+                      "Concentrator",
+                      paste0("Concentrator_quant_",
+                             current_sim$quant, 
+                             "_alpha_", 
+                             current_sim$alpha, 
+                             "_sample_", 
+                             current_sim$sample) )
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+  
+  #active gen id's for that simulation
+  active_gen_id <-active_gen_df %>%
+    filter(sample == current_sim$sample, quant == current_sim$quant, alpha == current_sim$alpha) %>%
+    pull(active_gen_id)
+  
+  #set active generators
+  current_gen <- as_data_frame(exp_IEEE, what = "vertices") %>%
+    mutate(Generation_MW = if_else(name %in% active_gen_id, Generation_MW, 0),
+           Perc_Gen = Generation_MW/sum(Generation_MW), #find the percentage of total gen for each generator
+           Generation_MW = Perc_Gen*sum(Load_MW), #scale generation to match the demand
+           Net_Generation = Generation_MW-Load_MW) #reset the net generation column
+  
+  #set alpha level
+  current_g <-as_data_frame(exp_IEEE) %>%
+    graph_from_data_frame(., directed = FALSE, vertices = current_gen) %>%
+    PowerFlow(., SlackRef_conc, Net_generation = "Net_Generation") %>%
+    Proportional_Load(., alpha = 1)
+  
+  
+  #try to speed up simulation by setting not using cascade mode when alpha is Inf
+  CascadeMode <- ifelse(is.finite(current_sim$alpha), TRUE, FALSE)
+  
+  #attack grid
+  
+  SaveMultiAttacks(current_g, 
+                   DeleteOrders_Concentrator_Edges, 
+                   folder, 
+                   TotalAttackRounds = 1000, 
+                   CascadeMode = CascadeMode,
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   EdgeName = "Link", 
+                   VertexName = "name", 
+                   Net_generation = "Net_Generation",
+                   Target = "Edges")
+  
+})
+  
+```
 
-#set alpha level
 
-#attack grid
+#extract the data
+```{r}
 
- n
+
+ExtractAttackStats(RootFolder = file.path(Project_folder, "Concentrator"), 
+                   NewfolderPath = file.path(Project_folder, "Concentrator_Summary"), 
+                   Generation = "Net_Generation",
+                   EdgeName = "Link",
+                   PowerFlow = "PowerFlow",
+                   Link.Limit = "Link.Limit")
+
+
+
+#Load the saved files
+AttackRoundData <- list.files(path =file.path(Project_folder, "Concentrator_Summary"), 
+                              pattern = ".rds", 
+                              full.names = TRUE)  %>%
+   map_df(~read_rds(.x)) 
+
+
+test <- AttackRoundData %>%
+  arrange(-TotalNodes) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>% 
+  group_by(simulationID, alpha) %>%
+  summarise_all(first) %>%
+  separate(alpha, c("drop1", "drop2","quant","drop3", "alpha_value", "drop4", "sample"), sep = "_") %>%
+  mutate(quant = as.integer(quant),
+         alpha_value = as.numeric(alpha_value),
+         totals = n()) %>%
+  select(-contains("drop")) %>%
+  group_by(quant, alpha_value) %>%
+  summarise_all(mean)
+
 ```
 
 
@@ -622,3 +761,5 @@ test2 <- theta_crit_thresh %>%
   select(alpha,  NodesAttacked, theta_degs, orig_strain)
 
 ```
+
+
