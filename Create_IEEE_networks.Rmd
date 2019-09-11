@@ -322,9 +322,10 @@ Scramble_ec_values %>% walk(~{
 #calculate strain of the selected networks
 
 
+##Common values
 The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
 ```{r}
-common_time <- 0.03
+common_time <- 0.01
 common_Iter <- 20000
 common_tol <- 1e-10
 common_mass <- 1
@@ -401,8 +402,8 @@ test %>% ggplot(aes(x = t, y = z)) + geom_line()
 
 ```{r}
 
-cpu_id <- 2
-number_of_cpus <- 2
+cpu_id <- 1
+number_of_cpus <- 3
 cpu_vector <- rep(1:number_of_cpus, length.out =length(Scramble_ec_values))
 cpu_sims <-(1:length(Scramble_ec_values))[cpu_vector==cpu_id]
 
@@ -422,6 +423,12 @@ cpu_sims <-(1:length(Scramble_ec_values))[cpu_vector==cpu_id]
  1:nrow(target_orders2) %>% walk(~{
     
     ID <- .x
+    
+    Iteration_path <- file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds"))
+    
+    if(file.exists(Iteration_path)){
+      print("Equilibrium already found proceeding to next iteration")
+    }else{
     
     print(paste("alpha value", ID))
     #create network
@@ -473,11 +480,125 @@ cpu_sims <-(1:length(Scramble_ec_values))[cpu_vector==cpu_id]
                                           maxIter = common_Iter, 
                                           mass = common_mass)
     
-    write_rds(final_z, file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds")))
+    write_rds(final_z, Iteration_path)
+    
+    }
   })
   
 }
 ```
+
+##Sramble 50%
+
+This is the same as the previous except it randomly selects 50% of the edges and randomly scrambles them
+
+```{r}
+
+testvect <- (1:100)
+
+subsample_vector <- function(vect, n){
+  #This function randomly samples a fixed number of elements of a vector, than permutes that subsample,
+  #it is useful for scrambling only a fraction of the edges of a network
+  #vect: the vector of values to be scrambled
+  #n, the number of elements to be scrambled. must be less than or equal to the total number of elements.
+  
+  #subsample the vector to get the elements that will be scrambled, and arrange them in order
+  sample_vect <- sample(1:length(vect), n) %>% sort
+  
+  #Create a new vector that will replace the original
+  vect2 <- vect
+  #sample the vector. but only at the randomly chosen indices, to get the scrambled values
+  new_sub_value <- sample(vect2[sample_vect], length(vect2[sample_vect]))
+  #replace the original values with sub sample at the appropriate index
+  vect2[sample_vect] <- new_sub_value
+  
+  return(vect2)
+  
+  
+}
+
+subsample_vector(testvect, 50)
+
+ for(n in Scramble_ec_values[cpu_sims]){
+  print(n)
+  target_orders2 <- target_orders %>% 
+    filter(ec == n)
+  
+  alpha_folder <-  paste0("Solved_height_networks_alpha_", n*100) %>%
+    file.path(Project_folder, "constant_ec_from_alpha_norm_50", .)
+  #create folder if it doesn't already exist
+  if(!file.exists(alpha_folder)){
+    dir.create(alpha_folder)
+  }
+  
+ 1:nrow(target_orders2) %>% walk(~{
+    
+    ID <- .x
+    
+    Iteration_path <- file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds"))
+    
+    if(file.exists(Iteration_path)){
+      print("Equilibrium already found proceeding to next iteration")
+    }else{
+    
+    print(paste("alpha value", ID))
+    #create network
+    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = n)
+    
+    set.seed(target_orders2$seed[.x])
+    ec_order <- sample(1:ecount(Scrambled_edge_cap), ecount(Scrambled_edge_cap) )
+    
+    temp <- as_data_frame(Scrambled_edge_cap) %>%
+      mutate(ec = Link.Limit-abs(PowerFlow), #get excess capacity
+             ec2 = subsample_vector(ec, 90), #change order of excess capacity in 90 of the 179 edges
+             alpha = (abs(PowerFlow)+ec2)/abs(PowerFlow), #calculate alpha
+             Link.Limit = abs(PowerFlow)+ec2)#re-order link limit
+    
+    print(mean(temp$alpha))
+    
+    current_graph <- Scrambled_edge_cap %>%
+      set.edge.attribute(., "Link.Limit", value = temp$Link.Limit) %>% 
+      set.edge.attribute(. , "distance", value = 1) %>%
+      Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+      set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
+    
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+
+    giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+    
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+                                                   force ="Net_Generation",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = common_time, 
+                                                   tol = common_tol, 
+                                                   maxIter = common_Iter, 
+                                                   mass = common_mass)
+      
+      final_z <- Create_stabilised_blocks(g = current_graph, 
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant, 
+                                          force ="Net_Generation",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = common_time, 
+                                          tol = common_tol, 
+                                          maxIter = common_Iter, 
+                                          mass = common_mass)
+    
+    write_rds(final_z, Iteration_path)
+    
+    }
+  })
+  
+}
+```
+
 
 #Strain and quantity
 

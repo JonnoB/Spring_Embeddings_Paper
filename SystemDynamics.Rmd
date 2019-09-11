@@ -472,6 +472,8 @@ IEEE_118_dist <- IEEE_118 %>%
   set.edge.attribute(., "distance", value = 1)%>%
   set.edge.attribute(., "Link.Limit", value = Inf)
 
+
+#Loads the strain from proportionally loaded IEEE networks. These strain include infinity and 1 alpha values
 IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE) %>%
   map_df(~{
     read_rds(.x) %>%
@@ -702,7 +704,7 @@ theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
   mutate(alpha = 1/alpha,
                   orig_strain = theta_degs,
          theta_degs =  relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs)
-         )
+         ) 
 
 #reshape so that the alpha and strain values can be plotted
 {
@@ -2327,6 +2329,9 @@ peel_strain_sum <- strain_solution_peel %>%
               filter(class=="A"))
 
 
+peel_strain_sum %>%
+  ggplot(aes(y = mean, x = sd_strain, colour = Network)) +
+  geom_density_2d() 
 ##########
 ##########
 ##
@@ -2337,9 +2342,9 @@ peel_strain_sum <- strain_solution_peel %>%
 ##########
 ##########
 peel_strain_sum %>%
-  ggplot(aes(x = sd_strain, y = mean, colour = Network)) + geom_point() +
-  labs(title = "Seperating Peel's quintet using embedded height and strain",
-       x = "Standard deviation of edge strain",
+  ggplot(aes(x = mean_strain, y = mean, colour = Network)) + geom_point(alpha = 0.8) +
+  labs(title = "Separating Peel's quintet using embedded height and strain",
+       x = "Mean edge strain",
        y = "Mean node height of class A")
   ggsave(file.path(FiguresFolder, "Seperating_Peels_quintet.pdf"))
 #This demonstrates that the algorithm is topologically sensitive.
@@ -2432,6 +2437,27 @@ acc_peel %>%
   ggplot(aes(x = log10(t), y = log10(acceleration), colour = Network)) +
     geom_line()
 
+
+```
+
+#Test differe load profiles
+
+
+If I can re-construct the load profiles shown here I can use for different analyses
+```{r}
+
+setwd("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/Tariff and Transport")
+
+test <- read_xlsx("Tariff & Transport Model_2018_19 Tariffs_External.xlsm", sheet = "Transport", skip = 11) %>%
+  slice(1:959)
+
+test2 <-test %>% select(40:59) 
+
+test2[is.na(test2)] <-0
+
+test2 %>% summarise_all(sum)
+
+test3 <- test2 %>% select(contains("Demand")) %>%cor()
 
 ```
 
