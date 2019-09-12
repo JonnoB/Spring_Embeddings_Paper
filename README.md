@@ -1,4 +1,4 @@
-# Pre-Project PhD Scripts
+# Spring Embedding Paper
 
 The code in this repo is for the Spring Embeddings project description paper. It contains all the code used in the paper. It also includes some custom functions although the majority are included in the repos below
 
