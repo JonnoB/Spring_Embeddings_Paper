@@ -1,16 +1,11 @@
-# Pre-Project PhD Scripts
+# Spring Embedding Paper
 
-This repository contains a collection of scripts for code that was developed as part of my PhD. The code is smaller projects or ideas that are either stand alone or were spun out of larger projects but which don't yet require there own repo.
-
-Some of these scripts will go on to be developed in to projects and repos in their own rights others will just be abandoned as ideas move on.
-
-**N.B** This repo may have a more complicated branch structure than some of my other repos.
+The code in this repo is for the Spring Embeddings project description paper. It contains all the code used in the paper. It also includes some custom functions although the majority are included in the repos below
 
 # Related repos
 
-The below repos are all linked to my PhD. The scripts in this repo are all likely to interact with at least one of the repos listed below.
+This repo depends on the following to other repo's
 
-* [Proportional Loading](https://github.com/JonnoB/ProportionalLoading)
-* [System Dynamics](https://github.com/JonnoB/Pre-Project-PhD-Scripts/blob/master/SystemDynamics.Rmd)
 * [Power Grid Networking](https://github.com/JonnoB/PowerGridNetworking)
 * [Flow Spring System](https://github.com/JonnoB/Flow_Spring_System)
+* [Useful PhD R Functions](https://github.com/JonnoB/Useful_PhD__R_Functions)
