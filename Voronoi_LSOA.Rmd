@@ -1,0 +1,537 @@
+---
+title: "Voronoi Tesselation"
+author: "Jonathan Bourne"
+date: "18/07/2019"
+output: html_document
+---
+
+This script can only run with the System Dynamics script.
+It is my attempt to map LSOA/MSOA engergy use to nodes using the Voronoi tessellation.
+
+I stopped working on it as after a lot of work trying to get the code to work, it seemed a major issue was the data.
+The code is being kept as Being able to link LSOA to nodes is useful for other kinds of analysis
+
+##Voronoi tessaltion
+What does the height map look like with a vonoi tesselation instead of kriging?
+
+The voronooi tessellation looks ok for the node height, but looks horrible for the edge matrix.
+I'm not sure what I want to use the Voronoi for if at all, but it will be useful at some point so I am keeping it
+```{r}
+
+#convert the dataframe to an sf object
+node_z_sf <- node_z %>%
+  mutate(z = percent_rank(z))%>% 
+  st_as_sf(., coords = c("Longitude", "Latitude")) 
+#add in the correct projection data to align with the map
+st_crs(node_z_sf) <- st_crs(GB)$proj4string
+
+#create the tessellation
+v <- st_voronoi(st_combine(node_z_sf)) 
+
+#clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+#the key simple feature is of course z
+clipped_tess_node <- st_intersection(st_cast(v), st_union(GB)) %>% 
+  st_sf(geom=.) %>%
+  st_join(node_z_sf) %>% 
+  mutate(type = "node")
+
+#plot the tesselation of the UK with the fill and lines both having the same colour system.
+#grey areas occure when the node is accidently offshore and clippied out of the map. This can be easily fixed.
+bind_rows(clipped_tess_node, clipped_tess_node) 
+
+#voronoi of the nodes is pretty good
+clipped_tess_node %>%
+ggplot() + geom_sf(aes(fill = z, colour = z)) +
+   scale_fill_viridis_c()+
+  scale_colour_viridis_c() +
+  facet_grid(~type)
+
+#voronoi of the mid point of the edges is just a chaos
+# edge_z_sf <- edge_strain %>%
+#   mutate(z = percent_rank(z))%>% 
+#   st_as_sf(., coords = c("Longitude", "Latitude")) 
+# #add in the correct projection data to align with the map
+# st_crs(edge_z_sf) <- st_crs(GB)$proj4string
+# 
+# #create the tessellation
+# v_edge <- st_voronoi(st_combine(edge_z_sf))
+# 
+# #clip the tesselation then convert back into an sf object to allow the simple features to be joined back in
+# #the key simple feature is of course z
+# clipped_tess_edge <- st_intersection(st_cast(v_edge), st_union(GB)) %>% 
+#   st_sf(geom=.) %>%
+#   st_join(edge_z_sf) %>% 
+#   mutate(type = "edge")
+
+```
+
+#MSOA yearly data
+
+This section uses data from https://www.gov.uk/government/statistics/lower-and-middle-super-output-areas-electricity-consumption
+https://www.gov.uk/government/statistical-data-sets/stacked-electricity-consumption-statistics-data
+which gives yearly average energy consumption. 
+I can use this data to match the centroid of each MSOA to the Voronoi cell created by nodes with demand.
+This then gives me the change in demand across 10 years.
+I can then calculated a time series of line strain
+
+England and wales MSOA centroids available from
+https://data.gov.uk/dataset/c3e4b3c8-28ec-4599-bb61-dafe18525b4c/middle-layer-soa-with-names-geometric-centroid-population-weighted-centroid-local-alternative-names-lookup-table
+
+LSOA centroids are from
+https://data.cdrc.ac.uk/dataset/cdrc-2011-population-weighted-centroids-gb
+
+Data zone and intermedia zone look ups are from 
+https://www.nrscotland.gov.uk/statistics-and-data/geography/our-products/census-datasets/2011-census/2011-indexes
+
+LSOA to MSOA lookups from
+https://geoportal.statistics.gov.uk/datasets/output-area-to-lower-layer-super-output-area-to-middle-layer-super-output-area-to-local-authority-district-december-2011-lookup-in-england-and-wales/data
+
+
+```{r}
+
+
+elec_stacked <- file.path(basewd, "MSOA_demand", "elec_MSOA_dom_stacked.csv") %>% read_csv() %>%
+  rename(MSOA11CD = msoa.code) %>% mutate(user_type = "domestic") %>%
+  bind_rows(file.path(basewd, "MSOA_demand", "elec_MSOA_nondom_stacked.csv") %>% read_csv() %>%
+              rename(MSOA11CD = msoa.code) %>% mutate(user_type = "non-domestic")) %>%
+  group_by(MSOA11CD, user_type, year) %>%
+  summarise(total.kwh = sum(total.kwh, na.rm = TRUE),
+            msoa_counts = n()) 
+
+
+LSOA_centroids <- file.path(basewd,  "MSOA_demand","englandwelshscotlandpwc2011.csv") %>% read_csv()
+
+DZ_IZ_lookup <- file.path(basewd, "MSOA_demand", "OA_DZ_IZ_2011.xlsx") %>%
+  read_xlsx() %>%
+  select(-OutputArea2011Code) %>%
+  set_names(c("LSOA11CD", "MSOA11CD"))
+
+#load england wales data and bind with scottish data
+LSOA_MSOA_lookup <- file.path(basewd, "MSOA_demand", "Output_Area_to_Lower_Layer_Super_Output_Area_to_Middle_Layer_Super_Output_Area_to_Local_Authority_District_December_2011_Lookup_in_England_and_Wales.csv") %>%
+  read_csv() %>%
+  group_by(LSOA11CD) %>%
+  summarise(MSOA11CD = first(MSOA11CD)) %>%
+  bind_rows(DZ_IZ_lookup)
+
+
+#the UK grid system
+ukgrid <- "+init=epsg:27700"
+
+#create centroids spatial points
+LSOA_centroids_sf <- LSOA_centroids %>% 
+  select(LSOA11CD = CODE, Pop = TotPop2011, Easting, Northing) %>%
+  st_as_sf(., coords = c("Easting", "Northing") )
+#add in the correct projection data to align with the map
+st_crs(LSOA_centroids_sf) <- ukgrid
+LSOA_centroids_sf <- st_transform(LSOA_centroids_sf, st_crs(GB)$proj4string)
+
+#get the demand nodes data
+Demand_nodes <- MakeMapDF(g, read_csv(file.path(basewd, "point.csv"))) %>%
+  filter(PositionType=="Geo Space") %>%
+  select(Node:Latitude) %>%
+  distinct(.keep_all = TRUE) %>%
+  left_join( as_data_frame(g, what = "vertices"), by = c("Node"="name")) %>%
+  filter(Demand>0)
+
+#create spatial points out of the demand nodes
+Demand_nodes_sf <-Demand_nodes %>% 
+  select(Node:Latitude) %>%
+  st_as_sf(., coords = c("Longitude", "Latitude")) 
+#add in the correct projection data to align with the map
+st_crs(Demand_nodes_sf) <- st_crs(GB)$proj4string
+
+#create the voronoi tesselation using the demand nodes
+demand_v <- Demand_nodes_sf  %>% st_union() %>% st_voronoi()
+
+#create the voronoi tesselation using the demand nodes
+v <- Demand_nodes_sf  %>% st_union() %>% st_voronoi()
+#This finds what voronoi cell each lsoa is in but I don't know what ID each Voronoi refers to.
+voronoi_intersection <- st_intersects(st_cast(v), LSOA_centroids_sf, sparse = FALSE)
+
+###
+###
+##
+###
+##
+
+#create voronoi polygons
+demand_v <- st_collection_extract(st_voronoi(do.call(c, st_geometry(Demand_nodes_sf))))
+#The voronoi has to have the porjection added back in
+st_crs(demand_v) <- st_crs(GB)$proj4string
+
+#match polygon to original nodes
+Demand_nodes_sf$pols <- demand_v[unlist(st_intersects(Demand_nodes_sf, demand_v))]
+#match polygons to score ponts
+LSOA_centroids_sf$pols <- demand_v[unlist(st_intersects(LSOA_centroids_sf, demand_v))]
+
+
+#convert the spatial objects to matrices then into tibbles, then convert the polgyon list into a character string
+#finally join of the character string.
+Node_LSOA_dictionary <-left_join( as_tibble(as.matrix(Demand_nodes_sf)) %>% mutate(pols = as.character(pols)),
+              as_tibble(as.matrix(LSOA_centroids_sf)) %>% mutate(pols = as.character(pols)), by = "pols") %>%
+  select(-geometry.x, -geometry.y) %>% #remove the geometry columns as they cannot be unlisted within the dataframe
+  mutate_all(., unlist) %>% #unlist all columns back to thiere original form
+select(-pols) #remove the polygon column as it is now not needed
+##Once the centroids are resolved then the actual energy use data can be joined
+
+Node_MSOA_energy_year <- left_join(Node_LSOA_dictionary, LSOA_MSOA_lookup) %>%#join on the MSOA
+  group_by(MSOA11CD, Node) %>%
+  summarise(Pop = sum(Pop)) %>%
+  group_by(MSOA11CD) %>%
+  mutate(Perc = Pop/sum(Pop), #calc the fraction of MSOA population within each node cell based on LSOA pop centroids
+          MSOA_splits = n())%>% #number of splits of the lsoa
+left_join(elec_stacked) %>%
+  mutate(fract_kwh = total.kwh*Perc)
+
+Node_power_year_user <- Node_MSOA_energy_year %>%
+  group_by(Node, year, user_type) %>%
+  summarise(total.kwh = sum(fract_kwh),
+            counts = n()) %>%
+  ungroup %>%
+  mutate(Mw = total.kwh/(365*24*1000)) 
+
+Node_power_year_user %>%
+  filter(year >=2013) %>%#there is a very small amount of data available pre 2013 %>%
+  ggplot(aes(x = year, y = Mw, group = Node,)) + geom_line(alpha = 0.2) +
+  facet_grid(~user_type)
+
+Node_power_year<- Node_MSOA_energy_year %>%
+  group_by(Node, year) %>%
+  summarise(total.kwh = sum(fract_kwh),
+            counts = n()) %>%
+  ungroup %>%
+  mutate(Mw = total.kwh/(365*24*1000)) %>%
+  left_join(., {.} %>% filter(year == 2017) %>%
+              select(Node, Ref_Mw = Mw), by = "Node") %>%
+  mutate(Indexed_value = Mw/Ref_Mw) #The indexed values are used to multiply the base load values of the power-grid data
+
+update_indexed_demand <- function(g, Node_power_year){
+#this function is for convenience in updating the values of demand nodes according to an indexed value
+  #g the power network
+  #Node_power_year a data frame that contains the Node ID column "Node" and the index column "Indexed_value"
+  
+node_demand <- as_data_frame(g, what = "vertices") %>% 
+  left_join(.,
+    Node_power_year, by = c("name"= "Node")) 
+#I don't know why these won't chaing together
+node_demand <- node_demand %>%  mutate(Indexed_value = ifelse(is.na(Indexed_value), 0, Indexed_value),
+                 Demand = Demand*Indexed_value)
+
+#put updated demand back into the graph
+g2 <- set.vertex.attribute(g, "Demand", value = node_demand$Demand) %>%
+  BalencedGenDem(., "Demand", "Generation") #Update the net_generation column
+
+SlackRef <- SlackRefFunc(g2) #find the most appropriate node to be the slack bus
+g2<- PowerFlow(g2, SlackRef$name) #Output a balanced network with the correct edge flow
+
+return(g2)
+}
+
+g2 <- update_indexed_demand(g, Node_power_year %>% 
+      filter(year == 2013) %>% mutate(Indexed_value = 1))
+
+
+
+#Here I reshape the binary intersection matrix add back LSOA names and keep only rows that tell me that an LSOA is present.
+Node_dictionary <- voronoi_intersection %>% as_tibble(.) %>%
+  bind_cols(Demand_nodes %>% select(Node)) %>%
+  set_names(c(LSOA_centroids$CODE, "Node")) %>%
+  gather(key = lsoa, value = value, -Node) %>%
+  filter(value) %>%
+  select(-value)
+
+Node_elec_data <- Node_dictionary %>% rename(LSOA11CD = lsoa) %>%
+  left_join(LSOA_centroids %>% select(LSOA11CD = CODE, Pop = TotPop2011)) %>%
+  left_join(LSOA_MSOA_lookup) %>% #get the lookup of LSOA to MSOA
+  group_by(Node, MSOA11CD) %>% 
+  summarise(counts = n(),
+            Pop = sum(Pop)) %>%
+  group_by(MSOA11CD) %>%
+  mutate(Pop_perc = Pop/sum(Pop)) %>%
+  ungroup %>%
+  left_join(elec_stacked) %>%
+  mutate(weighted_kwh = Pop_perc*total.kwh) #weight the kwh by node
+
+```
+
+#Strain by year
+
+```{r}
+#calculate strain by year
+2013:2017 %>%
+  walk(~{
+    
+    strain_file_path <- file.path(PLwd,"Year_strains" , paste0("UK_power_grid_",.x,".rds"))
+    
+    if(!file.exists(strain_file_path)){
+      
+      g2 <- update_indexed_demand(g, Node_power_year %>% 
+      filter(year == .x))
+      
+      g2 <-set.edge.attribute(g2, "Imp", value = 1/get.edge.attribute(g, "Y"))
+      g2 <-set.edge.attribute(g2, "distance", value = 1) %>%
+        Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+        set.edge.attribute(., "Area", value = 1)
+      g2 <-Normalize_load(g2, EdgeName = Link, VertexName = name, Net_Generation = BalencedPower, capacity = Link.Limit,
+                          Generation = Generation, Demand = Demand)
+      
+      List_of_BiConComps <- Create_balanced_blocks(g2, force = "BalencedPower")
+
+      #use the largest block to set the simulation parameters k and m.
+      #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock <- Find_network_balance(List_of_BiConComps[[147]], tstep = 0.1, tol = 1e-10, distance = "distance", 
+                                          maxIter = 5000, mass = 1)
+      
+      final_z <- Create_stabilised_blocks(g2, OriginBlock, 147, tstep = 0.01, tol = 1e-10, 
+                                          distance = "distance", maxIter = 20000, mass = 1)
+      
+      write_rds(final_z, strain_file_path)
+      
+    }
+    
+  })
+
+
+height_by_year <- 2013:2017 %>%
+  map_df(~{
+    
+    strain_file_path <- file.path(PLwd,"Year_strains" , paste0("UK_power_grid_",.x,".rds"))
+    
+    read_rds(strain_file_path) %>%
+      mutate(year = .x)
+    
+  })
+
+strain_by_year <- 2013:2017 %>%
+  map_df(~{
+    
+      strain_file_path <- file.path(PLwd,"Year_strains" , paste0("UK_power_grid_",.x,".rds"))
+    
+    read_rds(strain_file_path) %>%
+      Calc_line_strain(set.edge.attribute(g, "distance", value = 1), ., distance) %>%
+      mutate(year = .x)
+    
+  }) %>%
+  left_join(., {.} %>%
+              filter(year==2017) %>%
+              select(Link, ref_strain = strain)) %>%
+  mutate(perc_diff = (strain-ref_strain)) 
+
+
+strain_by_year %>%
+  mutate(year = factor(year)) %>%
+  filter(year!= 2017) %>%
+ggplot(aes(x = strain, y = abs(perc_diff), colour = year)) + geom_point() +
+  facet_wrap(~year)
+
+
+strain_by_year %>%
+  ggplot(aes(x = year, y = strain, group = Link)) + geom_line(alpha = 0.2)
+
+strain_by_year %>%
+  group_by(year) %>%
+  summarise(mean = mean(strain)) %>%
+  mutate(test = mean/max(mean))
+
+
+
+```
+
+#future energy attempt
+```{r}
+
+#load data
+future_data <- file.path("/home/jonno/Downloads", "ETYS_2018_Appendix_E_Distribution.xlsx") %>%
+  read_xlsx(., sheet = "Gross Reactive", skip = 3)
+
+
+#check strip names to site level and aggregate
+future_data <- file.path("/home/jonno/Downloads", "ETYS_2018_Appendix_E_Distribution.xlsx") %>%
+  read_xlsx(., sheet = "Net Reactive", skip = 1) %>% 
+  mutate(Node =str_sub( `Elexon id`, 1, 4) %>% gsub("-|_", "",.)) %>%
+  group_by(Node, Scenario) %>%
+  summarise_if(., is.numeric, sum)
+
+Nodes_future <-future_data %>% distinct(., Node, .keep_all = T) %>%
+  select(Node, future_power = `17/18`)
+
+test3 <- VertexMetaData %>% select(Node = Name, power_current = BalencedPower) %>%
+  full_join(Nodes_future)
+  
+```
+
+
+
+#Voronoi Reprex
+
+I am trying to match the values of a set of points at fixed locations across multiple years to thier nearest nodes that are also at fixed points.
+To do this I have chosen to use a voronoi tesselation where the score of the each point is associated entirely with the nearest node.
+I am using the sf package which I don't understand very well. I have made two ordering assumptions, these assumptions appear to be incorrect as the results are not as expected. The assumptions are shown on line xxx and yy of the reprex
+
+In the reprex below I set the coordinates such that I can calculate the node scores using either the voronoi method or a simple join. As can be seen the two values are not identical
+
+My question is: How do I correctly match my points to the correct cell in the voronoi tesselation?
+
+```{r}
+library(sf); library(dplyr); library(tibble)
+
+#Create the data set of node locations
+set.seed(256)
+node_locations <- expand.grid(x = 1:10, y = 1:10) %>%
+  as_tibble() %>% 
+  mutate(Node = expand.grid(x = LETTERS[1:10], y = LETTERS[1:10], stringsAsFactors = FALSE)  %>%
+           { paste0(.$x,.$y)})
+
+#create the score spread across the geographical area of the points for multiple years
+score_by_year <- expand.grid(x = 1:10, y = 1:10, year = 2001:2010) %>% as_tibble %>%
+  mutate(score = sample(1:1000, size = nrow(.), replace = TRUE),
+         ID = 1:n())
+
+#convert to spatial data
+node_locations_sf <- node_locations  %>% 
+  st_as_sf(., coords = c("x", "y")) 
+#add in the correct projection data to align with the map
+st_crs(node_locations_sf) <- "+proj=longlat +datum=WGS84 +no_defs"
+
+#convert to spatial data
+score_by_year_sf <- score_by_year  %>% st_multipoint()
+  st_as_sf(., coords = c("x", "y")) 
+#add in the correct projection data to align with the map
+st_crs(score_by_year_sf) <- "+proj=longlat +datum=WGS84 +no_defs"
+
+#create voronoi tesselation
+node_v <- node_locations_sf  %>% 
+  #st_union() %>% 
+  st_voronoi()
+
+test<-st_collection_extract(st_voronoi(do.call(c, st_geometry(node_locations_sf))))
+
+test[unlist(st_intersects(node_locations_sf, test))]
+
+#this is what it looks like
+plot(node_v, col = "0")
+
+#find which scores are associated with the nodes
+voronoi_intersection <- st_intersects(st_cast(node_v), score_by_year_sf, sparse = FALSE) 
+
+#create a dictionary to match nodes to score IDs
+Node_data_dictionary <- voronoi_intersection %>% as_tibble(.) %>%
+  bind_cols(node_locations %>% select(Node)) %>% #I assume that the row order is the same as the node_locations df
+  set_names(c(score_by_year$ID, "Node")) %>% #I assume that the columns are the same order as the date_by_year df
+  gather(key = ID, value = value, -Node) %>%
+  filter(value) %>% #remove values that that show a point is NOT within a cell, this is the majority of values
+  select(-value) %>%
+  mutate(ID = as.integer(ID))
+
+#join scores to nodes
+Node_score_year <- left_join(Node_data_dictionary, score_by_year)
+
+#create df of the sum of scores across all years for the voronoi matched df
+score_across_years_voronoi <- Node_score_year %>%
+  group_by(Node) %>%
+  summarise(score = sum(score),
+            counts = n())
+#create df of sum of scores just by joining the original two dfs together
+score_across_years_join <- left_join(node_locations,score_by_year) %>%
+  group_by(Node) %>%
+  summarise(score = sum(score),
+            counts = n())
+
+#Calculating the score using the two different methods does not produce the same result
+score_diffs <- left_join(
+  score_across_years_voronoi %>% select(Node, score_voronoi = score),
+  score_across_years_join %>% select(Node, score_join = score)
+) %>%
+  mutate(diffs = score_voronoi-score_join)
+
+
+ggplot() +
+  geom_sf(data = score_by_year_sf) +
+  geom_sf(data = node_v, alpha = 0.5)
+
+```
+
+```{r}
+set.seed(1)
+x = st_multipoint(matrix(runif(10),,2))
+box = st_polygon(list(rbind(c(0,0),c(1,0),c(1,1),c(0,1),c(0,0))))
+
+ v = st_sfc(st_voronoi(x, st_sfc(box)))
+ plot(v, col = 0, border = 1, axes = TRUE)
+ plot(box, add = TRUE, col = 0, border = 1) # a larger box is returned, as documented
+ plot(x, add = TRUE, col = 'red', cex=2, pch=16)
+ plot(st_intersection(st_cast(v), box)) # clip to smaller box
+ plot(x, add = TRUE, col = 'red', cex=2, pch=16)
+ # matching Voronoi polygons to data points:
+ # https://github.com/r-spatial/sf/issues/1030
+ # generate 50 random unif points:
+ n = 100
+ pts = st_as_sf(data.frame(matrix(runif(n), , 2), id = 1:(n/2)), coords = c("X1", "X2"))
+ # compute Voronoi polygons:
+ pols = st_collection_extract(st_voronoi(do.call(c, st_geometry(pts))))
+ # match them to points:
+ pts$pols = pols[unlist(st_intersects(pts, pols))]
+ plot(pts["id"], pch = 16) # ID is color
+ plot(st_set_geometry(pts[2,], "pols")["id"], xlim = c(0,1), ylim = c(0,1), reset = FALSE)
+ plot(st_geometry(pts[2,]), add = TRUE)
+
+
+ total_nodes <-2
+ 
+set.seed(256)
+node_locations.orig <- expand.grid(x = 1:total_nodes , y = 1:total_nodes ) %>%
+  as_tibble() %>% 
+  mutate(Node = expand.grid(x = LETTERS[1:total_nodes ], y = LETTERS[1:total_nodes ], stringsAsFactors = FALSE)  %>%
+           { paste0(.$x,.$y)})
+
+node_locations <- node_locations.orig%>%
+  st_as_sf(.,  coords = c("x", "y"))
+
+
+score_by_year.orig <- expand.grid(x = 1:total_nodes , y = 1:total_nodes , year = 2001:2010) %>% #only a single year not 10, still has errors 
+  as_tibble %>%
+mutate(score = sample(1:1000, size = nrow(.), replace = TRUE),
+        ID = 1:n()) %>%
+ arrange(x,y) 
+
+score_by_year <- score_by_year.orig %>%
+  st_as_sf(.,  coords = c("x", "y"))
+
+#create voronoi polygons
+pols2 = st_collection_extract(st_voronoi(do.call(c, st_geometry(node_locations))))
+
+#match polygon to original nodes
+node_locations$pols = pols2[unlist(st_intersects(node_locations, pols2))]
+
+#match polygons to score ponts
+score_by_year$pols = pols2[unlist(st_intersects(score_by_year, pols2))]
+
+#convert the spatial objects to matrices then into tibbles, then convert the polgyon list into a character string
+#finally join of the character string.
+test <-left_join( as_tibble(as.matrix(node_locations)) %>% mutate(pols = as.character(pols)),
+ as_tibble(as.matrix(score_by_year)) %>% mutate(pols = as.character(pols)), by = "pols")
+
+#convert the lists that were created when the dataframe was turned into a matrix back into variables
+ score_across_years_voronoi <- test %>% mutate(Node = unlist(Node),
+                                               year = unlist(year),
+                                               score = unlist(score),
+                                               ID = unlist(ID)) %>%
+  group_by(Node) %>%
+  summarise(score = sum(score),
+            counts = n())
+ 
+#create df of sum of scores just by joining the original two dfs together
+score_across_years_join <- left_join(node_locations.orig ,score_by_year.orig) %>%
+  group_by(Node) %>%
+  summarise(score = sum(score),
+            counts = n())
+
+#Calculating the score using the two different methods does not produce the same result
+score_diffs <- left_join(
+  score_across_years_voronoi %>% select(Node, score_voronoi = score),
+  score_across_years_join %>% select(Node, score_join = score)
+) %>%
+  mutate(diffs = score_voronoi-score_join)
+
+    
+```

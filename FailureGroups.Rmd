@@ -341,15 +341,13 @@ if (NextSim==Inf) break #Stops function making error on last iteration
 
 #Animation
 ```{r}
-
+#There is a problem with the 1st simulation of real limits this needs to be checked
 RoundRemovedReal <- AllRemovedNodes %>%
-  filter(alpha == "Real_Limits", type == "Edge", Sim == "Simulation_ID_1") %>%
+  filter(alpha == "Real_Limits", type == "Edge", Sim == "Simulation_ID_2") %>%
   select(Name:RemovalType)
 
 
-
-#test comes from the ggGeoPlot chunk in prop loading
-test3 <-test2 %>%
+test3 <-  MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))   %>%
   left_join(RoundRemovedReal, by = c("Link" = "Name"))
 
 
@@ -367,7 +365,7 @@ p <- test4 %>%
          PositionType = factor(PositionType),
          PositionType = fct_relevel(PositionType, "Geo Space", after = 0),
          PresentInRound = factor(PresentInRound)) %>%
-  ggplot(aes(x = V1, y = V2)) + 
+  ggplot(aes(x = Longitude, y = Latitude)) + 
   geom_line(aes(colour = Voltage, group = Link)) +
   facet_grid(~PositionType, scales = "free") +
   theme(axis.title.x=element_blank(),
@@ -378,7 +376,16 @@ p <- test4 %>%
         axis.ticks.y=element_blank()) + 
   transition_manual(PresentInRound)
 
-anim_save(file = file.path(basewd, "CollapseOfGrid1.gif"))
+anim_save(filename = file.path(basewd, "CollapseOfGrid1.gif"))
+
+
+library(gganimate)
+anim <- ggplot(mtcars, aes(factor(gear), mpg)) +
+  geom_boxplot() +
+  transition_manual(gear)
+
+
+anim
 
 ```
 
@@ -448,4 +455,188 @@ TypeCollapseDF  %>% #need to remove infinte values
 ```{r}
 
 ```
+
+
+#Transplant from physics model
+The code in this block was simply pasted in from the spring system model, it almost certainly is dependent on code from that project and also needs to be carefully evaluate in the context of the work here as to whether it should be kep or deleted.
+
+##Distance clusters
+
+```{r}
+z_graph <- as_data_frame(g) %>% as_tibble %>%
+  left_join(., final_z %>% select(node, z), by = c("from"= "node")) %>%
+  left_join(., final_z %>% select(node, z), by = c("to"= "node")) %>%
+  mutate(D = 1/Y,
+         dz = abs(z.x-z.y),
+         mean_z = (z.x+z.y)/2,
+         H = sqrt(dz^2 +D^2),
+         strain = (H-D)/D,
+         alpha = Link.Limit/abs(PowerFlow),
+         line_load = abs(PowerFlow)/Link.Limit,
+         percentile_strain = percent_rank(strain)) %>%
+graph_from_data_frame(., vertices = node_z %>% select(Node, z), directed = FALSE ) 
+
+z_mst <- mst(z_graph, weights = get.edge.attribute(z_graph, "dz"))
+
+FailureNodeCommunity_z  <- z_graph %>% 
+  cluster_walktrap(.) %>% 
+  MakeNodeCommunity()
+
+IsSameCommunity2(FailureNodeCommunity, FailureNodeCommunity_z) %>% pull(Jaccard) %>% mean
+
+distancedf <- distances(g, weights = get.edge.attribute(g, "dz")) %>% as_tibble %>% mutate(from = names(.)) %>%
+    gather(key = "to", value = "distance",-from)
+
+#graph clustered based on height distance
+distgraph <- distancedf %>% spread(to, distance) %>% select(-from) %>% as.matrix
+rownames(distgraph) <- colnames(distgraph)
+dist_hclust <- distgraph %>% as.dist %>% hclust(.) 
+
+dist_hclust <- hclust_graph(z_mst)
+
+#True co-failure group
+hclust_nodes1 <- hclust_graph(g_cofailure, weight = "weight") %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+hclust_nodes2 <- hclust_graph(g) %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 12)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+#stress group
+hclust_nodes3 <- hclust_graph(z_graph, weight = "H") %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+#topological
+hclust_nodes4 <-  g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
+hclust_graph(., weight = "weight")  %>%
+  list(names = names(cutree(., 10)),  membership = cutree(., 10)) %>%
+  MakeNodeCommunity(large = 1, medium = 0)
+
+MakeMapDF(g, read_csv(file.path(basewd, "point.csv")))  %>%
+  left_join(hclust_nodes1) %>%
+#  left_join(VertexMetaData2 %>% rename(Node = Name)) %>%
+    ggplot(aes(x = Latitude, y = Longitude)) + 
+  geom_line(aes(group = Link), size = 0.8) + 
+  geom_point(aes(colour =Community), size = 2) +
+   facet_grid(~PositionType) +
+    scale_color_brewer(palette = "Paired")+
+  labs(title = "Failure groups hierarchically clustered 10 groups")
+
+
+#There is a strong corellation betweeen Longitude and z and no corellation between latitude and z
+node_z %>%
+  gather(key = coord, value = value, -z,-Node) %>%
+  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
+  left_join(hclust_nodes1) %>%
+  mutate(Force = percent_rank(abs(NetTension))) %>%
+  ggplot(aes(x = value, y = z, colour = Force)) + geom_point() + 
+  scale_color_viridis_c() +
+  #scale_color_brewer(palette = "Paired")+
+  facet_grid(~coord, scales = "free_x") +
+  labs(title = "The height of each node and the percent rank Force acting on each node \n relative to the Latitude and Longitude")
+
+
+node_z %>%
+  gather(key = coord, value = value, -z,-Node) %>%
+  left_join(final_z %>% select(node, NetTension), by = c("Node"= "node")) %>%
+  left_join(hclust_nodes1) %>%
+  ggplot(aes(x = value, y = z, colour = Community)) + geom_point() + 
+  scale_color_brewer(palette = "Paired")+
+  facet_grid(~coord, scales = "free_x") +
+  labs(title = "Node cluster membership")
+
+CommSim <- IsSameCommunity2(hclust_nodes1, hclust_nodes3) %>%
+  left_join(hclust_nodes2, by = c("Node"= "Node")) %>%
+  group_by(membership) %>%
+  summarise(Jaccard = mean(Jaccard),
+            size = first(size),
+            rank = first(rank) %>% as.integer,
+            Community = first(Community))
+
+
+
+test <-Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
+                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
+  mutate(type = "depth") %>%
+  bind_rows(Tree_Similarity( hclust_graph(g), 
+                       hclust_graph(g_cofailure, weight = "weight"),1,50) %>%
+  mutate(type = "Line Limit")) %>%
+  # bind_rows(Tree_Similarity( hclust_graph(z_mst, weight = "dz"), 
+  #                      hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  # mutate(type = "mst depth")) %>%
+    bind_rows(Tree_Similarity(g %>% set.edge.attribute(., "weight", value = rep(1, ecount(.))) %>% #set edge weights to 1
+hclust_graph(., weight = "weight") , 
+                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  mutate(type = "topological")) %>%
+  bind_rows(Tree_Similarity( hclust_graph(z_graph, weight = "H"), 
+                       hclust_graph(g_cofailure, weight = "weight"),1, 50) %>%
+  mutate(type = "H dist")) 
+  
+
+
+test %>%
+  filter(trees>3) %>%
+  ggplot(aes(x = trees, y = mean, colour = type )) + geom_line()
+
+Tree_Similarity(hclust_graph(z_graph, weight = "dz") , 
+                       hclust_graph(g_cofailure, weight = "weight"),10,10, node_jaccard = T) %>%
+  ggplot(aes(x = Jaccard)) + geom_density()
+
+```
+
+```{r}
+
+test2 <- OverloadType %>%
+  filter(type == "Edge") %>% 
+  left_join(as_data_frame(z_graph)%>%as.tibble, by = c("Name"="name"))%>%  ungroup 
+   
+select(test2, Islanded, Overloaded, Targeted, mean_z, H, line_load, strain, percentile_strain, dz) %>% cor
+
+g_cofailure <- DistDF %>%
+  select(Node1, Node2, weight = counts) %>%
+  filter(weight >=1000) %>% #only edges with at least 1000 occurrances aka 10%, I'm not sure on the rights and wrongs of a cut off. This is definately a case for the metric backbone. Doing this or not makes a substantial difference
+  graph_from_data_frame(directed = FALSE)
+
+
+```
+
+
+
+```{r}
+
+node_heights <- tibble(node = get.vertex.attribute(z_mst, "name"), z = get.vertex.attribute(z_mst, "z")) %>%
+  mutate(rank = rank(z))
+
+remove_nodes <- node_heights %>%
+  filter(rank>2) %>% pull(node)
+
+g_temp <- delete.vertices(z_mst, remove_nodes) 
+plot(g_temp)
+
+g_non_single <- delete.vertices(g_temp, get.vertex.attribute(g_temp,"name" )[degree(g_temp)==0])
+
+who_is_with_who <- tibble(name = names(components(g_non_single)$membership), component = components(g_non_single)$membership)
+
+
+#how to make a hclust object
+a <- list()  # initialize empty object
+# define merging pattern: 
+#    negative numbers are leaves, 
+#    positive are merged clusters (defined by row number in $merge)
+a$merge <- matrix(c(-1, -2,
+                    -3, -4,
+                     1,  2), nc=2, byrow=TRUE ) 
+a$height <- c(1, 1.5, 3)    # define merge heights
+a$order <- 1:4              # order of leaves(trivial if hand-entered)
+a$labels <- LETTERS[1:4]    # labels of leaves
+class(a) <- "hclust"        # make it an hclust object
+plot(a)                     # look at the result   
+
+#convert to a dendrogram object if needed
+ad <- as.dendrogram(a)
+
+```
+
 
