@@ -478,7 +478,7 @@ IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_
   map_df(~{
     read_rds(.x) %>%
     Calc_line_strain(IEEE_118_dist , ., distance = "distance", capacity = "Link.Limit", flow = "PowerFlow") %>%
-      summarise(theta_degs = mean(strain)) %>%
+      summarise(strain = mean(strain)) %>%
     #angle_from_solved_heights(.) %>%
     mutate(alpha = basename(.x),
            )  
@@ -486,13 +486,49 @@ IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_
   mutate(alpha = gsub("IEEE_118_alpha_", "", alpha) %>%
            gsub(".rds", "",.) %>% as.numeric())
 
+#Scrambled strain heights. Loads all the scramble fractions
+
+IEEE_theta_by_alpha_ec <- c("constant_ec_from_alpha_norm_50", "constant_ec_from_alpha_norm") %>%
+  map_df(~{
+    
+    test <- list.dirs(file.path(IEEE_Project_folder, .x), recursive = FALSE) %>%
+  map_df(~{ #map loop 2
+    Out <- list.files(.x, full.names = TRUE) %>%
+      map_df(~{ #map loop 1 inner map
+        read_rds(.x) %>%
+    Calc_line_strain(IEEE_118_dist , ., distance = "distance", capacity = "Link.Limit", flow = "PowerFlow") %>%
+      summarise(strain = mean(strain)) %>%
+    #angle_from_solved_heights(.) %>%
+          mutate(alpha = basename(.x))  
+      }) %>%
+      rename(v = alpha) %>%
+      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
+              v = gsub("IEEE_118_v_", "", v) %>%
+                gsub(".rds", "",.) %>% as.numeric )%>% 
+      arrange(v) #%>% 
+     bind_cols(target_orders) #This is the target orders from the IEEE script
+    
+    return(Out)
+    
+  }) %>% mutate(scramble_fract = .x)
+    
+  }) %>%
+  mutate(scramble_fract = case_when(
+    sub(".*_", "",scramble_fract) == "50" ~"50",
+    TRUE ~"100"
+  ))
+
+
+
+
+
 IEEE_theta_by_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha_norm"), recursive = FALSE) %>%
   map_df(~{
     Out <- list.files(.x, full.names = TRUE) %>%
       map_df(~{
         read_rds(.x) %>%
     Calc_line_strain(IEEE_118_dist , ., distance = "distance", capacity = "Link.Limit", flow = "PowerFlow") %>%
-      summarise(theta_degs = mean(strain)) %>%
+      summarise(strain = mean(strain)) %>%
     #angle_from_solved_heights(.) %>%
           mutate(alpha = basename(.x))  
       }) %>%
@@ -692,8 +728,8 @@ theta_crit_thresh <- AttackRoundData %>%
   summarise_all(mean) %>%
   left_join(IEEE_theta_by_alpha) %>%
   mutate(alpha = 1/alpha,
-         orig_strain = theta_degs,
-     theta_degs =   relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs) 
+         orig_strain = strain,
+     strain =   relative_position(strain, IEEE_theta_by_alpha$strain) 
      ) %>%
   mutate(true_alpha = 1/alpha)
 
@@ -702,14 +738,14 @@ theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
   left_join(IEEE_theta_by_alpha_ec %>% 
               mutate(ec = ec %>% as.numeric(.)/100)) %>%
   mutate(alpha = 1/alpha,
-                  orig_strain = theta_degs,
-         theta_degs =  relative_position(theta_degs, IEEE_theta_by_alpha$theta_degs)
+                  orig_strain = strain,
+         strain =  relative_position(strain, IEEE_theta_by_alpha$strain)
          ) 
 
 #reshape so that the alpha and strain values can be plotted
 {
 PropLoad_line <- theta_crit_thresh %>%
-  select(alpha, NodesAttacked, theta_degs) %>%
+  select(alpha, NodesAttacked, strain) %>%
   gather(key = type, value = value, -NodesAttacked) 
   
  PropLoad_line <-  bind_rows(PropLoad_line %>%
@@ -725,8 +761,8 @@ PropLoad_line <- theta_crit_thresh %>%
 #reshape so that the alpha and strain values can be plotted
 
  scrambled_ec_points <- theta_crit_thresh_ec_2 %>%
-               select(alpha, NodesAttacked, theta_degs, ec, v) %>%
-               gather(key = type, value = value, -NodesAttacked, -ec, -v) %>%
+               select(alpha, NodesAttacked, strain, ec, v, scramble_fract) %>%
+               gather(key = type, value = value, -NodesAttacked, -ec, -v, -scramble_fract) %>%
   mutate(ec = factor(ec)#,
          #type = type %>%factor(., labels = c("1/alpha[sys]", "kappa~strain"))
          ) %>%
@@ -746,8 +782,19 @@ PropLoad_line <- theta_crit_thresh %>%
    mutate(type = factor(type, levels = c("1/alpha[sys]", "kappa~strain", "alpha[sys]", "1/kappa~strain")),
           Edge_perc = NodesAttacked/ecount(IEEE_118))
 
- 
 }
+
+
+#THis piece of code is just to plot the 50% scramble as well. I can delete when I understand what is going on
+theta_crit_thresh_ec_2  %>%
+  mutate(value = NodesAttacked) %>%
+  filter(as.character(ec)%>% as.numeric()<30) %>%
+  ggplot(aes(y = alpha, x = orig_strain, colour = factor(ec), shape  = scramble_fract)) + 
+  geom_point() +
+  labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
+       x = "Fraction of Edges Attacked", y = "metric value",
+       colour = "Original\nsystem\ntolerance")  
+
 
 #plot the data to show that the strain value has a closer relationship to the proportional load than the alpha value does for both high and low values of strain.
 PropLoad_line  %>%
@@ -757,7 +804,7 @@ PropLoad_line  %>%
  # geom_line(data = scrambled_ec_points, aes(group = factor(v), colour = ec)) +
   geom_point(data = scrambled_ec_points  %>%
   filter(as.character(ec)%>% as.numeric()<30) %>% filter(bounded),# %>%  filter(ec !=100),
-             aes(colour = ec)) +
+             aes(colour = ec, shape = scramble_fract)) +
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
        x = "Fraction of Edges Attacked", y = "metric value",
