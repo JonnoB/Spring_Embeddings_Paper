@@ -43,7 +43,7 @@ MatricesFolder <- file.path(LatexFolder, "Matrices")
 Tariff <- file.path(basewd,"Tariff and Transport")
 PLwd <- "/media/jonno/Seagate Expansion Drive/System_Dynamics"
 Deletion_Order_Folder <-  file.path("/home/jonno/Dropbox/AWS_Simulation_Files") #Only one of the deletion order folders is needed. Either Nodes or Edges
-IEEE_Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
+IEEE_Project_folder <- "/home/jonno/Dropbox/IEEE_Networks" #"/media/jonno/Seagate Expansion Drive/IEEE_Networks"
 base_attack_folder <-"/media/jonno/Seagate Expansion Drive/System_Dynamics/Profile_attacks"
 
 #Load necessary datasets and great the base powergrid network
@@ -415,10 +415,10 @@ This section uses the IEEE_118 network to demonstrate that strain is a proxy for
 ##plot IEEE118
 
 ```{r}
-IEEE_Project_folder <- "/media/jonno/Seagate Expansion Drive/IEEE_Networks"
 
 IEEE_118 <- readRDS(file.path(IEEE_Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
 
+#change index value back to 16. value is only 1 for test reasons
 
 #set node coordinates for IEEE118
 set.seed(2664)
@@ -437,7 +437,7 @@ IEEE118_heights <- IEEE_118 %>%
     TRUE~"Transfer"
   )
   ) %>%
-  left_join(., list.files(file.path(IEEE_Project_folder, "Solved_height_networks"), full.names = TRUE)[16] %>%
+  left_join(., list.files(file.path(IEEE_Project_folder, "Solved_height_networks_PL"), full.names = TRUE)[1] %>%
   read_rds(), by = c("Node"="node")
   ) %>%
   mutate(height_perc = percent_rank(z))
@@ -466,7 +466,15 @@ IEEE118_heights %>%
 ##Strain alpha relationship
 
 ```{r}
-target_orders  <- readRDS(file.path(IEEE_Project_folder, "target_orders.rds"))
+fract_vect <- c(1, 0.75, 0.5, 0.25)
+
+readRDS(file.path(Project_folder, "target_orders", file_name))
+
+#Load the target orders for the different fraction scrambles
+target_orders<- list.files(file.path(IEEE_Project_folder, "target_orders"), full.names = TRUE) %>%
+  map_df(~read_rds(.x))
+
+#target_orders  <- readRDS(file.path(IEEE_Project_folder, "target_orders.rds"))
 
 IEEE_118_dist <- IEEE_118 %>%
   set.edge.attribute(., "distance", value = 1)%>%
@@ -488,61 +496,42 @@ IEEE_theta_by_alpha <- list.files(file.path(IEEE_Project_folder, "Solved_height_
 
 #Scrambled strain heights. Loads all the scramble fractions
 
-IEEE_theta_by_alpha_ec <- c("constant_ec_from_alpha_norm_50", "constant_ec_from_alpha_norm") %>%
+#This creates a dataframe of height files to load. it makes the code for loading mucheasier to understand  
+height_files_to_load <- fract_vect %>%
   map_df(~{
+       
+    load_folder <- paste0("constant_ec_from_alpha_fract_", .x )
     
-    test <- list.dirs(file.path(IEEE_Project_folder, .x), recursive = FALSE) %>%
-  map_df(~{ #map loop 2
-    Out <- list.files(.x, full.names = TRUE) %>%
-      map_df(~{ #map loop 1 inner map
-        read_rds(.x) %>%
-    Calc_line_strain(IEEE_118_dist , ., distance = "distance", capacity = "Link.Limit", flow = "PowerFlow") %>%
-      summarise(strain = mean(strain)) %>%
-    #angle_from_solved_heights(.) %>%
-          mutate(alpha = basename(.x))  
-      }) %>%
-      rename(v = alpha) %>%
-      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
-              v = gsub("IEEE_118_v_", "", v) %>%
-                gsub(".rds", "",.) %>% as.numeric )%>% 
-      arrange(v) #%>% 
-     bind_cols(target_orders) #This is the target orders from the IEEE script
-    
-    return(Out)
-    
-  }) %>% mutate(scramble_fract = .x)
-    
+  all_fractions <- list.files(file.path(IEEE_Project_folder, load_folder), recursive = TRUE) %>%
+    tibble(file_path = .) %>%
+  mutate(v = basename(file_path),
+         ec = file_path %>% dirname(.),
+         fract = .x)
+         
   }) %>%
-  mutate(scramble_fract = case_when(
-    sub(".*_", "",scramble_fract) == "50" ~"50",
-    TRUE ~"100"
-  ))
+  mutate(v = gsub("(IEEE_118_alpha_)|(.rds)", "", v ) %>% as.integer(),
+         ec =  sub("Solved_height_networks_alpha_", "", ec ) %>% as.numeric())
 
-
-
-
-
-IEEE_theta_by_alpha_ec <- list.dirs(file.path(IEEE_Project_folder,"constant_ec_from_alpha_norm"), recursive = FALSE) %>%
+#Use the previously generated dataframe to load all the solved height networks and find the strain
+IEEE_strain_by_alpha_ec <- 1:nrow(height_files_to_load) %>%
   map_df(~{
-    Out <- list.files(.x, full.names = TRUE) %>%
-      map_df(~{
-        read_rds(.x) %>%
+    
+    load_file <- height_files_to_load %>% slice(.x)
+    
+    file_path <- file.path(IEEE_Project_folder,
+                           paste0("constant_ec_from_alpha_fract_", load_file$fract ), load_file$file_path )
+    
+    Out <- read_rds(file_path) %>%
     Calc_line_strain(IEEE_118_dist , ., distance = "distance", capacity = "Link.Limit", flow = "PowerFlow") %>%
       summarise(strain = mean(strain)) %>%
-    #angle_from_solved_heights(.) %>%
-          mutate(alpha = basename(.x))  
-      }) %>%
-      rename(v = alpha) %>%
-      mutate( ec = basename(.x) %>% gsub("Solved_height_networks_alpha_", "", .),
-              v = gsub("IEEE_118_v_", "", v) %>%
-                gsub(".rds", "",.) %>% as.numeric )%>% 
-      arrange(v) #%>% 
-     bind_cols(target_orders) #This is the target orders from the IEEE script
+      bind_cols(load_file, .)
     
     return(Out)
-    
-  })
+  }) %>%
+  select(-file_path)
 
+#this is not used again so is removed here
+rm(height_files_to_load)
 ```
 
 
@@ -658,6 +647,22 @@ ExtractAttackStats(file.path(IEEE_Project_folder, "IEEE118_edges"),
                    EdgeName = "Link")
 
 
+#Extract the scrambled edges
+
+if(!file.exists(file.path(IEEE_Project_folder, "Edge_Attack_Summaries_by_fraction"))){
+  dir.create(file.path(IEEE_Project_folder, "Edge_Attack_Summaries_by_fraction"))
+}
+
+ fract_vect %>%
+  walk(~{
+   
+    load_folder <- paste0("IEEE_permute_edge_ec_Edge_fract_", .x ) 
+    print(load_folder)
+    
+    
+    
+    })
+
 
 list.dirs(file.path(IEEE_Project_folder,"IEEE_permute_edge_ec_Edge"), recursive = F) %>%
   walk(~{
@@ -735,7 +740,7 @@ theta_crit_thresh <- AttackRoundData %>%
 
 #get the mean number of elements attacked for each of the hundred random attacks per scramble
 theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
-  left_join(IEEE_theta_by_alpha_ec %>% 
+  left_join(IEEE_strain_by_alpha_ec %>% 
               mutate(ec = ec %>% as.numeric(.)/100)) %>%
   mutate(alpha = 1/alpha,
                   orig_strain = strain,
