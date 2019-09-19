@@ -688,7 +688,6 @@ fract_vect %>%
 
 
 
-
 #I have managed to delete the attack round data! get it back from github asap!
 
 AttackRoundData <- list.files(path = file.path(IEEE_Project_folder,"Edge_Attack_Summaries_PL"), 
@@ -713,15 +712,17 @@ AttackRoundData_ec_alpha_ec <- list.files(path = file.path(IEEE_Project_folder,"
     mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
     filter(!has_gc) %>%
     group_by(simulationID, file_path) %>%
-    summarise_all(first) %>%
+    summarise_all(first) %>% ungroup %>%
     mutate(v = basename(file_path) %>% gsub("constant_ec_v", "", .) %>%
              gsub(".rds", "", .) %>%  as.numeric(.),
            ec = dirname(file_path) %>% basename() %>% gsub("alpha_value_", "", .) %>% 
              as.numeric()/100,
            fract = dirname(file_path) %>% dirname() %>% basename() %>% 
              gsub("Summary_IEEE_permute_edge_ec_Edge_fract_", "", .) %>% 
-             as.numeric() )
-
+             as.numeric() ) %>%
+  group_by(ec, v, fract) %>%
+  summarise(NodesAttacked = mean(NodesAttacked)) %>%
+  left_join(target_orders %>% rename(fract = scramble_fract), by = c("ec", "v", "fract"))
 ```
 
 
@@ -750,8 +751,6 @@ theta_crit_thresh <- AttackRoundData %>%
 theta_crit_thresh_ec_2 <- AttackRoundData_ec_alpha_ec  %>%
   left_join(IEEE_strain_by_alpha_ec %>% 
               mutate(ec = ec %>% as.numeric(.)/100)) %>%
-  select(-alpha) %>%
-  left_join(target_orders %>% rename(fract = scramble_fract)) %>%
   mutate(alpha = 1/alpha,
                   orig_strain = strain,
          strain =  relative_position(strain, IEEE_strain_by_alpha_PL$strain) #strian is blanked out for testing remove to make relative!
@@ -811,14 +810,14 @@ theta_crit_thresh_ec_2  %>%
 #plot the data to show that the strain value has a closer relationship to the proportional load than the alpha value does for both high and low values of strain.
 PropLoad_line  %>%
   filter(bounded) %>%
-  ggplot(aes(y = 1/value, x = Edge_perc)) + 
-  geom_point(data = scrambled_ec_points  %>%
-  filter(as.character(ec)%>% as.numeric()<30) %>% filter(bounded),
-             aes(colour = ec)) +
+  ggplot(aes(x = 1/value, y = Edge_perc)) + 
+  geom_point(data = scrambled_ec_points %>% filter(bounded),
+             aes(colour = ec, shape = factor(fract))) +
     geom_path() +
+#  geom_smooth(data = scrambled_ec_points %>% filter(bounded))+
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
-       x = "Fraction of Edges Attacked", y = "metric value",
+       y = "Fraction of Edges Attacked", x = "metric value",
        colour = "Original\nsystem\ntolerance")  
 ggsave(file.path(FiguresFolder, "NodesAttacked_Strain_alpha_small_ec_118.pdf"))
 
@@ -826,8 +825,7 @@ PropLoad_line %>%
   filter(!bounded) %>%
   ggplot(aes(y = 1/value, x = NodesAttacked)) + 
   geom_path() +
-  geom_point(data = scrambled_ec_points  %>%
-  filter(as.character(ec)%>% as.numeric()<30) %>% filter(!bounded),
+  geom_point(data = scrambled_ec_points %>% filter(!bounded),
              aes(colour = ec)) +
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Analysing the spread of outcomes for alpha and one over relative strain", 
