@@ -75,40 +75,40 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 ##Edges
 ```{r}
 
-# 
-# setwd(file.path(Project_folder, "IEEE118_edges"))
-# 
-# #rep <-5 #I don't think this does anything. If nothing breaks then delete.
-# alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
-# alpha_vector
-# set.seed(21256)
-# DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")  
-# 
-# #Create the simulations for each of the alpha avalues using 100 simulations for each
-# alpha_vector %>% walk(~{
-#   gProp <- Proportional_Load(IEEE_118, alpha = .x)
-#   
-#   folder <- paste0("alpha_value_",  .x*100)
-#   #create folder if it doesn't already exist
-#   if(!file.exists(folder)){
-#     dir.create(folder)
-#   }
-#   
-#   CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
-#   
-#   SaveMultiAttacks(gProp, DeleteOrders_Edges, folder, 
-#                    TotalAttackRounds = 1000, 
-#                    CascadeMode = CascadeMode,
-#                    Demand = "Load_MW",
-#                    Generation = "Generation_MW",
-#                    EdgeName = "Link", 
-#                    VertexName = "name", 
-#                    Net_generation = "Net_Generation",
-#                    Target = "Edges")
-#   
-# }
-# 
-# )
+
+setwd(file.path(Project_folder, "IEEE118_edges"))
+
+#rep <-5 #I don't think this does anything. If nothing breaks then delete.
+alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 100, 200, Inf)
+alpha_vector
+set.seed(21256)
+DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
+
+#Create the simulations for each of the alpha avalues using 100 simulations for each
+alpha_vector %>% walk(~{
+  gProp <- Proportional_Load(IEEE_118, alpha = .x)
+
+  folder <- paste0("alpha_value_",  .x*100)
+  #create folder if it doesn't already exist
+  if(!file.exists(folder)){
+    dir.create(folder)
+  }
+
+  CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
+
+  SaveMultiAttacks(gProp, DeleteOrders_Edges, folder,
+                   TotalAttackRounds = 1000,
+                   CascadeMode = CascadeMode,
+                   Demand = "Load_MW",
+                   Generation = "Generation_MW",
+                   EdgeName = "Link",
+                   VertexName = "name",
+                   Net_generation = "Net_Generation",
+                   Target = "Edges")
+
+}
+
+)
 
 
 
@@ -314,14 +314,24 @@ if(!file.exists(file.path(Project_folder, "Solved_height_networks_PL"))){
 alpha_vector %>% walk(~{
 
   alpha <- .x
-
-  print(paste("alpha value", alpha))
+  file_path <- file.path(Project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds"))
+  
+  if(file.exists(file_path)){
+    
+    print("file exists continueing to next file")
+    
+  }else {
+    
+      print(paste("alpha value", alpha))
 
   current_graph <- IEEE_118 %>% Proportional_Load(., alpha = alpha)
 
   final_z <- Standardisesd_solution_finder(current_graph, common_time, common_Iter, common_tol, common_mass)
 
-  write_rds(final_z, file.path(Project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds")))
+  write_rds(final_z, file_path)
+    
+  }
+
 })
 
 
@@ -341,56 +351,51 @@ An alternative is to assign 1 fraction per machine. Do whatever you want.
 
 cpu_id <- 1
 number_of_cpus <- 4
-cpu_vector <- rep(1:number_of_cpus, length.out =length(Scramble_ec_values))
-cpu_sims <-(1:length(Scramble_ec_values))[cpu_vector==cpu_id]
 
-fract_vect %>%
-  walk(~{ #begin outer loop
+target_orders2 <- target_orders %>%
+  mutate(file_path = file.path(Project_folder,
+                               paste0("constant_ec_from_alpha_fract_", scramble_fract),
+                               paste0("Solved_height_networks_alpha_", ec*100),
+                               paste0("IEEE_118_alpha_", v, ".rds")),
+         calc_on_this_machine = rep_along(file_path, 1:number_of_cpus)) %>%
+  filter(calc_on_this_machine == cpu_id,
+         ec <= 20)
+
+1:nrow(target_orders2) %>%
+  walk(~{
     
-    current_fract <- .x
+    target <- target_orders2 %>%
+      slice(.x)
     
-    for(n in Scramble_ec_values[cpu_sims]){ #begin for loop
-      print(n)
-      target_orders2 <- target_orders %>% 
-        filter(ec == n, scramble_fract == current_fract)
+    #does the file exist?
+    if(file.exists(target$file_path)){
+      print("file exists continueing to next file")
+    }else { 
       
-      alpha_folder <-  paste0("Solved_height_networks_alpha_", n*100) %>%
-        file.path(Project_folder, paste0("constant_ec_from_alpha_fract_", current_fract), .)
-      #create folder if it doesn't already exist
-      if(!file.exists(alpha_folder)){
-        dir.create(alpha_folder, recursive = TRUE)
+      #if the file doesn't exist ensure that the folder is created and then calculate
+      if(!dir.exists(dirname(target$file_path))){
+        dir.create(dirname(target$file_path), recursive = TRUE)
       }
       
-      1:nrow(target_orders2) %>% walk(~{
-        
-        ID <- .x
-        
-        Iteration_path <- file.path(alpha_folder, paste0("IEEE_118_v_", ID, ".rds"))
-        
-        if(file.exists(Iteration_path)){
-          print("Equilibrium already found proceeding to next iteration")
-        }else{
-          
-          print(paste("alpha value", ID))
-          #create network
-          Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = n)
-          
-          #create dataframe of new edge limits
-          temp <-Create_scrambled_edges(Scrambled_edge_cap, target_orders2$seed[.x], fract = current_fract)
-          
-          print(mean(temp$alpha))
-          
-          final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
-                                                     set.edge.attribute(., "Link.Limit", value = temp$Link.Limit), 
-                                                   common_time, common_Iter, common_tol, common_mass)
-        
-          write_rds(final_z, file.path( alpha_folder , paste0("IEEE_118_alpha_", .x, ".rds")))
-        }
-      })
+      print(paste0("fraction ", target$scramble_fract ," ec value ", target$ec, ". v ",target$v))
+      #create network
+      Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = target$ec)
       
-    } #end of loop
+      #create dataframe of new edge limits
+      temp <-Create_scrambled_edges(Scrambled_edge_cap, target$seed, fract = target$scramble_fract)
+      
+      print(mean(temp$alpha))
+      
+      final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
+                                                 set.edge.attribute(., "Link.Limit", value = temp$Link.Limit), 
+                                               common_time, common_Iter, common_tol, common_mass)
+      
+      write_rds(final_z, target$file_path)
+      
+    } #proceed to next iteration
     
-  }) #end of outer walk
+  })
+
 ```
 
 
