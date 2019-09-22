@@ -7,6 +7,10 @@ editor_options:
   chunk_output_type: console
 ---
 
+instance -password i-0aff096095fb8174f
+
+foremost -i /dev/sda3 -t R -o /root/restored/
+
 This script is for performing the spring analysis on IEEE_118. The output of this script is used in the Spring Embeddings project. It was kept as a separate script as the outputs my be used more generally in the PhD.
 
 The script requires that the IEEE_118 network has been generated already
@@ -24,16 +28,16 @@ This will chunk need to be copy and pasted into the console or the whole RMD fil
 # 
 # 
 # #Once everything is excluded get the key dropbox folders for these simulations
-# includeSyncDropbox("IEEE_Networks")
-# includeSyncDropbox("Flow_Spring_System")
-# includeSyncDropbox("Useful_PhD__R_Functions")
+includeSyncDropbox("IEEE_Networks")
+includeSyncDropbox("Flow_Spring_System")
+includeSyncDropbox("Useful_PhD__R_Functions")
 ```
 
-
+#Set up
 
 ```{r}
 
-packages <- c("tidyverse", "igraph", "rlang", "devtools", "minpack.lm" )
+packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm", "foreach", "doParallel" )
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -47,15 +51,18 @@ library(PowerGridNetworking)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
 
-#This folder is for use on my machine
-Project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
-#This is for the folder that is on the cloud
-#Project_folder <- "~/Dropbox/IEEE_Networks"
-IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
+#creates the correct root depending on whether this is on the cloud or not
+if(dir.exists("/home/jonno")){
+  #This folder is for use on my machine
+  Project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
+  basewd <- "/home/jonno"
+}else{
+  #This is for the folder that is on the cloud
+  Project_folder <- "~/Dropbox/IEEE_Networks"
+  basewd <- "~/Dropbox"
+}
 
-#has to point to cloud location if on cloud!
-#basewd <- "/home/jonno"
-basewd <- "~/Dropbox"
+IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
@@ -76,40 +83,40 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 ```{r}
 
 
-setwd(file.path(Project_folder, "IEEE118_edges"))
-
-#rep <-5 #I don't think this does anything. If nothing breaks then delete.
-alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 100, 200, Inf)
-alpha_vector
-set.seed(21256)
-DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
-
-#Create the simulations for each of the alpha avalues using 100 simulations for each
-alpha_vector %>% walk(~{
-  gProp <- Proportional_Load(IEEE_118, alpha = .x)
-
-  folder <- paste0("alpha_value_",  .x*100)
-  #create folder if it doesn't already exist
-  if(!file.exists(folder)){
-    dir.create(folder)
-  }
-
-  CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
-
-  SaveMultiAttacks(gProp, DeleteOrders_Edges, folder,
-                   TotalAttackRounds = 1000,
-                   CascadeMode = CascadeMode,
-                   Demand = "Load_MW",
-                   Generation = "Generation_MW",
-                   EdgeName = "Link",
-                   VertexName = "name",
-                   Net_generation = "Net_Generation",
-                   Target = "Edges")
-
-}
-
-)
-
+# setwd(file.path(Project_folder, "IEEE118_edges"))
+# 
+# #rep <-5 #I don't think this does anything. If nothing breaks then delete.
+# alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 100, 200, Inf)
+# alpha_vector
+# set.seed(21256)
+# DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
+# 
+# #Create the simulations for each of the alpha avalues using 100 simulations for each
+# alpha_vector %>% walk(~{
+#   gProp <- Proportional_Load(IEEE_118, alpha = .x)
+# 
+#   folder <- paste0("alpha_value_",  .x*100)
+#   #create folder if it doesn't already exist
+#   if(!file.exists(folder)){
+#     dir.create(folder)
+#   }
+# 
+#   CascadeMode <- ifelse(is.finite(.x), TRUE, FALSE)
+# 
+#   SaveMultiAttacks(gProp, DeleteOrders_Edges, folder,
+#                    TotalAttackRounds = 1000,
+#                    CascadeMode = CascadeMode,
+#                    Demand = "Load_MW",
+#                    Generation = "Generation_MW",
+#                    EdgeName = "Link",
+#                    VertexName = "name",
+#                    Net_generation = "Net_Generation",
+#                    Target = "Edges")
+# 
+# }
+# 
+# )
+# 
 
 
 ```
@@ -135,46 +142,46 @@ Generate the target orders that will be used to ensure that the random edge perm
 
 This can take a while for large numbers (e.g 10k samples), as each graph needs to be generated and the new alpha value found.
 ```{r}
-
-target_orders <- fract_vect %>% map_df(~{
-  
-  file_name <- paste0("target_orders_fract_", .x*100, ".rds")
-  
-  current_fract <- .x
-  
-  if(!file.exists(file.path(Project_folder, "target_orders", file_name))){
-  
-  set.seed(123)
-  random_seeds <- sample(1:100000, 10000)
-  
-  target_orders <- Scramble_ec_values %>% map_df(~{
-    
-    print(.x)
-    #create network
-    Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
-    #permute edges
-    print("creating the random permutations")
-    seed_alpha <- Permute_excess_capacity(Scrambled_edge_cap, random_seeds, fract = current_fract)
-    #take subselection
-    target_orders <- sub_selection_of_seed_alpha(seed_alpha, total_samples = 10, seed = 123) %>%
-      mutate(ec = .x,
-             v = 1:n(),
-             scramble_fract = current_fract)
-    
-    return(target_orders)
-    
-  })
-  
-  saveRDS(target_orders, file.path(Project_folder, "target_orders", file_name))
-  
-} else {
-  
-  target_orders  <- readRDS(file.path(Project_folder, "target_orders", file_name))
-  
-}
- return(target_orders)
-  
-})
+# 
+# target_orders <- fract_vect %>% map_df(~{
+# 
+#   file_name <- paste0("target_orders_fract_", .x*100, ".rds")
+# 
+#   current_fract <- .x
+# 
+#   if(!file.exists(file.path(Project_folder, "target_orders", file_name))){
+# 
+#   set.seed(123)
+#   random_seeds <- sample(1:100000, 10000)
+# 
+#   target_orders <- Scramble_ec_values %>% map_df(~{
+# 
+#     print(.x)
+#     #create network
+#     Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
+#     #permute edges
+#     print("creating the random permutations")
+#     seed_alpha <- Permute_excess_capacity(Scrambled_edge_cap, random_seeds, fract = current_fract)
+#     #take subselection
+#     target_orders <- sub_selection_of_seed_alpha(seed_alpha, total_samples = 10, seed = 123) %>%
+#       mutate(ec = .x,
+#              v = 1:n(),
+#              scramble_fract = current_fract)
+# 
+#     return(target_orders)
+# 
+#   })
+# 
+#   saveRDS(target_orders, file.path(Project_folder, "target_orders", file_name))
+# 
+# } else {
+# 
+#   target_orders  <- readRDS(file.path(Project_folder, "target_orders", file_name))
+# 
+# }
+#  return(target_orders)
+# 
+# })
 
 ```
 
@@ -191,49 +198,47 @@ It may take a couple of days to calculate. Best done on the cloud if possible
 
 ##Edge attack
 ```{r}
-
-IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
-
+# IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
+# 
 # 
 # #These two lines of code are in the PL attack section. the seed ensures the attack order is the same, although it probably doesn't have a very large effect
 # set.seed(21256)
-# DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")   
+# DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
 # 
-# #fract_vect %>% 
+# #fract_vect %>%
 # fract_vect[1] %>%   #used for splitting up the attacks across the fractions
 #   walk(~{
-#   
+# 
 #   current_fract <- .x
 # 
-# Scramble_ec_values %>% 
+# Scramble_ec_values %>%
 #   walk(~{
-#     
-#     target_orders_x <- target_orders %>% 
+# 
+#     target_orders_x <- target_orders %>%
 #       filter(ec == .x, scramble_fract == current_fract)
-#     
+# 
 #     folder <- paste0("alpha_value_",  .x*100) %>%
 #       file.path(Project_folder, paste0("IEEE_permute_edge_ec_Edge_fract_", current_fract), .)
-#     
+# 
 #     #create folder if it doesn't already exist
 #     if(!file.exists(folder)){
 #       dir.create(folder, recursive = TRUE) #create all folders in the path if necessary
 #     }
-#     
+# 
 #     #
 #     #attack network using the deletion orders
 #     #
-#     
+# 
 #     setwd(folder)
 #     #create network
 #     Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = .x)
 #     #attack!
-#     Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap, 
+#     Scrambled_Edge_SaveMultiAttacks(target_orders_x, Scrambled_edge_cap,
 #                                     "constant_ec_v", DeleteOrders_Edges, Target = "Edges", fract = current_fract)
-#     
+# 
 #   })
 # 
 # })
-
 ```
 
 
@@ -243,52 +248,52 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 ##Common values
 The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
 ```{r}
-common_time <- 0.01
-common_Iter <- 20000
-common_tol <- 1e-10
-common_mass <- 1
-
-
-Standardisesd_solution_finder <- function(g, common_time, common_Iter, common_tol, common_mass){
-  #This function is just a wrapper to tidy up the code chucnks in finding various strain heights for IEEE_118
-  
-   current_graph  <- g %>%
-    set.edge.attribute(. , "distance", value = 1) %>%
-    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
-    set.edge.attribute(., "Area", value = 1) %>%
-  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
-  
-
-  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-
-    giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
-    
-  #use the largest block to set the simulation parameters k and m.
-  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
-                                                   force ="Net_Generation",
-                                                   flow = "PowerFlow",
-                                                   distance = "distance",
-                                                   capacity = "Link.Limit",
-                                                   tstep = common_time, 
-                                                   tol = common_tol, 
-                                                   maxIter = common_Iter, 
-                                                   mass = common_mass)
-      
-      final_z <- Create_stabilised_blocks(g = current_graph, 
-                                          OriginBlock = OriginBlock_complete,
-                                          OriginBlock_number = giant_componant, 
-                                          force ="Net_Generation",
-                                          flow = "PowerFlow",
-                                          distance = "distance",
-                                          capacity = "Link.Limit",
-                                          tstep = common_time, 
-                                          tol = common_tol, 
-                                          maxIter = common_Iter, 
-                                          mass = common_mass)
-  
-  
-}
+# common_time <- 0.01
+# common_Iter <- 20000
+# common_tol <- 1e-10
+# common_mass <- 1
+# 
+# 
+# Standardisesd_solution_finder <- function(g, common_time, common_Iter, common_tol, common_mass){
+#   #This function is just a wrapper to tidy up the code chucnks in finding various strain heights for IEEE_118
+#   
+#    current_graph  <- g %>%
+#     set.edge.attribute(. , "distance", value = 1) %>%
+#     Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+#     set.edge.attribute(., "Area", value = 1) %>%
+#   Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
+#   
+# 
+#   List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+# 
+#     giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+#     
+#   #use the largest block to set the simulation parameters k and m.
+#   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+#       OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
+#                                                    force ="Net_Generation",
+#                                                    flow = "PowerFlow",
+#                                                    distance = "distance",
+#                                                    capacity = "Link.Limit",
+#                                                    tstep = common_time, 
+#                                                    tol = common_tol, 
+#                                                    maxIter = common_Iter, 
+#                                                    mass = common_mass)
+#       
+#       final_z <- Create_stabilised_blocks(g = current_graph, 
+#                                           OriginBlock = OriginBlock_complete,
+#                                           OriginBlock_number = giant_componant, 
+#                                           force ="Net_Generation",
+#                                           flow = "PowerFlow",
+#                                           distance = "distance",
+#                                           capacity = "Link.Limit",
+#                                           tstep = common_time, 
+#                                           tol = common_tol, 
+#                                           maxIter = common_Iter, 
+#                                           mass = common_mass)
+#   
+#   
+# }
 
 ```
 
@@ -299,41 +304,41 @@ calcualtes the embeddings of the proportionally loaded systems indicated in the 
 
 ```{r}
 
-IEEE_118 <- readRDS(file.path(Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
-
-
-#Network loadings to find the angles for
-alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 2.5, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
-
-if(!file.exists(file.path(Project_folder, "Solved_height_networks_PL"))){
-  dir.create(file.path(Project_folder, "Solved_height_networks_PL"))
-}
-
-
-#calculate theta for all values of alpha
-alpha_vector %>% walk(~{
-
-  alpha <- .x
-  file_path <- file.path(Project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds"))
-  
-  if(file.exists(file_path)){
-    
-    print("file exists continueing to next file")
-    
-  }else {
-    
-      print(paste("alpha value", alpha))
-
-  current_graph <- IEEE_118 %>% Proportional_Load(., alpha = alpha)
-
-  final_z <- Standardisesd_solution_finder(current_graph, common_time, common_Iter, common_tol, common_mass)
-
-  write_rds(final_z, file_path)
-    
-  }
-
-})
-
+# IEEE_118 <- readRDS(file.path(Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
+# 
+# 
+# #Network loadings to find the angles for
+# alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 2.5, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
+# 
+# if(!file.exists(file.path(Project_folder, "Solved_height_networks_PL"))){
+#   dir.create(file.path(Project_folder, "Solved_height_networks_PL"))
+# }
+# 
+# 
+# #calculate theta for all values of alpha
+# alpha_vector %>% walk(~{
+# 
+#   alpha <- .x
+#   file_path <- file.path(Project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds"))
+#   
+#   if(file.exists(file_path)){
+#     
+#     print("file exists continueing to next file")
+#     
+#   }else {
+#     
+#       print(paste("alpha value", alpha))
+# 
+#   current_graph <- IEEE_118 %>% Proportional_Load(., alpha = alpha)
+# 
+#   final_z <- Standardisesd_solution_finder(current_graph, common_time, common_Iter, common_tol, common_mass)
+# 
+#   write_rds(final_z, file_path)
+#     
+#   }
+# 
+# })
+# 
 
 
 ```
@@ -348,57 +353,215 @@ This code is designed to be spread across several machines. It doesn't seem to p
 An alternative is to assign 1 fraction per machine. Do whatever you want.
 
 ```{r}
+# 
+# cpu_id <- 1
+# number_of_cpus <- 4
+# 
+# target_orders2 <- target_orders %>%
+#   mutate(file_path = file.path(Project_folder,
+#                                paste0("constant_ec_from_alpha_fract_", scramble_fract),
+#                                paste0("Solved_height_networks_alpha_", ec*100),
+#                                paste0("IEEE_118_alpha_", v, ".rds")),
+#          calc_on_this_machine = rep_along(file_path, 1:number_of_cpus)) %>%
+#   filter(calc_on_this_machine == cpu_id,
+#          ec <= 20)
+# 
+# 1:nrow(target_orders2) %>%
+#   walk(~{
+# 
+#     target <- target_orders2 %>%
+#       slice(.x)
+# 
+#     #does the file exist?
+#     if(file.exists(target$file_path)){
+#       print("file exists continueing to next file")
+#     }else {
+# 
+#       #if the file doesn't exist ensure that the folder is created and then calculate
+#       if(!dir.exists(dirname(target$file_path))){
+#         dir.create(dirname(target$file_path), recursive = TRUE)
+#       }
+# 
+#       print(paste0("fraction ", target$scramble_fract ," ec value ", target$ec, ". v ",target$v))
+#       #create network
+#       Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = target$ec)
+# 
+#       #create dataframe of new edge limits
+#       temp <-Create_scrambled_edges(Scrambled_edge_cap, target$seed, fract = target$scramble_fract)
+# 
+#       print(mean(temp$alpha))
+# 
+#       final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
+#                                                  set.edge.attribute(., "Link.Limit", value = temp$Link.Limit),
+#                                                common_time, common_Iter, common_tol, common_mass)
+# 
+#       write_rds(final_z, target$file_path)
+# 
+#     } #proceed to next iteration
+# 
+#   })
+
+```
+
+
+
+#Permuted IEEE118
+
+This chunk creates 30 permutates of IEEE where the generation nodes have been permuted and the demand nodes have been permuted.
+
+We then repeat the previous set of scrambles for each permutation
+
+##Create networks
+```{r}
+#The path the target orders will be stored at
+Permuted_IEEE_118_path <- file.path(Project_folder, "target_orders", "Permuted_IEEE_118")
+
+#create the folder if necessary
+if(!dir.exists(Permuted_IEEE_118_path)){
+  dir.create(Permuted_IEEE_118_path, recursive = TRUE)
+}
+
+
+#Create a list of IEEE-118 networks where the demand and gen node values are internally permuted
+set.seed(1235)
+random_seeds <- sample(1:10000, 30)
+
+Permuted_IEEE_118_list <- random_seeds %>% map(~{
+  g <- Permute_IEEE(IEEE_118, .x)
+  
+  g8 <-  BalencedGenDem(g, 
+                        Demand = "Load_MW",
+                        Generation = "Generation_MW",
+                        OutputVar = "Net_Generation")
+  
+  SlackRef <- SlackRefFunc(g, name = "name", Generation = "Generation_MW")
+  
+  g <- PowerFlow(g, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
+})
+```
+
+
+##target orders
+
+Generate the target orders in parallel... becuase ain't nobidy got time for that
+```{r}
+
+registerDoParallel(cores=detectCores()) #RUNS ON ALL CORES!
+foreach(n = 1:length(Permuted_IEEE_118_list),
+        .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
+  
+  file_name <- paste0("target_permutation_", n, ".rds")
+  #only creat the target orders if necessary
+  if(file.exists(file.path(Permuted_IEEE_118_path, file_name))){
+    
+    print("file exists continueing to next network permutation")
+  } else{
+    
+    target_orders_temp <- Create_target_orders_for_strain_test(Permuted_IEEE_118_list[[n]], fract_vect, Scramble_ec_values,
+                                                               total_sample_space = 10000, #Larger number mean bigger extremes but it takes much longer. I choose 10k as a painful slow medium
+                                                               required_samples_out = 10,
+                                                               seed = 123 )
+    
+    saveRDS(target_orders_temp, file.path(Permuted_IEEE_118_path, file_name))
+  }
+  
+}
+  stopImplicitCluster()
+
+
+
+```
+
+##Attack PL
+These attacks provide the base line by only having proportionally loaded systems. I find the minimum and mamximum values by attacking when alpha/EC = 1 and alpha/EC = infinity
+
+```{r}
+
+```
+
+
+##Attack ec
+
+Here I attack the randomly permuted edges where the EC is fixed. The concept with the below chunk is that each of the machines used to get the attack results works on each permutation of IEEE-118. This means that each attack set is finished before teh next one is started. This allows me to check that everything is working the way it should.
+
+Outer loop: Permutation to be calculated
+Inner loop: the particular target order
+
+```{r}
 
 cpu_id <- 1
-number_of_cpus <- 4
+number_of_cpus <- 1
 
-target_orders2 <- target_orders %>%
-  mutate(file_path = file.path(Project_folder,
-                               paste0("constant_ec_from_alpha_fract_", scramble_fract),
-                               paste0("Solved_height_networks_alpha_", ec*100),
-                               paste0("IEEE_118_alpha_", v, ".rds")),
-         calc_on_this_machine = rep_along(file_path, 1:number_of_cpus)) %>%
-  filter(calc_on_this_machine == cpu_id,
-         ec <= 20)
+set.seed(21256)
+DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
 
-1:nrow(target_orders2) %>%
-  walk(~{
+1:30 %>%
+  walk(~{ #Outer loop choose the permutation
     
-    target <- target_orders2 %>%
-      slice(.x)
+    #Select the current graph permutation to work on
+    current_graph <- Permuted_IEEE_118_list[[.x]]
     
-    #does the file exist?
-    if(file.exists(target$file_path)){
-      print("file exists continueing to next file")
-    }else { 
-      
-      #if the file doesn't exist ensure that the folder is created and then calculate
-      if(!dir.exists(dirname(target$file_path))){
-        dir.create(dirname(target$file_path), recursive = TRUE)
-      }
-      
-      print(paste0("fraction ", target$scramble_fract ," ec value ", target$ec, ". v ",target$v))
-      #create network
-      Scrambled_edge_cap <-  Proportional_Load(IEEE_118, alpha = target$ec)
-      
-      #create dataframe of new edge limits
-      temp <-Create_scrambled_edges(Scrambled_edge_cap, target$seed, fract = target$scramble_fract)
-      
-      print(mean(temp$alpha))
-      
-      final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
-                                                 set.edge.attribute(., "Link.Limit", value = temp$Link.Limit), 
-                                               common_time, common_Iter, common_tol, common_mass)
-      
-      write_rds(final_z, target$file_path)
-      
-    } #proceed to next iteration
-    
+    #load the graph scramble seeds for this network permutation.
+    target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
+      mutate(folder_path = file.path(Project_folder,
+                                     "Permuted_IEEE_118_collapse_set",
+                                     paste0("Permutation_", .x),
+                                     paste0("fract_", fract, "_ec_", ec*100, "_v_", v)),
+             calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus),
+             ID  = 1:n()) %>%
+      filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
+
+    #Inner Loop: prepare network according to target-order and then attack. Loop is inside function
+    #Scrambled_Edge_SaveMultiAttacks(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges")
+    #exectutes the targets in parallel. does not do each target in parallel.
+    Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges", cores = detectCores())
   })
 
 ```
 
 
+```{r}
+
+Summary_folder <- file.path(Project_folder, "Summary_Permuted_IEEE_118_collapse_set",
+                                paste0("Permutation_",  1)) ###########change this! to make multiple
+    
+    #Create the summary folder for that fraction
+    if(!file.exists(Summary_folder)){
+      dir.create(Summary_folder, recursive = T)
+    }
+        #extract everything from each of the sub folders of each fraction
+ExtractAttackStats_parallel(RootFolder = "/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_1", 
+                            file.path(Summary_folder),
+                            Generation = "Net_Generation",
+                            EdgeName = "Link",
+                            cores = 7)
+
+
+        ExtractAttackStats(RootFolder = "/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_1", 
+                           file.path(Summary_folder),
+                           Generation = "Net_Generation",
+                           EdgeName = "Link")
+
+
+```
+
+
+```{r}
+    #Select the current graph permutation to work on
+    current_graph <- Permuted_IEEE_118_list[[.x]]
+    
+    #load the graph scramble seeds for this network permutation.
+    target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
+      mutate(folder_path = file.path(Project_folder,
+                                     "Permuted_IEEE_118_collapse_set",
+                                     paste0("Permutation_", .x),
+                                     paste0("fract_", fract, "_ec_", ec*100, "_v_", v)),
+             calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus)) %>%
+      filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
+
+    #Inner Loop: prepare network according to target-order and then attack. Loop is inside function
+    Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges", cores = 8)
+```
 
 #Dummy Chunk
 run all the chunks above

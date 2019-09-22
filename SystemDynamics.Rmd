@@ -36,7 +36,7 @@ library(PowerGridNetworking)
 
 basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
 datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
-LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Physics model for analysing flow graphs" 
+LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Spring Embeddings" 
 FiguresFolder <- file.path(LatexFolder, "Figures")
 TablesFolder <- file.path(LatexFolder, "Tables")
 MatricesFolder <- file.path(LatexFolder, "Matrices")
@@ -468,10 +468,8 @@ IEEE118_heights %>%
 ```{r}
 fract_vect <- c(1, 0.75, 0.5, 0.25)
 
-readRDS(file.path(Project_folder, "target_orders", file_name))
-
 #Load the target orders for the different fraction scrambles
-target_orders<- list.files(file.path(IEEE_Project_folder, "target_orders"), full.names = TRUE) %>%
+target_orders<- list.files(file.path(IEEE_Project_folder, "target_orders_orig"), full.names = TRUE) %>%
   map_df(~read_rds(.x))
 
 #target_orders  <- readRDS(file.path(IEEE_Project_folder, "target_orders.rds"))
@@ -812,9 +810,9 @@ PropLoad_line  %>%
   filter(bounded) %>%
   ggplot(aes(x = 1/value, y = Edge_perc)) + 
   geom_point(data = scrambled_ec_points %>% filter(bounded),
-             aes(colour = ec, shape = factor(fract))) +
+             aes(colour = ec)) +
     geom_path() +
-#  geom_smooth(data = scrambled_ec_points %>% filter(bounded))+
+  geom_smooth(data = scrambled_ec_points %>% filter(bounded), se = FALSE, colour = "black", linetype = 2) +
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
   labs(title = "Analysing the spread of outcomes for mean loading and relative strain", 
        y = "Fraction of Edges Attacked", x = "metric value",
@@ -825,6 +823,7 @@ PropLoad_line %>%
   filter(!bounded) %>%
   ggplot(aes(y = 1/value, x = NodesAttacked)) + 
   geom_path() +
+    geom_smooth(data = scrambled_ec_points %>% filter(!bounded), se = FALSE, colour = "black", linetype = 2) +
   geom_point(data = scrambled_ec_points %>% filter(!bounded),
              aes(colour = ec)) +
   facet_wrap(~type, labeller = label_parsed) + #parsing shows the plotmath
