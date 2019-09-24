@@ -7,8 +7,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-instance -password i-0aff096095fb8174f
-
 foremost -i /dev/sda3 -t R -o /root/restored/
 
 This script is for performing the spring analysis on IEEE_118. The output of this script is used in the Spring Embeddings project. It was kept as a separate script as the outputs my be used more generally in the PhD.
@@ -28,9 +26,9 @@ This will chunk need to be copy and pasted into the console or the whole RMD fil
 # 
 # 
 # #Once everything is excluded get the key dropbox folders for these simulations
-includeSyncDropbox("IEEE_Networks")
-includeSyncDropbox("Flow_Spring_System")
-includeSyncDropbox("Useful_PhD__R_Functions")
+# includeSyncDropbox("IEEE_Networks")
+# includeSyncDropbox("Flow_Spring_System")
+# includeSyncDropbox("Useful_PhD__R_Functions")
 ```
 
 #Set up
@@ -82,7 +80,7 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 ##Edges
 ```{r}
 
-
+# 
 # setwd(file.path(Project_folder, "IEEE118_edges"))
 # 
 # #rep <-5 #I don't think this does anything. If nothing breaks then delete.
@@ -248,52 +246,52 @@ It may take a couple of days to calculate. Best done on the cloud if possible
 ##Common values
 The below chunk was put in due to simulations being run with different parameters resulting in out of synch heights. The common values will be used for both the proportionally loaded edges and the ec scrambled edges
 ```{r}
-# common_time <- 0.01
-# common_Iter <- 20000
-# common_tol <- 1e-10
-# common_mass <- 1
-# 
-# 
-# Standardisesd_solution_finder <- function(g, common_time, common_Iter, common_tol, common_mass){
-#   #This function is just a wrapper to tidy up the code chucnks in finding various strain heights for IEEE_118
-#   
-#    current_graph  <- g %>%
-#     set.edge.attribute(. , "distance", value = 1) %>%
-#     Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
-#     set.edge.attribute(., "Area", value = 1) %>%
-#   Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
-#   
-# 
-#   List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
-# 
-#     giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
-#     
-#   #use the largest block to set the simulation parameters k and m.
-#   #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
-#       OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]], 
-#                                                    force ="Net_Generation",
-#                                                    flow = "PowerFlow",
-#                                                    distance = "distance",
-#                                                    capacity = "Link.Limit",
-#                                                    tstep = common_time, 
-#                                                    tol = common_tol, 
-#                                                    maxIter = common_Iter, 
-#                                                    mass = common_mass)
-#       
-#       final_z <- Create_stabilised_blocks(g = current_graph, 
-#                                           OriginBlock = OriginBlock_complete,
-#                                           OriginBlock_number = giant_componant, 
-#                                           force ="Net_Generation",
-#                                           flow = "PowerFlow",
-#                                           distance = "distance",
-#                                           capacity = "Link.Limit",
-#                                           tstep = common_time, 
-#                                           tol = common_tol, 
-#                                           maxIter = common_Iter, 
-#                                           mass = common_mass)
-#   
-#   
-# }
+common_time <- 0.01
+common_Iter <- 20000
+common_tol <- 1e-10
+common_mass <- 1
+
+
+Standardisesd_solution_finder <- function(g, common_time, common_Iter, common_tol, common_mass){
+  #This function is just a wrapper to tidy up the code chucnks in finding various strain heights for IEEE_118
+
+   current_graph  <- g %>%
+    set.edge.attribute(. , "distance", value = 1) %>%
+    Calc_Spring_Youngs_Modulus(., "PowerFlow", "Link.Limit", minimum_value = 100, stretch_range = 1000) %>%
+    set.edge.attribute(., "Area", value = 1) %>%
+  Normalize_load(., EdgeName = Link, VertexName = name, Net_Generation = Net_Generation, capacity = Link.Limit)
+
+
+  List_of_BiConComps <- Create_balanced_blocks(current_graph, force = "Net_Generation")
+
+    giant_componant <-List_of_BiConComps %>% map_dbl(~vcount(.x)) %>% which.max()
+
+  #use the largest block to set the simulation parameters k and m.
+  #k needs to be sufficiently stretch to allow enough topology variation. otherwise all that happens is a surface angled in the direct of net power flow. Which is interesting but not that interesting
+      OriginBlock_complete <- Find_network_balance(g = List_of_BiConComps[[giant_componant]],
+                                                   force ="Net_Generation",
+                                                   flow = "PowerFlow",
+                                                   distance = "distance",
+                                                   capacity = "Link.Limit",
+                                                   tstep = common_time,
+                                                   tol = common_tol,
+                                                   maxIter = common_Iter,
+                                                   mass = common_mass)
+
+      final_z <- Create_stabilised_blocks(g = current_graph,
+                                          OriginBlock = OriginBlock_complete,
+                                          OriginBlock_number = giant_componant,
+                                          force ="Net_Generation",
+                                          flow = "PowerFlow",
+                                          distance = "distance",
+                                          capacity = "Link.Limit",
+                                          tstep = common_time,
+                                          tol = common_tol,
+                                          maxIter = common_Iter,
+                                          mass = common_mass)
+
+
+}
 
 ```
 
@@ -445,37 +443,30 @@ Permuted_IEEE_118_list <- random_seeds %>% map(~{
 
 Generate the target orders in parallel... becuase ain't nobidy got time for that
 ```{r}
+# 
+# registerDoParallel(cores=detectCores()) #RUNS ON ALL CORES!
+# foreach(n = 1:length(Permuted_IEEE_118_list),
+#         .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
+#   
+#   file_name <- paste0("target_permutation_", n, ".rds")
+#   #only creat the target orders if necessary
+#   if(file.exists(file.path(Permuted_IEEE_118_path, file_name))){
+#     
+#     print("file exists continueing to next network permutation")
+#   } else{
+#     
+#     target_orders_temp <- Create_target_orders_for_strain_test(Permuted_IEEE_118_list[[n]], fract_vect, Scramble_ec_values,
+#                                                                total_sample_space = 10000, #Larger number mean bigger extremes but it takes much longer. I choose 10k as a painful slow medium
+#                                                                required_samples_out = 10,
+#                                                                seed = 123 )
+#     
+#     saveRDS(target_orders_temp, file.path(Permuted_IEEE_118_path, file_name))
+#   }
+#   
+# }
+#   stopImplicitCluster()
+# 
 
-registerDoParallel(cores=detectCores()) #RUNS ON ALL CORES!
-foreach(n = 1:length(Permuted_IEEE_118_list),
-        .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
-  
-  file_name <- paste0("target_permutation_", n, ".rds")
-  #only creat the target orders if necessary
-  if(file.exists(file.path(Permuted_IEEE_118_path, file_name))){
-    
-    print("file exists continueing to next network permutation")
-  } else{
-    
-    target_orders_temp <- Create_target_orders_for_strain_test(Permuted_IEEE_118_list[[n]], fract_vect, Scramble_ec_values,
-                                                               total_sample_space = 10000, #Larger number mean bigger extremes but it takes much longer. I choose 10k as a painful slow medium
-                                                               required_samples_out = 10,
-                                                               seed = 123 )
-    
-    saveRDS(target_orders_temp, file.path(Permuted_IEEE_118_path, file_name))
-  }
-  
-}
-  stopImplicitCluster()
-
-
-
-```
-
-##Attack PL
-These attacks provide the base line by only having proportionally loaded systems. I find the minimum and mamximum values by attacking when alpha/EC = 1 and alpha/EC = infinity
-
-```{r}
 
 ```
 
@@ -497,10 +488,10 @@ DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Na
 
 1:30 %>%
   walk(~{ #Outer loop choose the permutation
-    
+
     #Select the current graph permutation to work on
     current_graph <- Permuted_IEEE_118_list[[.x]]
-    
+
     #load the graph scramble seeds for this network permutation.
     target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
       mutate(folder_path = file.path(Project_folder,
@@ -517,6 +508,170 @@ DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Na
     Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges", cores = detectCores())
   })
 
+
+
+target_orders_attack <- 1:30 %>%
+  map_df(~{ #Outer loop choose the permutation
+
+    #Select the current graph permutation to work on
+    current_graph <- Permuted_IEEE_118_list[[.x]]
+
+    #load the graph scramble seeds for this network permutation.
+    target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
+      mutate(folder_path = file.path(Project_folder,
+                                     "Permuted_IEEE_118_collapse_set",
+                                     paste0("Permutation_", .x),
+                                     paste0("fract_", fract, "_ec_", ec*100, "_v_", v)),
+             calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus),
+             ID  = 1:n()) %>%
+      filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
+ 
+  })
+
+   Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders_attack, DeleteOrders_Edges , Target = "Edges", cores = detectCores())
+
+```
+
+##Strain Calc
+
+```{r}
+library(future.apply)
+cpu_id <- 1
+number_of_cpus <- 1
+
+if(!file.exists(file.path(Project_folder,"Permuted_IEEE_118_strain_set"))){
+  dir.create(file.path(Project_folder,"Permuted_IEEE_118_strain_set"))
+}
+
+
+1:length(Permuted_IEEE_118_list) %>% walk(~{
+  
+  current_graph <- Permuted_IEEE_118_list[[.x]]
+  
+  file_name <- paste0("target_permutation_", .x, ".rds")
+  #only creat the target orders if necessary
+  
+  
+  target_orders2 <-read_rds(file.path(Permuted_IEEE_118_path, file_name)) %>%
+    mutate(file_path = file.path(Project_folder,
+                                 "Permuted_IEEE_118_strain_set",
+                                 paste0("Permutation_", .x),
+                                 paste0("fract_", fract, "_ec_", ec*100, "_v_", v, ".rds")),
+           calc_on_this_machine = rep_along(file_path, 1:number_of_cpus),
+           ID  = 1:n()) %>%
+    filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
+  
+  
+ plan(multiprocess, workers = 4)
+  #plan(sequential)
+  future_lapply(X = 1:nrow(target_orders2), 
+                FUN = function(X){ #use future lapply to parallelize the process
+    
+    target <- target_orders2 %>%
+      slice(X)
+    
+    #does the file exist?
+    if(file.exists(target$file_path)){
+      print("file exists continueing to next file")
+    }else {
+      
+      #if the file doesn't exist ensure that the folder is created and then calculate
+      if(!dir.exists(dirname(target$file_path))){
+        dir.create(dirname(target$file_path), recursive = TRUE)
+      }
+      
+      print(paste0("fraction ", target$fract ," ec value ", target$ec, ". v ",target$v))
+      #create network
+      Scrambled_edge_cap <-  Proportional_Load(Permuted_IEEE_118_list[[target$permute]], alpha = target$ec)
+      
+      #create dataframe of new edge limits
+      temp <- Create_scrambled_edges(g = Scrambled_edge_cap, target$seed, fract = target$fract)
+      
+      print(mean(temp$alpha))
+      
+      final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
+                                                 set.edge.attribute(., "Link.Limit", value = temp$Link.Limit),
+                                               common_time, common_Iter/1000, common_tol, common_mass)
+      
+      
+      write_rds(final_z, target$file_path)
+      
+      
+    }
+  }
+  
+  )
+})
+```
+
+```{r}
+
+target_orders2 <- 1:length(Permuted_IEEE_118_list) %>% map_df(~{
+  
+  current_graph <- Permuted_IEEE_118_list[[.x]]
+  
+  file_name <- paste0("target_permutation_", .x, ".rds")
+  #only creat the target orders if necessary
+  
+  
+  target_orders2 <-read_rds(file.path(Permuted_IEEE_118_path, file_name)) %>%
+    mutate(file_path = file.path(Project_folder,
+                                 "Permuted_IEEE_118_strain_set",
+                                 paste0("Permutation_", .x),
+                                 paste0("fract_", fract, "_ec_", ec*100, "_v_", v, ".rds")),
+           permute = .x,
+           calc_on_this_machine = rep_along(file_path, 1:number_of_cpus),
+           ID  = 1:n()) %>%
+    filter(calc_on_this_machine == cpu_id)
+}
+)
+
+
+#foreach version
+
+registerDoParallel(cores=4)
+foreach(X = 1:nrow(target_orders2), 
+        .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar% { #use future lapply to parallelize the process
+    
+    target <- target_orders2 %>%
+      slice(X)
+    
+    #does the file exist?
+    if(file.exists(target$file_path)){
+      print("file exists continueing to next file")
+    }else {
+      
+      #if the file doesn't exist ensure that the folder is created and then calculate
+      if(!dir.exists(dirname(target$file_path))){
+        dir.create(dirname(target$file_path), recursive = TRUE)
+      }
+      
+      print(paste0("fraction ", target$fract ," ec value ", target$ec, ". v ",target$v))
+      #create network
+      Scrambled_edge_cap <-  Proportional_Load(Permuted_IEEE_118_list[[target$permute]], alpha = target$ec)
+      
+      #create dataframe of new edge limits
+      temp <- Create_scrambled_edges(g = Scrambled_edge_cap, target$seed, fract = target$fract)
+      
+      print(mean(temp$alpha))
+      
+      final_z <- Standardisesd_solution_finder(Scrambled_edge_cap %>%
+                                                 set.edge.attribute(., "Link.Limit", value = temp$Link.Limit),
+                                               common_time, common_Iter/1000, common_tol, common_mass)
+      
+      
+      write_rds(final_z, target$file_path)
+      
+      
+    }
+  }
+stopImplicitCluster()
+  
+```
+
+
+```{r}
+
 ```
 
 
@@ -530,7 +685,7 @@ Summary_folder <- file.path(Project_folder, "Summary_Permuted_IEEE_118_collapse_
       dir.create(Summary_folder, recursive = T)
     }
         #extract everything from each of the sub folders of each fraction
-ExtractAttackStats_parallel(RootFolder = "/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_1", 
+ExtractAttackStats_parallel(RootFolder = "/home/jonno/Dropbox/IEEE_Networks/IEEE118_edges", 
                             file.path(Summary_folder),
                             Generation = "Net_Generation",
                             EdgeName = "Link",
