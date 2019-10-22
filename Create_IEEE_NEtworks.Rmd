@@ -129,18 +129,72 @@ c(14, 30, 57, 118, 300) %>% walk (~{
 ```
 
 
+
+#Matpower version
+
+explanation of the matpower case format can be found here
+https://matpower.org/docs/ref/matpower5.0/caseformat.html
+
+```{r}
+
+the_ieee_test_cases <- list.files("/home/jonno/pglib-opf-master", pattern = "ieee.m", full.names = TRUE)
+
+the_ieee_test_cases
+
+
+
+c(14, 30, 57, 118, 300) %>% walk(~{
+  
+  
+  mat_dat <- matpower_loader(the_ieee_test_cases[which.max(grepl(.x, the_ieee_test_cases))], output_graph = F)
+  
+  bus_data <- mat_dat$bus %>%
+    select(bus = bus_i, Demand = Pd, Generation = Pmax) %>%
+    mutate(Net_Generation = Generation - Demand,
+           Name = bus)
+  
+  branch_data <- mat_dat$branch %>% #mutate(b1 = 1/x)
+    select(fbus, tbus, Y = x ) %>%
+    mutate(Y = 1/Y, #simplification for DC power flow assumptions
+           Link = paste(fbus, tbus, sep = "-")) %>% #name the links
+    group_by(fbus, tbus, Link) %>%
+    #Remove parallel lines summing the susceptances
+    summarise(
+      Y = sum(Y)) %>% ungroup
+  
+  
+  g<- graph_from_data_frame(branch_data, directed = F, vertices = bus_data)
+  
+  g <-  BalencedGenDem(g, 
+                       Demand = "Demand",
+                       Generation = "Generation",
+                       OutputVar = "Net_Generation")
+  
+  SlackRef <- SlackRefFunc(g, name = "name", Generation = "Generation")
+  
+  g <- PowerFlow(g, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
+  
+  saveRDS(g, file = file.path(power_grid_graphs_path , paste0("IEEE_", .x, "_igraph.rds")))
+  
+})
+
+```
+
+
+
 #Plot 118
 
 ```{r}
 
- {IEEE_number <- 14
+ {
+   IEEE_number <- 300
 
-g <- read_rds(file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_igraph.rds")))
+g <- read_rds(file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_igraph.rds"))) %>%
+  PowerFlow(., "1", Net_generation = "Net_Generation")
 
 test2 <- as_data_frame(g) %>%
   mutate(absPF = abs(PowerFlow),
          rank = rank(absPF))
-
 
 NodePosition <- test2 %>%
   select(from, to, Link, PowerFlow) %>%
@@ -171,20 +225,4 @@ NodePosition <- test2 %>%
 
 ```
 
-
-
-#Matpower version
-
-explanation of the matpower case format can be found here
-https://matpower.org/docs/ref/matpower5.0/caseformat.html
-
-```{r}
-
-the_ieee_test_cases<- list.files("/home/jonno/pglib-opf-master", pattern = "ieee.m", full.names = TRUE)
-
-the_ieee_test_cases
-
-matpower_loader(the_ieee_test_cases[1], output_graph = F)
-
-```
 

@@ -17,6 +17,10 @@ The script requires that the IEEE_118 network has been generated already
 
 
 This will chunk need to be copy and pasted into the console or the whole RMD file pasted into a new RMD file in AWS.
+
+~For myriad
+you can use qdel $job_id to delete specific jobs/arrays, or qdel '*' to delete all your jobs
+
 ```{r}
 # library("RStudioAMI")
 # 
@@ -442,7 +446,7 @@ random_seeds <- sample(1:10000, 30)
 Permuted_IEEE_118_list <- random_seeds %>% map(~{
   g <- Permute_IEEE(IEEE_118, .x)
   
-  g8 <-  BalencedGenDem(g, 
+  g <-  BalencedGenDem(g, 
                         Demand = "Load_MW",
                         Generation = "Generation_MW",
                         OutputVar = "Net_Generation")
@@ -1136,8 +1140,26 @@ completion_time <- all_dirs %>% map_df(~{
     hours = difftime(ctime, lag, units = "hours" ),
     alpha = alpha) %>% select(alpha, mins, size, hours)
 
-})
+}) %>%
+  filter(complete.cases(.))
 
+
+worst_case <- completion_time %>%
+  group_by(alpha) %>%
+  summarise(max = max(as.numeric(mins)),
+            min = min(as.numeric(mins)))
+
+sum(worst_case$max)
+sum(worst_case$min)
+
+#1 cpu 1 hour clock time per set of twelve
+
+single_collapse_set <- 48000/12
+single_collapse_set
+total_compute_time  <-30*48000/12
+total_compute_time
+
+total_compute_time/36
 
 completion_time %>% 
   mutate(alpha = factor(alpha)) %>%
@@ -1153,6 +1175,11 @@ completion_time %>%
        y = "minutes")
 
 
+
+mean_time_per_alpha <- completion_time %>%
+  group_by(alpha) %>%
+  summarise(mean = mean(as.numeric(mins)),
+            median = median(as.numeric(mins)))
 
 completion_time %>%
   summarise(hours = sum(hours, na.rm = T)) %>%
