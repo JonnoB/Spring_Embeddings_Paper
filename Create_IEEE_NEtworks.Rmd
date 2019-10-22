@@ -18,6 +18,14 @@ IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
 
 Data in common format from
 http://labs.ece.uw.edu/pstca/
+https://egriddata.org/dataset/ieee-30-bus-power-flow-test-case
+
+
+A useful paper for cyber physical references and stufff to do with power grids. Electrical Engineer friendly
+-Cyber-Physical Models for Power Grid Security Analysis: 8-Substation Case 
+
+This paper says that the IEEE CDF is no longer in common use. Lends support to changing the format to one that is easier to understand.
+-Integration and Adoption of Open Data Standards for Online and Offline Power System Analysis
 
 Points of interest in The IEEE power flow test cases.
 
@@ -112,6 +120,9 @@ c(14, 30, 57, 118, 300) %>% walk (~{
   
   saveRDS(IEEE_netowork, file = file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_igraph.rds")))
   
+  write_csv(nodes, file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_nodes.csv")))
+  write_csv(edges, file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_edges.csv")))
+  
 })
 
 
@@ -121,7 +132,12 @@ c(14, 30, 57, 118, 300) %>% walk (~{
 #Plot 118
 
 ```{r}
-test2 <- as_data_frame(IEEE_118) %>%
+
+ {IEEE_number <- 14
+
+g <- read_rds(file.path(IEEE_networks, paste0("IEEE_", IEEE_number, "_igraph.rds")))
+
+test2 <- as_data_frame(g) %>%
   mutate(absPF = abs(PowerFlow),
          rank = rank(absPF))
 
@@ -131,14 +147,14 @@ NodePosition <- test2 %>%
   gather(key = type, value = Node, -Link, -PowerFlow)
 
  set.seed(158)
-  BaseCoords <- layout_with_fr(IEEE_118) %>% 
+  BaseCoords <- layout_with_fr(g) %>% 
     as_tibble %>% 
-    mutate(Node = names(V(IEEE_118))) %>%
+    mutate(Node = names(V(g))) %>%
     rename(Longitude = V1,
            Latitude = V2) %>%
     left_join(NodePosition, .) %>%
-    left_join(nodes2 %>% 
-                select(Node = Bus_Number, Name, Net_Generation) %>% 
+    left_join(as_data_frame(g, what = "vertices") %>% 
+                select(Node = name, Name, Net_Generation) %>% 
                 mutate(Node = as.character(Node),
                        Node_type = case_when(Net_Generation ==0 ~"Transmission",
                                         Net_Generation > 0 ~"Generation",
@@ -151,6 +167,24 @@ NodePosition <- test2 %>%
     BaseCoords %>%
   ggplot(aes(x = Longitude, y = Latitude, group = Link, colour = abs(PowerFlow))) + geom_line() +  
     geom_point(aes(shape = Node_type), size = 2) +
-    scale_color_viridis_c()
+    scale_color_viridis_c()}
 
 ```
+
+
+
+#Matpower version
+
+explanation of the matpower case format can be found here
+https://matpower.org/docs/ref/matpower5.0/caseformat.html
+
+```{r}
+
+the_ieee_test_cases<- list.files("/home/jonno/pglib-opf-master", pattern = "ieee.m", full.names = TRUE)
+
+the_ieee_test_cases
+
+matpower_loader(the_ieee_test_cases[1], output_graph = F)
+
+```
+

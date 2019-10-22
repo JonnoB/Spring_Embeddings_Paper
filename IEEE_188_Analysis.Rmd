@@ -46,7 +46,7 @@ sapply(packages, library, character.only = TRUE)
 
 
 
-install_github("JonnoB/PowerGridNetworking")
+#install_github("JonnoB/PowerGridNetworking")
 library(PowerGridNetworking)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
@@ -62,7 +62,18 @@ if(dir.exists("/home/jonno")){
   basewd <- "~/Dropbox"
 }
 
-IEEE_networks <- file.path(Project_folder, "IEEE_network_files")
+IEEE_networks <- file.path(Project_folder, "IEEE_network_files") #The folder all the files are stored in for the project
+power_grid_graphs_path <- file.path(Project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
+IEEE_permuted_path <- file.path(power_grid_graphs_path, "IEEE_permuted") #The permuted base IEEE-118 igraphs are stored here
+collapse_sets <- file.path(Project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
+collapse_set_summaries <- file.path(Project_folder, "collapse_set_summaries")
+
+#The path where the permuted and attacked graph lists of the IEEE graphs are stored
+summary_path <- 
+
+c(IEEE_networks, power_grid_graphs_path, IEEE_permuted_path, collapse_sets, collapse_set_summaries ) %>% walk(~{
+  if(!file.exists(.x)) dir.create(.x, recursive = T)
+})
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
@@ -130,7 +141,7 @@ Create the target orders for the scrambled edge values
 ##ec values to attack
 ```{r}
 #The alpha/ec values to scramble
-Scramble_ec_values <- c(1.005, 1.01, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20) 
+Scramble_ec_values <- c(1.005, 1.025, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20) 
 
 #The fraction of edges that will be scrmabled for each scrambled alpha
 fract_vect <- c(1, 0.75, 0.5, 0.25) #0.75 can also be added but may overlap with the others too much
@@ -440,6 +451,16 @@ Permuted_IEEE_118_list <- random_seeds %>% map(~{
   
   g <- PowerFlow(g, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
 })
+
+#Save the networks so that they can be used by the HPC 
+
+1:length(Permuted_IEEE_118_list) %>%
+  walk(~{
+    saveRDS(Permuted_IEEE_118_list[[.x]], 
+            file.path(IEEE_permuted_path, 
+                      paste0("Permutation_", .x, ".rds")))
+  })
+
 ```
 
 
@@ -448,7 +469,7 @@ Permuted_IEEE_118_list <- random_seeds %>% map(~{
 Generate the target orders in parallel... becuase ain't nobody got time for that
 ```{r}
 
-registerDoParallel(cores=4) #RUNS ON ALL CORES!
+registerDoParallel(cores=6) #RUNS ON ALL CORES!
 foreach(n = 1:length(Permuted_IEEE_118_list),
         .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
 
@@ -462,7 +483,7 @@ foreach(n = 1:length(Permuted_IEEE_118_list),
     target_orders_temp <- Create_target_orders_for_strain_test(Permuted_IEEE_118_list[[n]], fract_vect, Scramble_ec_values,
                                                                total_sample_space = 10000, #Larger number mean bigger extremes but it takes much longer. I choose 10k as a painful slow medium
                                                                required_samples_out = 10,
-                                                               seed = 123 )
+                                                               seed = n ) #previously a constant 123
 
     saveRDS(target_orders_temp, file.path(Permuted_IEEE_118_path, file_name))
   }
@@ -471,6 +492,10 @@ foreach(n = 1:length(Permuted_IEEE_118_list),
   stopImplicitCluster()
 
 
+  
+test <-   target_orders_temp %>%
+    group_by(seed) %>%
+    summarise(counts = n())
 
 ```
 
@@ -484,33 +509,33 @@ Inner loop: the particular target order
 
 ```{r}
 
-# cpu_id <- 1
-# number_of_cpus <- 1
-# 
-# set.seed(21256)
-# DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
-# 
-# 1:30 %>%
-#   walk(~{ #Outer loop choose the permutation
-# 
-#     #Select the current graph permutation to work on
-#     current_graph <- Permuted_IEEE_118_list[[.x]]
-#     
-#     #load the graph scramble seeds for this network permutation.
-#     target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
-#       mutate(folder_path = file.path(Project_folder,
-#                                      "Permuted_IEEE_118_collapse_set",
-#                                      paste0("Permutation_", .x),
-#                                      paste0("fract_", fract, "_ec_", ec*100, "_v_", v)))     %>%
-#       arrange(-ec) %>%#order the clculations so that the slow ones are first. this makes the paralellisation more efficient
-#       #by preventing cpu's finishing whilst slow calculations are in progress. This way the the cpu's will finish each permutation on the smallest fastest ec values, minimising non-active cpu time
-#       mutate(calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus),
-#              ID  = 1:n()) %>%
-#       
-#       filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
-# 
-#     Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges", cores = 5)
-#   })
+cpu_id <- 1
+number_of_cpus <- 1
+
+set.seed(21256)
+DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Name = "Link")
+
+1:30 %>%
+  walk(~{ #Outer loop choose the permutation
+
+    #Select the current graph permutation to work on
+    current_graph <- Permuted_IEEE_118_list[[.x]]
+
+    #load the graph scramble seeds for this network permutation.
+    target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
+      mutate(folder_path = file.path(Project_folder,
+                                     "Permuted_IEEE_118_collapse_set",
+                                     paste0("Permutation_", .x),
+                                     paste0("fract_", fract, "_ec_", ec*100, "_v_", v)))     %>%
+      arrange(-ec) %>%#order the clculations so that the slow ones are first. this makes the paralellisation more efficient
+      #by preventing cpu's finishing whilst slow calculations are in progress. This way the the cpu's will finish each permutation on the smallest fastest ec values, minimising non-active cpu time
+      mutate(calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus),
+             ID  = 1:n()) %>%
+
+      filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
+
+    Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders, DeleteOrders_Edges , Target = "Edges", cores = 5)
+  })
 
 #You can't make a single dataframe to do the multi attack until you can work out how to load different networks according to which permutation is being used
 
@@ -519,10 +544,10 @@ Inner loop: the particular target order
 #It Also makes the code easier to read
 # target_orders_attack <- 1:30 %>%
 #   map_df(~{ #Outer loop choose the permutation
-# 
+#
 #     #Select the current graph permutation to work on
 #     current_graph <- Permuted_IEEE_118_list[[.x]]
-# 
+#
 #     #load the graph scramble seeds for this network permutation.
 #     target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
 #       mutate(folder_path = file.path(Project_folder,
@@ -532,9 +557,9 @@ Inner loop: the particular target order
 #              calc_on_this_machine = rep_along(folder_path, 1:number_of_cpus),
 #              ID  = 1:n()) %>%
 #       filter(calc_on_this_machine == cpu_id) #keep only the elements to be calculated on this machine
-#  
+#
 #   })
-# 
+#
 #    Scrambled_Edge_SaveMultiAttacks_parallel(current_graph, target_orders_attack, DeleteOrders_Edges , Target = "Edges", cores = detectCores())
 
 ```
@@ -1086,4 +1111,104 @@ test2 <- theta_crit_thresh %>%
 
 ```
 
+
+#Get time to create files
+```{r}
+
+target_path <- "/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_2"
+
+all_dirs <-list.dirs(target_path)[-1] #remove base dir
+
+
+completion_time <- all_dirs %>% map_df(~{
+  
+  all_files <- .x %>%
+  list.files(., full.names = T) 
+  
+  alpha <-all_files %>% dirname() %>% basename() %>% str_split(., "_", simplify = T) %>% as_tibble() %>%
+  pull(V4) %>% as.integer()/100
+  
+  all_files %>% file.info(.) %>% as_tibble() %>%
+    mutate(file_path = all_files) %>%
+  arrange(ctime) %>%
+  mutate(lag = lag(ctime),
+    mins = difftime(ctime, lag, units = "mins" ),
+    hours = difftime(ctime, lag, units = "hours" ),
+    alpha = alpha) %>% select(alpha, mins, size, hours)
+
+})
+
+
+completion_time %>% 
+  mutate(alpha = factor(alpha)) %>%
+  ggplot(aes(x = alpha, y = mins, fill = alpha)) + geom_boxplot() +
+  labs(title = "time to completion by alpha, there are 400 repetitions of each alpha",
+       y = "minutes")
+
+
+completion_time %>% 
+  mutate(alpha = factor(alpha)) %>%
+  ggplot(aes(x = alpha, y = hours*100, fill = alpha)) + geom_boxplot() +
+  labs(title = "time to completion by alpha there are 4 repititions of each alpha",
+       y = "minutes")
+
+
+
+completion_time %>%
+  summarise(hours = sum(hours, na.rm = T)) %>%
+  mutate(hours_set = hours*100*4/1000, 
+         hours_all_sets = hours_set*30,
+         hours_all_sets_all_networks = hours_all_sets*5)
+
+```
+
+
+#Support code for Myriad script
+```{r}
+
+target_order_permutations <- list.files("/home/jonno/Dropbox/IEEE_Networks/target_orders/Permuted_IEEE_118", full.names = T)
+
+#The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
+parameter_df <-  target_order_permutations %>% map_df(~{
+  target_order <-.x
+  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
+  temp <- readRDS(target_order) %>% as.data.frame() %>%
+    expand_grid(df = ., Simulation_ID = 1:100) 
+  
+  temp2 <- temp$df %>% mutate(Simulation_ID = temp$Simulation_ID, 
+                              permutation = gsub("[^0-9]","",basename(target_order)) %>% as.integer() )
+  return(temp2)
+})
+
+
+parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
+                                        scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
+  left_join(tibble(graph_path = list.files(IEEE_permuted_path, full.names = T), 
+                   permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
+  ) %>%
+  mutate(collapse_path = file.path(collapse_sets, 
+                                   paste0("Permutation_", permutation), 
+                                   paste0("fract_", fract, "_ec_", ec, "_v_", v,".rds")),
+         collapse_summary_path = file.path(collapse_set_summaries, 
+                                   paste0("Permutation_", permutation), 
+                                   paste0("fract_", fract, "_ec_", ec, "_v_", v), 
+                                   paste0("Simulation_ID_", Simulation_ID )))
+
+saveRDS(parameter_df, file.path(Project_folder, "parameter_file.rds"))
+
+Iter <- parameter_df %>%
+  slice(1)
+
+scramble_network <- Iter$scramble_network #Needs to be added into the target orders file
+graph_path <- Iter$graph_path
+scramble_seed <- Iter$seed
+ec <- Iter$ec
+v <- Iter$v
+fract <- Iter$fract
+permutation <- Iter$permutation
+deletion_seed <- Iter$deletion_seed
+attack_id <- Iter$Simulation_ID
+Iter_collapse_path <- Iter$collapse_path
+Iter_collapse_summary_path <- Iter$collapse_summary_path
+```
 
