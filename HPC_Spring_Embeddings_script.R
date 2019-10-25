@@ -31,11 +31,11 @@ library(PowerGridNetworking)
 #creates the correct root depending on whether this is on the cloud or not
 if(dir.exists("/home/jonno")){
   #This folder is for use on my machine
-  Project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
+  project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
 }else{
   #This is for the folder that is on the cloud
-  Project_folder <- "~/Dropbox/IEEE_Networks"
+  project_folder <- "~/Dropbox/IEEE_Networks"
   basewd <- "~/Dropbox"
 }
 
@@ -48,7 +48,7 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
   walk(~source(.x))
 
 
-parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>% arrange(compute_group) #temporary to get timings
+parameter_df_temp <- readRDS(file.path(project_folder, "base_parameter_file.rds")) %>% arrange(compute_group) %>% filter(permutation == "IEEE_14_igraph")#temporary to get timings
 #filter(compute_group ==computation_number) #this variable is inserted into the file
 
 
@@ -85,25 +85,26 @@ parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>
     
     
     #Proportionally load the network
-    g <- Proportional_Load(g, alpha = ec)
+    g <- Proportional_Load(g, alpha = ec, PowerFlow = "power_flow",
+                           Link.Limit = "edge_limit")
     
     #For most of the simulations we will scramble the proportionally loaded networks,
     #However when we are calculating the limits of 1 and Inf as well as the proportional line for the test cases
     #scrambling is not required. As a result these lines of code make the overall script more flexible.
     if(scramble_network){
       #scramble the excess capaacity
-      edge_order_df <- Create_scrambled_edges(g, scramble_seed, fract = fract)
+      edge_order_df <- create_scrambled_edges(g, scramble_seed, fract = fract)
       
       g <- g %>%
-        set.edge.attribute(., "Link.Limit", value = edge_order_df$Link.Limit)
+        set.edge.attribute(., "edge_limit", value = edge_order_df$edge_limit)
       
     }
     
     #Set the seed for the random order and generate the edge deletion order
     set.seed(deletion_seed)
-    DeletionOrder <- RandomAttack(g, Target = "Edges", Number = ecount(g), Name = "Link")
+    DeletionOrder <- RandomAttack(g, Target = "Edges", Number = ecount(g), Name = "edge_name")
     #Construction the deletion order function.
-    FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder, "Edge", Name =  "Link"))
+    FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder, "Edge", Name =  "edge_name"))
     
     AttackSeries <- suppressMessages(AttackTheGrid(NetworkList = list(list(g)),
                                                    AttackStrategy = FixedNodes,
@@ -112,25 +113,26 @@ parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>
                                                    TotalAttackRounds=1000,
                                                    CascadeMode = TRUE,
                                                    CumulativeAttacks = NULL,
-                                                   Demand = "Demand",
-                                                   Generation = "Generation",
-                                                   EdgeName = "Link",
+                                                   Demand = "demand",
+                                                   Generation = "generation",
+                                                   EdgeName = "edge_name",
                                                    VertexName = "name",
-                                                   Net_generation = "Net_Generation"))
+                                                   Net_generation = "net_generation",
+                                                   edge_limit = "edge_limit"))
     
     
     #This is because doing all the extraction at the end would take a very long time, so I break it up over all the jobs.
     #This way I only need to combine the saved files but not operate on them.
     AttackSeriesSummary <- AttackSeries %>%
-      ExtractNetworkStats(Generation = "Generation", EdgeName = "Link", PowerFlow = "PowerFlow", Link.Limit = "Link.Limit") %>%
+      ExtractNetworkStats(Generation = "generation", EdgeName = "edge_name", PowerFlow = "power_flow", Link.Limit = "edge_limit") %>%
       #I add in the attack parameters for conveniance so I don't need to do it when I load the data.
       #This is just as joining a very large table can be slow
       mutate(simulation_id = simulation_id,
              ec = ec,
              v = v,
-             fract = frac,
+             fract = fract,
              permutation = permutation) 
-  )
+  
 
 #Both the attack series and the summary are saved to store as much information as possible in one go.
 

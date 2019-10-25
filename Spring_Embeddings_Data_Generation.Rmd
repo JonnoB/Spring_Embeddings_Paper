@@ -25,24 +25,24 @@ library(PowerGridNetworking)
 #creates the correct root depending on whether this is on the cloud or not
 if(dir.exists("/home/jonno")){
   #This folder is for use on my machine
-  Project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
+  project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
 }else{
   #This is for the folder that is on the cloud
-  Project_folder <- "~/Dropbox/IEEE_Networks"
+  project_folder <- "~/Dropbox/IEEE_Networks"
   basewd <- "~/Dropbox"
 }
 
-power_grid_graphs_path <- file.path(Project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
-collapse_sets <- file.path(Project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
-collapse_set_summaries <- file.path(Project_folder, "collapse_set_summaries")
-Permuted_IEEE_118_path <- file.path(power_grid_graphs_path, "Permuted_IEEE_118") #The permuted base IEEE-118 igraphs are stored here
-edge_scramble_keys_path <- file.path(Project_folder, "edge_scramble_keys")
-edge_scramble_keys_IEEE_Permutation_path <- file.path(edge_scramble_keys_path, "Permuted_IEEE_118")
+power_grid_graphs_path <- file.path(project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
+collapse_sets <- file.path(project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
+collapse_set_summaries <- file.path(project_folder, "collapse_set_summaries")
+permuted_IEEE_118_path <- file.path(power_grid_graphs_path, "Permuted_IEEE_118") #The permuted base IEEE-118 igraphs are stored here
+edge_scramble_keys_path <- file.path(project_folder, "edge_scramble_keys")
+edge_scramble_keys_IEEE_permutation_path <- file.path(edge_scramble_keys_path, "Permuted_IEEE_118")
 #The path where the permuted and attacked graph lists of the IEEE graphs are stored
 #summary_path <- 
 
-c(power_grid_graphs_path, collapse_sets, collapse_set_summaries, Permuted_IEEE_118_path, edge_scramble_keys_path, edge_scramble_keys_IEEE_Permutation_path) %>% walk(~{
+c(power_grid_graphs_path, collapse_sets, collapse_set_summaries, permuted_IEEE_118_path, edge_scramble_keys_path, edge_scramble_keys_IEEE_permutation_path) %>% walk(~{
   if(!file.exists(.x)) dir.create(.x, recursive = T)
 })
 
@@ -81,16 +81,17 @@ g <- readRDS(file.path(power_grid_graphs_path, "IEEE_118_igraph.rds"))
 
  
 Permuted_IEEE_118_list <- random_seeds %>% map(~{
-  g <- Permute_IEEE(g, .x)
+  g <- permute_gen_dem(g, .x)
   
   g <-  BalencedGenDem(g, 
-                        Demand = "Demand",
-                        Generation = "Generation",
-                        OutputVar = "Net_Generation")
+                        Demand = "demand",
+                        Generation = "generation",
+                        OutputVar = "net_generation")
   
-  SlackRef <- SlackRefFunc(g, name = "name", Generation = "Generation")
+  SlackRef <- SlackRefFunc(g, name = "name", Generation = "generation")
   
-  g <- PowerFlow(g, SlackRef$name, EdgeName ="Link", VertexName = "name", Net_generation = "Net_Generation")
+  g <- PowerFlow(g, SlackRef$name, EdgeName ="edge_name", VertexName = "name", Net_generation = "net_generation", power_flow = "power_flow")
+
 })
 
 #Save the networks so that they can be used by the HPC 
@@ -98,7 +99,7 @@ Permuted_IEEE_118_list <- random_seeds %>% map(~{
 1:length(Permuted_IEEE_118_list) %>%
   walk(~{
     saveRDS(Permuted_IEEE_118_list[[.x]], 
-            file.path(Permuted_IEEE_118_path, 
+            file.path(permuted_IEEE_118_path, 
                       paste0("Permutation_", .x, ".rds")))
   })
 
@@ -116,15 +117,12 @@ Create the edge scrambles that give a range of alpha values for each initial ec/
 returns a data frame that contains (amongst other things), a random seed and the associated alpha value is the network edges are scrambled using that random seed.
 
 *N.B*
-This chunk requires a large number of networks to be loaded and analysed so takes a long time. doing this in parallel is reccomended
+This chunk requires a large number of networks to be loaded and analysed so takes a long time. doing this in parallel is reccomended. However, I haven't been able to make it work effectively so keep it in parallel.
 
 ```{r}
 networks_in_project <- list.files(power_grid_graphs_path, recursive = T)
 
-
-registerDoParallel(cores = 5) #RUNS ON ALL CORES!
-foreach(n = 1:length(networks_in_project),
-        .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
+for(n in 1:length(networks_in_project)){
           
           #load the graph for the edge scrambles to be calculated
           g <- readRDS(file.path(power_grid_graphs_path, networks_in_project[n]))
@@ -137,7 +135,7 @@ foreach(n = 1:length(networks_in_project),
           } else{
             
             
-            target_orders_temp <- Create_target_orders_for_strain_test(g, fract_vect, Scramble_ec_values,
+            target_orders_temp <- create_target_orders_for_strain_test(g, fract_vect, Scramble_ec_values,
                                                                        total_sample_space = 10000, #Larger number mean bigger extremes but it takes much longer. I choose 10k as a painful slow medium
                                                                        required_samples_out = 10,
                                                                        seed = n ) #previously a constant 123
@@ -146,20 +144,23 @@ foreach(n = 1:length(networks_in_project),
           }
           
         }
-stopImplicitCluster()
 ```
 
 #Create parameter dataframe
+
+
+I need to make this work for all the graphs not just the permutations. I can filter out the non-IEEE after words
 
 The parameter dataframe allows for efficient parallel processing of the large number of simulations performed in this project.
 
 The parameter dataframe can be saved and used later on a different system such as an HPC or cloud machine.
 
 ```{r}
-target_order_permutations <- list.files(edge_scramble_keys_IEEE_Permutation_path, full.names = T)
+
 
 #The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
-parameter_df <-  target_order_permutations %>% map_df(~{
+parameter_df <-  list.files(edge_scramble_keys_IEEE_permutation_path, full.names = T) %>% 
+  map_df(~{
   target_order <-.x
   #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
   temp <- readRDS(target_order) %>% as.data.frame() %>%
@@ -173,7 +174,7 @@ parameter_df <-  target_order_permutations %>% map_df(~{
 
 parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
                                         scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
-  left_join(tibble(graph_path = list.files(Permuted_IEEE_118_path, full.names = T), 
+  left_join(tibble(graph_path = list.files(permuted_IEEE_118_path, full.names = T), 
                    permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
   ) %>%
   mutate(
@@ -188,7 +189,44 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
   mutate(compute_group = 1:n()) %>%
   ungroup
 
-saveRDS(parameter_df, file.path(Project_folder, "parameter_file.rds"))
+saveRDS(parameter_df, file.path(project_folder, "IEEE_118_permutatio_parameter_file.rds"))
+```
+
+#Base esge scramble codes
+
+```{r}
+#The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
+parameter_df <-  list.files(edge_scramble_keys_path, full.names = T, pattern = ".rds") %>% 
+  map_df(~{
+  target_order <-.x
+  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
+  temp <- readRDS(target_order) %>% as.data.frame() %>%
+    expand_grid(df = ., simulation_id = 1:100) 
+  
+  temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
+                              permutation = basename(.x) %>% gsub(".rds", "",.))
+  return(temp2)
+})
+
+
+parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
+                                        scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
+  left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, pattern = ".rds"), 
+                   permutation = basename(graph_path) %>% gsub(".rds", "",.)), by = "permutation" 
+  ) %>%
+  mutate(
+    sub_path = file.path( #The collapse set and the collapse set summary paths are identiacal apart from the root.
+      paste0("Permutation_", permutation), 
+      paste0("fract_", fract, "_ec_", ec, "_v_", v), 
+      paste0("simulation_id_", simulation_id, ".rds" )),
+    collapse_path = file.path(collapse_sets,sub_path),
+    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
+  ungroup %>%
+  group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
+  mutate(compute_group = 1:n()) %>%
+  ungroup
+
+saveRDS(parameter_df, file.path(project_folder, "base_parameter_file.rds"))
 ```
 
 
