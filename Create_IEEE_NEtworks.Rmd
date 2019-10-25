@@ -149,8 +149,8 @@ c(14, 30, 57, 118, 300) %>% walk(~{
   mat_dat <- matpower_loader(the_ieee_test_cases[which.max(grepl(.x, the_ieee_test_cases))], output_graph = F)
   
   bus_data <- mat_dat$bus %>%
-    select(bus = bus_i, Demand = Pd, Generation = Pmax) %>%
-    mutate(Net_Generation = Generation - Demand,
+    select(bus = bus_i, demand = Pd, generation = Pmax) %>%
+    mutate(net_generation = generation - demand,
            Name = bus)
   
   branch_data <- mat_dat$branch %>% #mutate(b1 = 1/x)
@@ -166,9 +166,9 @@ c(14, 30, 57, 118, 300) %>% walk(~{
   g<- graph_from_data_frame(branch_data, directed = F, vertices = bus_data)
   
   g <-  BalencedGenDem(g, 
-                       Demand = "Demand",
-                       Generation = "Generation",
-                       OutputVar = "Net_Generation")
+                       demand = "demand",
+                       generation = "generation",
+                       output_var = "net_generation")
   
   SlackRef <- SlackRefFunc(g, name = "name", Generation = "Generation")
   

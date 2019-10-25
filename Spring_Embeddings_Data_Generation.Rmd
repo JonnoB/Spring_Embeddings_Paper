@@ -122,7 +122,7 @@ This chunk requires a large number of networks to be loaded and analysed so take
 networks_in_project <- list.files(power_grid_graphs_path, recursive = T)
 
 
-registerDoParallel(cores = 6) #RUNS ON ALL CORES!
+registerDoParallel(cores = 5) #RUNS ON ALL CORES!
 foreach(n = 1:length(networks_in_project),
         .packages = c("PowerGridNetworking", "rlang", "dplyr", "igraph", "stringr", "purrr", "tidyr")) %dopar%{
           
@@ -163,9 +163,9 @@ parameter_df <-  target_order_permutations %>% map_df(~{
   target_order <-.x
   #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
   temp <- readRDS(target_order) %>% as.data.frame() %>%
-    expand_grid(df = ., Simulation_ID = 1:100) 
+    expand_grid(df = ., simulation_id = 1:100) 
   
-  temp2 <- temp$df %>% mutate(Simulation_ID = temp$Simulation_ID, 
+  temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
                               permutation = gsub("[^0-9]","",basename(target_order)) %>% as.integer() )
   return(temp2)
 })
@@ -173,35 +173,70 @@ parameter_df <-  target_order_permutations %>% map_df(~{
 
 parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
                                         scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
-  left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, recursive = T), 
+  left_join(tibble(graph_path = list.files(Permuted_IEEE_118_path, full.names = T), 
                    permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
   ) %>%
-  mutate(collapse_path = file.path(collapse_sets, 
-                                   paste0("Permutation_", permutation), 
-                                   paste0("fract_", fract, "_ec_", ec, "_v_", v,".rds")),
-         collapse_summary_path = file.path(collapse_set_summaries, 
-                                   paste0("Permutation_", permutation), 
-                                   paste0("fract_", fract, "_ec_", ec, "_v_", v), 
-                                   paste0("Simulation_ID_", Simulation_ID ))) %>%
+  mutate(
+    sub_path = file.path( #The collapse set and the collapse set summary paths are identiacal apart from the root.
+      paste0("Permutation_", permutation), 
+      paste0("fract_", fract, "_ec_", ec, "_v_", v), 
+      paste0("simulation_id_", simulation_id, ".rds" )),
+    collapse_path = file.path(collapse_sets,sub_path),
+    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
   ungroup %>%
   group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
   mutate(compute_group = 1:n()) %>%
   ungroup
 
-
-
 saveRDS(parameter_df, file.path(Project_folder, "parameter_file.rds"))
 ```
 
 
-
 #Load the collapse set summaries
 ```{r}
-test <- list.files(collapse_set_summaries, recursive = T, full.names = T) %>%
-  map_df(~{
-    readRDS(.x)
-  })
 
+Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries, 
+                                        # pattern = ".rds", I saved them wrong, the code has been corrected but not re-run
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~read_rds(.x)%>%
+           mutate(file_path = .x))   %>%
+  arrange(-TotalNodes) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  group_by(file_path) %>%
+  summarise_all(first)  %>%
+  #### This is not necessary after re-calc as all the info is included with the extracted data
+  left_join(parameter_df %>% 
+              select(file_path  = collapse_summary_path, 
+                     ec:permutation), by  = "file_path") %>%
+  ###
+  group_by(ec, v, fract, permutation) %>%
+  summarise(NodesAttacked = mean(NodesAttacked)) 
+
+
+##After this the strain needs to be added
+
+#Why is the grid loading so high for the alpha == 20 grids?
+test <- Permuted_IEEE_118_results %>% filter(NodesAttacked==0) %>%
+  mutate(alpha = 1/GridLoading)
+
+parameter_df %>%
+  filter(v == 1, fract == 1, permutation == 1, simulation_id==1) %>%
+  pull(alpha)
+
+
+g <- readRDS(file.path("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/Permuted_IEEE_118/", "Permutation_1.rds")) %>%
+  Proportional_Load(., alpha = 20)
+
+edge_order_df <- Create_scrambled_edges(g, 2798, fract = 1) %>%
+  mutate(loading = 1/alpha)
+
+test <- edge_order_df %>%
+  summarise(mean_alpha = mean(alpha),
+            median_alpha = median(alpha),
+            mean_loading = mean(loading),
+            median_loading = median(loading))
 
 ```
 

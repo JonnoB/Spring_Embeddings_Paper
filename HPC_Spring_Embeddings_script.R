@@ -48,8 +48,8 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
   walk(~source(.x))
 
 
-parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>%
-  filter(compute_group ==computation_number) #this variable is inserted into the file
+parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>% arrange(compute_group) #temporary to get timings
+#filter(compute_group ==computation_number) #this variable is inserted into the file
 
 
 1:nrow(parameter_df_temp) %>%
@@ -71,7 +71,7 @@ parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>
     fract <- Iter$fract
     permutation <- Iter$permutation
     deletion_seed <- Iter$deletion_seed
-    attack_id <- Iter$Simulation_ID
+    simulation_id <- Iter$simulation_id
     Iter_collapse_path <- Iter$collapse_path
     Iter_collapse_summary_path <- Iter$collapse_summary_path
     ##
@@ -123,22 +123,28 @@ parameter_df_temp <- readRDS(file.path(Project_folder, "parameter_file.rds")) %>
     #This way I only need to combine the saved files but not operate on them.
     AttackSeriesSummary <- AttackSeries %>%
       ExtractNetworkStats(Generation = "Generation", EdgeName = "Link", PowerFlow = "PowerFlow", Link.Limit = "Link.Limit") %>%
-      mutate(attack_id = attack_id,
-             GridLoading = ifelse(Blackout==1, 0, GridLoading))
-    
-    #Both the attack series and the summary are saved to store as much information as possible in one go.
-    
-    #The structure is generated as needed and so any new paths can just be created at this point.
-    #There is very little overhead in doing it this way
-    c(dirname(Iter_collapse_path), dirname(Iter_collapse_summary_path) ) %>% walk(~{
-      if(!file.exists(.x)) dir.create(.x, recursive = T)
-    })
-    
-    saveRDS(AttackSeries, file = Iter_collapse_path)
-    
-    saveRDS(AttackSeriesSummary, file = Iter_collapse_summary_path)
-    #After the simulation and its summary are saved to the drive the next in the compute group is calculated
-    
+      #I add in the attack parameters for conveniance so I don't need to do it when I load the data.
+      #This is just as joining a very large table can be slow
+      mutate(simulation_id = simulation_id,
+             ec = ec,
+             v = v,
+             fract = frac,
+             permutation = permutation) 
+  )
+
+#Both the attack series and the summary are saved to store as much information as possible in one go.
+
+#The structure is generated as needed and so any new paths can just be created at this point.
+#There is very little overhead in doing it this way
+c(dirname(Iter_collapse_path), dirname(Iter_collapse_summary_path) ) %>% walk(~{
+  if(!file.exists(.x)) dir.create(.x, recursive = T)
+})
+
+saveRDS(AttackSeries, file = Iter_collapse_path)
+
+saveRDS(AttackSeriesSummary, file = Iter_collapse_summary_path)
+#After the simulation and its summary are saved to the drive the next in the compute group is calculated
+
   })
 
 

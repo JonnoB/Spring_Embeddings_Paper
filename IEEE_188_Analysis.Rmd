@@ -1190,52 +1190,7 @@ completion_time %>%
 ```
 
 
-#Support code for Myriad script
 ```{r}
 
-target_order_permutations <- list.files("/home/jonno/Dropbox/IEEE_Networks/target_orders/Permuted_IEEE_118", full.names = T)
-
-#The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
-parameter_df <-  target_order_permutations %>% map_df(~{
-  target_order <-.x
-  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
-  temp <- readRDS(target_order) %>% as.data.frame() %>%
-    expand_grid(df = ., Simulation_ID = 1:100) 
-  
-  temp2 <- temp$df %>% mutate(Simulation_ID = temp$Simulation_ID, 
-                              permutation = gsub("[^0-9]","",basename(target_order)) %>% as.integer() )
-  return(temp2)
-})
-
-
-parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
-                                        scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
-  left_join(tibble(graph_path = list.files(IEEE_permuted_path, full.names = T), 
-                   permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
-  ) %>%
-  mutate(collapse_path = file.path(collapse_sets, 
-                                   paste0("Permutation_", permutation), 
-                                   paste0("fract_", fract, "_ec_", ec, "_v_", v,".rds")),
-         collapse_summary_path = file.path(collapse_set_summaries, 
-                                   paste0("Permutation_", permutation), 
-                                   paste0("fract_", fract, "_ec_", ec, "_v_", v), 
-                                   paste0("Simulation_ID_", Simulation_ID )))
-
-saveRDS(parameter_df, file.path(Project_folder, "parameter_file.rds"))
-
-Iter <- parameter_df %>%
-  slice(1)
-
-scramble_network <- Iter$scramble_network #Needs to be added into the target orders file
-graph_path <- Iter$graph_path
-scramble_seed <- Iter$seed
-ec <- Iter$ec
-v <- Iter$v
-fract <- Iter$fract
-permutation <- Iter$permutation
-deletion_seed <- Iter$deletion_seed
-attack_id <- Iter$Simulation_ID
-Iter_collapse_path <- Iter$collapse_path
-Iter_collapse_summary_path <- Iter$collapse_summary_path
 ```
 
