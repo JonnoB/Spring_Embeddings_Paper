@@ -8,7 +8,7 @@ editor_options:
 ---
 
 ```{r}
-packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm", "foreach", "doParallel" )
+packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -39,10 +39,11 @@ collapse_set_summaries <- file.path(project_folder, "collapse_set_summaries")
 permuted_IEEE_118_path <- file.path(power_grid_graphs_path, "Permuted_IEEE_118") #The permuted base IEEE-118 igraphs are stored here
 edge_scramble_keys_path <- file.path(project_folder, "edge_scramble_keys")
 edge_scramble_keys_IEEE_permutation_path <- file.path(edge_scramble_keys_path, "Permuted_IEEE_118")
+analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
 #The path where the permuted and attacked graph lists of the IEEE graphs are stored
 #summary_path <- 
 
-c(power_grid_graphs_path, collapse_sets, collapse_set_summaries, permuted_IEEE_118_path, edge_scramble_keys_path, edge_scramble_keys_IEEE_permutation_path) %>% walk(~{
+c(power_grid_graphs_path, collapse_sets, collapse_set_summaries, permuted_IEEE_118_path, edge_scramble_keys_path, edge_scramble_keys_IEEE_permutation_path, analysis_parameter_file_path) %>% walk(~{
   if(!file.exists(.x)) dir.create(.x, recursive = T)
 })
 
@@ -155,6 +156,10 @@ The parameter dataframe allows for efficient parallel processing of the large nu
 
 The parameter dataframe can be saved and used later on a different system such as an HPC or cloud machine.
 
+The three code chunks should be combined into a single chunk as the differences between them are clearly minimal. This is a low priority though
+
+##Permuted edges
+
 ```{r}
 
 
@@ -173,7 +178,7 @@ parameter_df <-  list.files(edge_scramble_keys_IEEE_permutation_path, full.names
 
 
 parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
-                                        scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
+                                        scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
   left_join(tibble(graph_path = list.files(permuted_IEEE_118_path, full.names = T), 
                    permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
   ) %>%
@@ -189,10 +194,10 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
   mutate(compute_group = 1:n()) %>%
   ungroup
 
-saveRDS(parameter_df, file.path(project_folder, "IEEE_118_permutatio_parameter_file.rds"))
+saveRDS(parameter_df, file.path(analysis_parameter_file_path, "IEEE_118_permutation_parameter_file.rds"))
 ```
 
-#Base esge scramble codes
+##Base edge scramble codes
 
 ```{r}
 #The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
@@ -210,7 +215,7 @@ parameter_df <-  list.files(edge_scramble_keys_path, full.names = T, pattern = "
 
 
 parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
-                                        scramble_network = ifelse(is.na(fract), FALSE, TRUE)) %>%
+                                        scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
   left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, pattern = ".rds"), 
                    permutation = basename(graph_path) %>% gsub(".rds", "",.)), by = "permutation" 
   ) %>%
@@ -226,8 +231,65 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
   mutate(compute_group = 1:n()) %>%
   ungroup
 
-saveRDS(parameter_df, file.path(project_folder, "base_parameter_file.rds"))
+saveRDS(parameter_df, file.path(analysis_parameter_file_path, "base_parameter_file.rds"))
 ```
+
+##non scrambled edges
+
+The non-scrambled edges can be identified as they have fract_0
+
+```{r}
+
+parameter_df <-  list.files(edge_scramble_keys_path, full.names = T, pattern = ".rds") %>% 
+  map_df(~{
+  target_order <-.x
+  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
+  temp <- readRDS(target_order) %>% as.data.frame() %>%
+    expand_grid(df = ., simulation_id = 1:100) 
+  
+  temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
+                              permutation = basename(.x) %>% gsub(".rds", "",.))
+  return(temp2)
+}) %>% 
+  filter(v ==1, fract ==1) %>%
+  mutate(fract = 0)
+
+parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
+                                        scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
+  left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, pattern = ".rds"), 
+                   permutation = basename(graph_path) %>% gsub(".rds", "",.)), by = "permutation" 
+  ) %>%
+  mutate(
+    sub_path = file.path( #The collapse set and the collapse set summary paths are identiacal apart from the root.
+      paste0("Permutation_", permutation), 
+      paste0("fract_", fract, "_ec_", ec, "_v_", v), 
+      paste0("simulation_id_", simulation_id, ".rds" )),
+    collapse_path = file.path(collapse_sets,sub_path),
+    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
+  ungroup %>%
+  group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
+  mutate(compute_group = 1:n()) %>%
+  ungroup
+
+#parameter_df_simple <- parameter_df
+
+unique(parameter_df$graph_path) %>% walk(~{
+  
+  temp <- parameter_df %>%
+    filter(parameter_df$graph_path==.x)
+  
+  
+  file_name <- paste0("base_", basename(.x))
+  saveRDS(temp, file.path(analysis_parameter_file_path, file_name))  
+  
+}
+)
+
+
+
+
+```
+
 
 
 #Load the collapse set summaries

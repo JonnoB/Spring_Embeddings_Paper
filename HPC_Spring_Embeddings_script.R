@@ -38,7 +38,7 @@ if(dir.exists("/home/jonno")){
   project_folder <- "~/Dropbox/IEEE_Networks"
   basewd <- "~/Dropbox"
 }
-
+analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
@@ -48,8 +48,9 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
   walk(~source(.x))
 
 
-parameter_df_temp <- readRDS(file.path(project_folder, "base_parameter_file.rds")) %>% arrange(compute_group) %>% filter(permutation == "IEEE_14_igraph")#temporary to get timings
+parameter_df_temp <- readRDS(file.path(analysis_parameter_file_path, "base_IEEE_300_igraph.rds"))# %>% arrange(compute_group) #temporary to get timings
 #filter(compute_group ==computation_number) #this variable is inserted into the file
+
 
 
 1:nrow(parameter_df_temp) %>%
@@ -118,6 +119,7 @@ parameter_df_temp <- readRDS(file.path(project_folder, "base_parameter_file.rds"
                                                    EdgeName = "edge_name",
                                                    VertexName = "name",
                                                    Net_generation = "net_generation",
+                                                   power_flow = "power_flow",
                                                    edge_limit = "edge_limit"))
     
     
