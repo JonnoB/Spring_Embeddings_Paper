@@ -58,22 +58,21 @@ library(PowerGridNetworking)
 #creates the correct root depending on whether this is on the cloud or not
 if(dir.exists("/home/jonno")){
   #This folder is for use on my machine
-  Project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
+  project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
 }else{
   #This is for the folder that is on the cloud
-  Project_folder <- "~/Dropbox/IEEE_Networks"
+  project_folder <- "~/Dropbox/IEEE_Networks"
   basewd <- "~/Dropbox"
 }
 
-IEEE_networks <- file.path(Project_folder, "IEEE_network_files") #The folder all the files are stored in for the project
-power_grid_graphs_path <- file.path(Project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
+IEEE_networks <- file.path(project_folder, "IEEE_network_files") #The folder all the files are stored in for the project
+power_grid_graphs_path <- file.path(project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
 IEEE_permuted_path <- file.path(power_grid_graphs_path, "IEEE_permuted") #The permuted base IEEE-118 igraphs are stored here
-collapse_sets <- file.path(Project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
-collapse_set_summaries <- file.path(Project_folder, "collapse_set_summaries")
+collapse_sets <- file.path(project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
+collapse_set_summaries <- file.path(project_folder, "collapse_set_summaries")
 
-#The path where the permuted and attacked graph lists of the IEEE graphs are stored
-summary_path <- 
+HPC_startup_parameter_file_path <- file.path(project_folder, "HPC_parameter_files")
 
 c(IEEE_networks, power_grid_graphs_path, IEEE_permuted_path, collapse_sets, collapse_set_summaries ) %>% walk(~{
   if(!file.exists(.x)) dir.create(.x, recursive = T)
@@ -98,7 +97,7 @@ IEEE_118 <- readRDS(file = file.path(IEEE_networks, "IEEE_118_igraph.rds"))
 ```{r}
 
 # 
-# setwd(file.path(Project_folder, "IEEE118_edges"))
+# setwd(file.path(project_folder, "IEEE118_edges"))
 # 
 # #rep <-5 #I don't think this does anything. If nothing breaks then delete.
 # alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 100, 200, Inf)
@@ -164,7 +163,7 @@ This can take a while for large numbers (e.g 10k samples), as each graph needs t
 # 
 #   current_fract <- .x
 # 
-#   if(!file.exists(file.path(Project_folder, "target_orders", file_name))){
+#   if(!file.exists(file.path(project_folder, "target_orders", file_name))){
 # 
 #   set.seed(123)
 #   random_seeds <- sample(1:100000, 10000)
@@ -187,11 +186,11 @@ This can take a while for large numbers (e.g 10k samples), as each graph needs t
 # 
 #   })
 # 
-#   saveRDS(target_orders, file.path(Project_folder, "target_orders", file_name))
+#   saveRDS(target_orders, file.path(project_folder, "target_orders", file_name))
 # 
 # } else {
 # 
-#   target_orders  <- readRDS(file.path(Project_folder, "target_orders", file_name))
+#   target_orders  <- readRDS(file.path(project_folder, "target_orders", file_name))
 # 
 # }
 #  return(target_orders)
@@ -233,7 +232,7 @@ It may take a couple of days to calculate. Best done on the cloud if possible
 #       filter(ec == .x, scramble_fract == current_fract)
 # 
 #     folder <- paste0("alpha_value_",  .x*100) %>%
-#       file.path(Project_folder, paste0("IEEE_permute_edge_ec_Edge_fract_", current_fract), .)
+#       file.path(project_folder, paste0("IEEE_permute_edge_ec_Edge_fract_", current_fract), .)
 # 
 #     #create folder if it doesn't already exist
 #     if(!file.exists(folder)){
@@ -321,14 +320,14 @@ calcualtes the embeddings of the proportionally loaded systems indicated in the 
 
 ```{r}
 
-# IEEE_118 <- readRDS(file.path(Project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
+# IEEE_118 <- readRDS(file.path(project_folder,"IEEE_network_files", "IEEE_118_igraph.rds"))
 # 
 # 
 # #Network loadings to find the angles for
 # alpha_vector <- c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 2.5, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
 # 
-# if(!file.exists(file.path(Project_folder, "Solved_height_networks_PL"))){
-#   dir.create(file.path(Project_folder, "Solved_height_networks_PL"))
+# if(!file.exists(file.path(project_folder, "Solved_height_networks_PL"))){
+#   dir.create(file.path(project_folder, "Solved_height_networks_PL"))
 # }
 # 
 # 
@@ -336,7 +335,7 @@ calcualtes the embeddings of the proportionally loaded systems indicated in the 
 # alpha_vector %>% walk(~{
 # 
 #   alpha <- .x
-#   file_path <- file.path(Project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds"))
+#   file_path <- file.path(project_folder,"Solved_height_networks_PL", paste0("IEEE_118_alpha_", alpha, ".rds"))
 #   
 #   if(file.exists(file_path)){
 #     
@@ -375,7 +374,7 @@ An alternative is to assign 1 fraction per machine. Do whatever you want.
 # number_of_cpus <- 4
 # 
 # target_orders2 <- target_orders %>%
-#   mutate(file_path = file.path(Project_folder,
+#   mutate(file_path = file.path(project_folder,
 #                                paste0("constant_ec_from_alpha_fract_", scramble_fract),
 #                                paste0("Solved_height_networks_alpha_", ec*100),
 #                                paste0("IEEE_118_alpha_", v, ".rds")),
@@ -431,7 +430,7 @@ We then repeat the previous set of scrambles for each permutation
 ##Create networks
 ```{r}
 #The path the target orders will be stored at
-Permuted_IEEE_118_path <- file.path(Project_folder, "target_orders", "Permuted_IEEE_118")
+Permuted_IEEE_118_path <- file.path(project_folder, "target_orders", "Permuted_IEEE_118")
 
 #create the folder if necessary
 if(!dir.exists(Permuted_IEEE_118_path)){
@@ -527,7 +526,7 @@ DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Na
 
     #load the graph scramble seeds for this network permutation.
     target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
-      mutate(folder_path = file.path(Project_folder,
+      mutate(folder_path = file.path(project_folder,
                                      "Permuted_IEEE_118_collapse_set",
                                      paste0("Permutation_", .x),
                                      paste0("fract_", fract, "_ec_", ec*100, "_v_", v)))     %>%
@@ -554,7 +553,7 @@ DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Na
 #
 #     #load the graph scramble seeds for this network permutation.
 #     target_orders <- readRDS(file.path(Permuted_IEEE_118_path,  paste0("target_permutation_", .x, ".rds"))) %>%
-#       mutate(folder_path = file.path(Project_folder,
+#       mutate(folder_path = file.path(project_folder,
 #                                      "Permuted_IEEE_118_collapse_set",
 #                                      paste0("Permutation_", .x),
 #                                      paste0("fract_", fract, "_ec_", ec*100, "_v_", v)),
@@ -577,7 +576,7 @@ DeleteOrders_Edges <- MultiAttackOrder(IEEE_118, Target ="Edges", Sims = 100, Na
 cpu_id <- 1
 number_of_cpus <- 1
 
-permuted_strain_folder <- file.path(Project_folder,"Permuted_IEEE_118_strain_set")
+permuted_strain_folder <- file.path(project_folder,"Permuted_IEEE_118_strain_set")
 
 if(!file.exists(permuted_strain_folder)){
   dir.create(permuted_strain_folder)
@@ -693,7 +692,7 @@ permutation <- 2
 
 Attack_folder <- paste0("/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_", permutation)
 
-Summary_folder <- file.path(Project_folder, "Summary_Permuted_IEEE_118_collapse_set",
+Summary_folder <- file.path(project_folder, "Summary_Permuted_IEEE_118_collapse_set",
                                 paste0("Permutation_",  permutation)) ###########change this! to make multiple
     
     #Create the summary folder for that fraction
@@ -904,7 +903,7 @@ cpu_sims %>% walk(~{
     slice(.x)
   
   #folder name is 
-  folder <- file.path(Project_folder, 
+  folder <- file.path(project_folder, 
                       "Concentrator",
                       paste0("Concentrator_quant_",
                              current_sim$quant, 
@@ -962,8 +961,8 @@ cpu_sims %>% walk(~{
 ```{r}
 
 
-ExtractAttackStats(RootFolder = file.path(Project_folder, "Concentrator"), 
-                   NewfolderPath = file.path(Project_folder, "Concentrator_Summary"), 
+ExtractAttackStats(RootFolder = file.path(project_folder, "Concentrator"), 
+                   NewfolderPath = file.path(project_folder, "Concentrator_Summary"), 
                    Generation = "Net_Generation",
                    EdgeName = "Link",
                    PowerFlow = "PowerFlow",
@@ -972,7 +971,7 @@ ExtractAttackStats(RootFolder = file.path(Project_folder, "Concentrator"),
 
 
 #Load the saved files
-AttackRoundData <- list.files(path =file.path(Project_folder, "Concentrator_Summary"), 
+AttackRoundData <- list.files(path =file.path(project_folder, "Concentrator_Summary"), 
                               pattern = ".rds", 
                               full.names = TRUE)  %>%
    map_df(~read_rds(.x)) 
@@ -1117,80 +1116,328 @@ test2 <- theta_crit_thresh %>%
 
 
 #Get time to create files
+
+This allows me to set the time for the wallkclock of the HPC
+
+IT looks like I can set the clock to 7 mins for graphs 14-57
+
+20 mins for 118
+and 25 for 300
+
+if I do a full 1 fract 1 v aka 100*12 sims then there are 1240 groups, if I add on 0.5 hours for safety then it is 2.4 hours per group. making a total of 25680 hours which is about 3000 hours less than if I do them in blocks of 12 but take the worst case
+
 ```{r}
 
-target_path <- "/home/jonno/Dropbox/IEEE_Networks/Permuted_IEEE_118_collapse_set/Permutation_2"
+target_path <- "/home/jonno/Dropbox/IEEE_Networks/collapse_set_summaries"
 
-all_dirs <-list.dirs(target_path)[-1] #remove base dir
-
+all_dirs <-list.dirs(target_path) %>% #remove base dir
+tibble(value = .) %>%
+  filter(grepl("fract_0", value)) %>% pull(value)
 
 completion_time <- all_dirs %>% map_df(~{
-  
+
   all_files <- .x %>%
-  list.files(., full.names = T) 
+  list.files(., full.names = T, recursive = T, pattern = ".rds") 
   
-  alpha <-all_files %>% dirname() %>% basename() %>% str_split(., "_", simplify = T) %>% as_tibble() %>%
-  pull(V4) %>% as.integer()/100
+  alpha <- all_files %>% dirname() %>% basename() %>% str_split(., "_", simplify = T) %>% as_tibble() %>%
+  pull(V4) %>% as.numeric()
   
-  all_files %>% file.info(.) %>% as_tibble() %>%
-    mutate(file_path = all_files) %>%
+ Out <-  all_files %>% file.info(.) %>% as_tibble() %>%
+    mutate(graph = all_files %>% dirname %>% dirname %>% basename() %>% gsub("_igraph", "", .) 
+           %>% gsub("Permutation_", "", .),
+           sim_id = str_extract(basename(all_files), "\\d+") %>% as.integer(),
+           alpha = alpha) %>%
   arrange(ctime) %>%
+   group_by(alpha) %>%
   mutate(lag = lag(ctime),
     mins = difftime(ctime, lag, units = "mins" ),
-    hours = difftime(ctime, lag, units = "hours" ),
-    alpha = alpha) %>% select(alpha, mins, size, hours)
+    hours = difftime(ctime, lag, units = "hours" )) %>% 
+   select(graph, alpha, mins, size, hours, ctime, lag, sim_id) %>%
+   ungroup
 
 }) %>%
   filter(complete.cases(.))
 
 
-worst_case <- completion_time %>%
-  group_by(alpha) %>%
-  summarise(max = max(as.numeric(mins)),
-            min = min(as.numeric(mins)))
+worst_case <- completion_time %>% #
+  group_by(alpha, graph) %>%
+  summarise(max = max(as.numeric(hours)),
+            min = min(as.numeric(hours)))
 
-sum(worst_case$max)
-sum(worst_case$min)
-
+#worst case 1 simulation from each level
+worst_case %>%
+  group_by(graph) %>%
+  summarise(max_hours = sum(max)) %>%
+  arrange(max_hours) %>% #1 simulations from each level
+  mutate(
+    hours_per_fract_v = max_hours*100,
+    hours_set = hours_per_fract_v*10*4, #ten variations per fraction and four fractions 
+    hours_all_sets = hours_set*30) %>%
+  arrange(max_hours)  
 #1 cpu 1 hour clock time per set of twelve
 
-single_collapse_set <- 48000/12
-single_collapse_set
-total_compute_time  <-30*48000/12
-total_compute_time
-
-total_compute_time/36
 
 completion_time %>% 
-  mutate(alpha = factor(alpha)) %>%
-  ggplot(aes(x = alpha, y = mins, fill = alpha)) + geom_boxplot() +
+ # filter(mins<3) %>%
+  mutate(alpha = factor(alpha),
+         mins = as.numeric(mins)) %>%
+  ggplot(aes(x = graph, y = mins, fill = alpha)) + geom_boxplot() +
   labs(title = "time to completion by alpha, there are 400 repetitions of each alpha",
-       y = "minutes")
-
+       y = "minutes") 
 
 completion_time %>% 
-  mutate(alpha = factor(alpha)) %>%
-  ggplot(aes(x = alpha, y = hours*100, fill = alpha)) + geom_boxplot() +
-  labs(title = "time to completion by alpha there are 4 repititions of each alpha",
-       y = "minutes")
-
-
+  #filter(graph!="IEEE_14") %>%
+  mutate(alpha = factor(alpha),
+         mins = as.numeric(mins)) %>%
+  ggplot(aes(x  = mins, group = alpha, colour = as.numeric(alpha))) + geom_density()+
+  facet_wrap(~graph) + 
+  scale_color_viridis_c()
 
 mean_time_per_alpha <- completion_time %>%
-  group_by(alpha) %>%
+  group_by(alpha, graph) %>%
   summarise(mean = mean(as.numeric(mins)),
             median = median(as.numeric(mins)))
 
-completion_time %>%
-  summarise(hours = sum(hours, na.rm = T)) %>%
-  mutate(hours_set = hours*100*4/1000, 
-         hours_all_sets = hours_set*30,
-         hours_all_sets_all_networks = hours_all_sets*5)
+mean_time_per_alpha %>%
+  group_by(graph) %>%
+  summarise(sum_mean = sum(mean),
+            sum_median = sum(median)) %>%
+  arrange(sum_mean)
+
+set_times <- completion_time %>%
+  group_by(graph) %>%
+  summarise(hours_fract_v = sum(hours, na.rm = T)) %>% #per fractions so 100 simulations from each level
+  mutate(hours_fract_v_round = round(hours_fract_v+0.5, 1),
+    hours_set = hours_fract_v_round*10*4, #ten variations per fraction and four fractions 
+         hours_all_sets = hours_set*30) %>%
+  arrange(hours_fract_v)
+
+set_times
+
+set_times %>%
+  mutate(hours_set = hours_set,
+         hours_all_sets = hours_all_sets)
+
+test <- completion_time %>%
+  group_by(alpha, graph) %>%
+  sample_n(size = 10000, replace = T) %>%
+  mutate(ID = 1:n()) %>%
+  group_by(graph, ID) %>%
+  summarise(mins = sum(as.numeric(mins))) %>%
+  group_by(graph) %>%
+  mutate(percentile = percent_rank(mins)) %>%
+  ungroup
+
+test_3 <- test %>%
+  filter(percentile>0.99) %>%
+  group_by(graph) %>%
+  summarise(mins_99th = min(mins)) %>%
+  left_join(worst_case %>%
+  group_by(graph) %>%
+  summarise(max_mins = sum(max)) %>%
+  arrange(max_mins) %>%
+  mutate()) %>%
+  arrange(max_mins)
+
+test %>%
+  ggplot(aes(x = mins, colour = graph)) + geom_density()
 
 ```
 
+#Run HPC script in parallel
 
+This code tests the HPC script by running it in parallel.Two parallel methods are used foreach and parralell's mcapply. Neither of these methods seem particularly good and it could be an isse related to ram access or something.
+
+This SO question and answer are interesting and related. It may be that ensuring NULL is returned speeds up the process, but I need to check that
+https://stackoverflow.com/questions/41925706/why-does-foreach-dopar-get-slower-with-each-additional-node?noredirect=1&lq=1
+
+The chunk uses the parameter file for the HPC and the HPC script to run the data generation for the small graphs
+
+##Run collapse script
 ```{r}
 
+
+library(parallel)
+
+#If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
+#Load the params file. 
+HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "test_attack_base_IEEE_118_igraph.txt" ), delim = " ")
+
+# mclapply(1:nrow(HPC_params), mc.cores= 6, FUN = function(i){
+#   
+#     temp <- HPC_params[i,]
+#   
+#   compute_group <- temp$compute_group
+#   
+#   load_file <- temp$load_file
+#   
+#   source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
+#   
+#   return(NULL)
+#   
+# } )
+
+#This appears to be considerably faster than the parallel version
+1:nrow(HPC_params) %>% walk(~{
+  temp <- HPC_params[.x,]
+  
+  compute_group_value <- temp$compute_group
+  #compute_group <- temp$compute_group #as the df variable is called compute group, this cannot be otherise the variable just has to equal itself and the grouping is not used
+  
+  load_file <- temp$load_file
+  
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+})
+
+
+list.files(analysis_parameter_file_path, pattern = "PL") %>%
+
 ```
+
+##Run Strain script
+```{r}
+#If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
+#Load the params file. 
+HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "strain_base_IEEE_118_igraph.txt" ), delim = " ")
+
+
+mclapply(1:nrow(HPC_params), mc.cores= 6, FUN = function(i){
+  
+  gc()
+  
+  temp <- HPC_params[i,]
+  
+  compute_group_value <- temp$compute_group
+  
+  param_v <- temp$v
+  param_ec <- temp$ec
+  param_fract <- temp$fract
+  
+  load_file <- temp$load_file
+  
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_strain_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+} )
+
+HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "strain_base_IEEE_118_igraph.txt" ), delim = " ")
+
+1:nrow(HPC_params) %>% walk(~{
+  
+  gc()
+  
+  temp <- HPC_params[.x,]
+  
+  compute_group_value <- temp$compute_group
+  
+  param_v <- temp$v
+  param_ec <- temp$ec
+  param_fract <- temp$fract
+  
+  load_file <- temp$load_file
+  
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_strain_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+} )
+
+
+```
+
+#Load HPC output
+
+submit job to myriad
+qsub ~/Spring_Embeddings_Paper/HPC_attack_bash 
+
+
+to send files to myriad
+ scp /home/jonno/Useful_PhD__R_Functions.tar.xz ucabbou@myriad.rc.ucl.ac.uk:~
+
+
+This chunk is to test the output of the model and make sure it all makes sense
+```{r}
+
+#Load all the collapse files
+collapse_data <- list.files(file.path(collapse_set_summaries_path, "Permutation_IEEE_118_igraph"), 
+                   full.names = TRUE, recursive = TRUE) %>%
+  map_df(~read_rds(.x))
+
+#Filter to keep the mean point of GC collapse per collapse setting
+collapse_point <- collapse_data %>%
+  group_by(ec, v, fract, permutation) %>%
+  mutate(alpha = first(mean_alpha),
+         loading = first(mean_loading)) %>%
+  filter(mean_degree_sqrd< 2*mean_degree) %>%#the giant component is lost
+  arrange(attack_round) %>%
+  group_by(ec, v, fract, permutation, simulation_id) %>% #remove all the attacks after the first point at which the giant component is lost
+  summarise_all(first) %>%
+  ungroup %>%
+   group_by(ec, v, fract, permutation) %>%
+  mutate(counts = n()) %>%
+  summarise_all(mean) %>% ungroup
+%>%
+  filter(fract ==1)
+
+
+test<- collapse_data %>%
+  filter(fract==1) %>%
+  group_by(ec,v, attack_round, ) %>%
+  select(nodes, edges , generation, contains("loading"), contains("alpha")) %>%
+  summarise_all(mean) 
+
+collapse_point %>%
+#  filter(fract ==1) %>%
+  ggplot(aes(x = loading, y = attack_round, colour = as.factor(ec))) + geom_point()
+
+#Read the embeddings files
+embeddings_data <- list.files(file.path(embeddings_path, "IEEE_14_igraph"), 
+                              full.names = TRUE, recursive = TRUE) %>%
+  map_df(~{
+
+    specs <- basename(.x) %>% gsub(".rds", "", .) %>%str_split(., "_", simplify = TRUE) %>% t(.) %>% as_tibble(., name_repair = "unique") %>%
+      pull(V1)
+    
+    embeddings_list <- read_rds(.x)
+    
+    temp_strain <- embeddings_list$edge_embeddings %>%
+      select(strain, tension, alpha, line_load) %>%
+      summarise_all(.funs = c(mean = mean, median = median))
+    
+    temp_elevation <- embeddings_list$node_embeddings %>%
+      select(elevation = z, force) %>%
+      summarise_all(.funs = c(mean = mean, median = median)) %>%
+      select(elevation_median, elevation_mean)
+    
+    bind_cols(temp_strain, temp_elevation) %>%
+      mutate(fract = specs[2],
+             ec = specs[4],
+             v = specs[6])
+    
+  }) %>%
+  mutate(
+         ec = as.numeric(ec),
+         v = as.numeric(v),
+         fract = as.numeric(fract))
+
+
+#This is a pure cloud when IEEE-14 is used. Is this correct?
+left_join(collapse_point, embeddings_data ) %>%
+  select(attack_round, line_load_mean, strain_mean, v, ec) %>%
+  filter(complete.cases(.)) %>%
+  gather(key = metric, value = value, -attack_round, -v,-ec) %>%
+  group_by(metric) %>%
+  mutate(value = value/max(value)) %>% #rough way of getting the limits
+  ggplot(aes(x = value, y = attack_round, colour = as.factor(ec))) +
+  geom_point() +
+  facet_grid(~metric)
+
+
+
+```
+
 

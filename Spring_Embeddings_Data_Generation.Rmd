@@ -7,6 +7,7 @@ editor_options:
   chunk_output_type: console
 ---
 
+#Set up
 ```{r}
 packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm")
 
@@ -34,16 +35,17 @@ if(dir.exists("/home/jonno")){
 }
 
 power_grid_graphs_path <- file.path(project_folder, "power_grid_graphs") #The path where the base igraph representations of the power grids are
-collapse_sets <- file.path(project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
-collapse_set_summaries <- file.path(project_folder, "collapse_set_summaries")
+collapse_sets_path <- file.path(project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
+collapse_set_summaries_path <- file.path(project_folder, "collapse_set_summaries")
 permuted_IEEE_118_path <- file.path(power_grid_graphs_path, "Permuted_IEEE_118") #The permuted base IEEE-118 igraphs are stored here
 edge_scramble_keys_path <- file.path(project_folder, "edge_scramble_keys")
 edge_scramble_keys_IEEE_permutation_path <- file.path(edge_scramble_keys_path, "Permuted_IEEE_118")
 analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
-#The path where the permuted and attacked graph lists of the IEEE graphs are stored
-#summary_path <- 
+HPC_startup_parameter_file_path <- file.path(project_folder, "HPC_parameter_files")
+embeddings_path <- file.path(project_folder, "embeddings") 
 
-c(power_grid_graphs_path, collapse_sets, collapse_set_summaries, permuted_IEEE_118_path, edge_scramble_keys_path, edge_scramble_keys_IEEE_permutation_path, analysis_parameter_file_path) %>% walk(~{
+#make sure all the paths exist
+ls(pattern = "_path") %>% walk(~{
   if(!file.exists(.x)) dir.create(.x, recursive = T)
 })
 
@@ -72,7 +74,7 @@ fract_vect <- c(1, 0.75, 0.5, 0.25) #0.75 can also be added but may overlap with
 
 
 
-##Create permuted IEEE-118 networks
+#Create permuted IEEE-118 networks
 ```{r}
 #Create a list of IEEE-118 networks where the demand and gen node values are internally permuted
 set.seed(1235)
@@ -149,16 +151,21 @@ for(n in 1:length(networks_in_project)){
 
 #Create parameter dataframe
 
-
-I need to make this work for all the graphs not just the permutations. I can filter out the non-IEEE after words
+Base and strain HPC start up needs to be made for the permutations and the non-scramble
 
 The parameter dataframe allows for efficient parallel processing of the large number of simulations performed in this project.
 
-The parameter dataframe can be saved and used later on a different system such as an HPC or cloud machine.
+The parameter dataframe is saved to be used later on a different system such as an HPC or cloud machine.
 
 The three code chunks should be combined into a single chunk as the differences between them are clearly minimal. This is a low priority though
 
+
+The HPC parameter Array is different for the collapse set and the strain set the strain set is 480 simulations per set these are broken into 12 compute groups the numbers of the compute groups need to be specified before hand they are
+1  101  201  301  401  501  601  701  801  901 1001 1101 this means that there is a different startup parameter file for strain and collapse.
+
 ##Permuted edges
+
+This is ONLY the IEEE-118 power flow network. It has the edges scrambled/permuted AND load and demand 
 
 ```{r}
 
@@ -177,7 +184,7 @@ parameter_df <-  list.files(edge_scramble_keys_IEEE_permutation_path, full.names
 })
 
 
-parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
+parameter_df <- parameter_df %>% mutate(deletion_seed = simulation_id, #The random seed is the simulation id, this means that each simulation id will have the same attack order. This is becuase we are looking at the effect of alpha on collapse not at the effect of deletion order
                                         scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
   left_join(tibble(graph_path = list.files(permuted_IEEE_118_path, full.names = T), 
                    permutation = gsub("[^0-9]","",basename(graph_path)) %>% as.integer()), by = "permutation" 
@@ -187,51 +194,100 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
       paste0("Permutation_", permutation), 
       paste0("fract_", fract, "_ec_", ec, "_v_", v), 
       paste0("simulation_id_", simulation_id, ".rds" )),
-    collapse_path = file.path(collapse_sets,sub_path),
-    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
+    collapse_path = file.path(collapse_sets_path,sub_path),
+    collapse_summary_path = file.path(collapse_set_summaries_path, sub_path),
+    embeddings_path = file.path(embeddings_path, permutation, paste0("fract_", fract, "_ec_", ec, "_v_", v, ".rds") )
+    )%>%
   ungroup %>%
   group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
   mutate(compute_group = 1:n()) %>%
   ungroup
 
 saveRDS(parameter_df, file.path(analysis_parameter_file_path, "IEEE_118_permutation_parameter_file.rds"))
+
 ```
 
 ##Base edge scramble codes
 
+This is ALL the IEEE power flow networks. They have the edges scrambled but the load and demand is NOT permuted
+
 ```{r}
+
+
 #The target orders need to be combined into a single dataframe so that each job in the array has it's parameters defined
 parameter_df <-  list.files(edge_scramble_keys_path, full.names = T, pattern = ".rds") %>% 
   map_df(~{
-  target_order <-.x
-  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
-  temp <- readRDS(target_order) %>% as.data.frame() %>%
-    expand_grid(df = ., simulation_id = 1:100) 
-  
-  temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
-                              permutation = basename(.x) %>% gsub(".rds", "",.))
-  return(temp2)
-})
+    target_order <-.x
+    #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
+    temp <- readRDS(target_order) %>% as.data.frame() %>%
+      expand_grid(df = ., simulation_id = 1:100) 
+    
+    temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
+                                permutation = basename(.x) %>% gsub(".rds", "",.))
+    return(temp2)
+  }) %>% mutate(deletion_seed = simulation_id, #The random seed is the simulation id, this means that each simulation id will have the same attack order. This is becuase we are looking at the effect of alpha on collapse not at the effect of deletion order
+                scramble_network = ifelse(fract==0, FALSE, TRUE)) 
 
 
-parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
-                                        scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
-  left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, pattern = ".rds"), 
-                   permutation = basename(graph_path) %>% gsub(".rds", "",.)), by = "permutation" 
+parameter_df <- parameter_df %>%
+  left_join(
+    tibble(graph_path = list.files(basename(power_grid_graphs_path), full.names = T, pattern = ".rds"), 
+           permutation = basename(graph_path) %>% 
+             gsub(".rds", "",.)), 
+    by = "permutation" 
   ) %>%
   mutate(
     sub_path = file.path( #The collapse set and the collapse set summary paths are identiacal apart from the root.
       paste0("Permutation_", permutation), 
       paste0("fract_", fract, "_ec_", ec, "_v_", v), 
       paste0("simulation_id_", simulation_id, ".rds" )),
-    collapse_path = file.path(collapse_sets,sub_path),
-    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
+    collapse_path = file.path(basename(collapse_sets), sub_path),
+    collapse_summary_path = file.path(basename(collapse_set_summaries_path), sub_path),
+    embeddings_path = file.path(basename(embeddings_path), permutation, paste0("fract_", fract, "_ec_", ec, "_v_", v, ".rds") )
+  )%>%
   ungroup %>%
-  group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
+  arrange(simulation_id) %>%
+  group_by(simulation_id, ec, permutation) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
   mutate(compute_group = 1:n()) %>%
   ungroup
 
-saveRDS(parameter_df, file.path(analysis_parameter_file_path, "base_parameter_file.rds"))
+
+parameter_df %>%
+  group_by(permutation) %>%
+  summarise(counts = n(),
+            max = max(compute_group))
+
+save_params_for_HPC(parameter_df = parameter_df, HPC_startup_parameter_file_path, analysis_parameter_file_path)
+
+#
+#Params for a simple HPC test
+#
+
+
+#test run for HPC
+#is an array of two attack only
+test_params <- parameter_df %>%
+  filter(permutation== "IEEE_118_igraph",
+         simulation_id %in% 1) %>% filter(compute_group %in% 1:2) %>%
+  mutate(permutation = paste0("test_", permutation))
+
+#The HPC start up array
+test_attack_startup <- test_params %>%
+  distinct(compute_group) %>% 
+  mutate(load_file = "test_base_IEEE_118_igraph.rds") 
+
+
+saveRDS(test_params, 
+        file.path(analysis_parameter_file_path, 
+                  "test_base_IEEE_118_igraph.rds")) 
+
+#save the parameter files for the attack simulations
+write_delim(test_attack_startup, 
+            path = file.path(HPC_startup_parameter_file_path, 
+                             paste0("test_attack_", 
+                                    gsub(".rds", ".txt","base_IEEE_118_igraph.rds"))), 
+            delim = " ") #save the HPC start up parameter file. This defines the entire array
+  
 ```
 
 ##non scrambled edges
@@ -240,21 +296,28 @@ The non-scrambled edges can be identified as they have fract_0
 
 ```{r}
 
+c(1, 1.02, 1.01, 1.005, 1.05, 1.1, 1.2, 1.5, 2, 2.5, 3, 5, 7, 10, 15, 20, 50, 100, 200, Inf)
+
+non_scramble_df <- tibble(
+  seed = NA,
+  alpha =  c(1.005, 1.025, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20) ,
+  ec = alpha,
+  v = 1,
+  fract = 0)
+
 parameter_df <-  list.files(edge_scramble_keys_path, full.names = T, pattern = ".rds") %>% 
   map_df(~{
-  target_order <-.x
-  #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
-  temp <- readRDS(target_order) %>% as.data.frame() %>%
-    expand_grid(df = ., simulation_id = 1:100) 
-  
-  temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
-                              permutation = basename(.x) %>% gsub(".rds", "",.))
-  return(temp2)
-}) %>% 
-  filter(v ==1, fract ==1) %>%
-  mutate(fract = 0)
+    target_order <-.x
+    #expand grid creates a two column tibble which is not what I want, so I have to do this two stage process
+    temp <- non_scramble_df %>% as.data.frame() %>% # the non-scrambles have a different form so have to be done seperately
+      expand_grid(df = ., simulation_id = 1:100)  #
+    
+    temp2 <- temp$df %>% mutate(simulation_id = temp$simulation_id, 
+                                permutation = basename(.x) %>% gsub(".rds", "",.))
+    return(temp2)
+  })
 
-parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random deletion seed to be the job number. This guarentees a different order for every simulation
+parameter_df <- parameter_df %>% mutate(deletion_seed = simulation_id, #The random seed is the simulation id, this means that each simulation id will have the same attack order. This is becuase we are looking at the effect of alpha on collapse not at the effect of deletion order
                                         scramble_network = ifelse(fract==0, FALSE, TRUE)) %>%
   left_join(tibble(graph_path = list.files(power_grid_graphs_path, full.names = T, pattern = ".rds"), 
                    permutation = basename(graph_path) %>% gsub(".rds", "",.)), by = "permutation" 
@@ -264,8 +327,10 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
       paste0("Permutation_", permutation), 
       paste0("fract_", fract, "_ec_", ec, "_v_", v), 
       paste0("simulation_id_", simulation_id, ".rds" )),
-    collapse_path = file.path(collapse_sets,sub_path),
-    collapse_summary_path = file.path(collapse_set_summaries, sub_path))%>%
+    collapse_path = file.path(collapse_sets_path,sub_path),
+    collapse_summary_path = file.path(collapse_set_summaries_path, sub_path),
+    embeddings_path = file.path(embeddings_path, permutation, paste0("fract_", fract, "_ec_", ec, "_v_", v, ".rds") )
+  )%>%
   ungroup %>%
   group_by(ec) %>% #break the parameter table into sets of twelve where each set contains every ec level. This allows for a longer and more stable clock time
   mutate(compute_group = 1:n()) %>%
@@ -273,19 +338,7 @@ parameter_df <- parameter_df %>% mutate(deletion_seed = 1:n(), #set the random d
 
 #parameter_df_simple <- parameter_df
 
-unique(parameter_df$graph_path) %>% walk(~{
-  
-  temp <- parameter_df %>%
-    filter(parameter_df$graph_path==.x)
-  
-  
-  file_name <- paste0("base_", basename(.x))
-  saveRDS(temp, file.path(analysis_parameter_file_path, file_name))  
-  
-}
-)
-
-
+save_params_for_HPC(parameter_df = parameter_df, HPC_startup_parameter_file_path, analysis_parameter_file_path)
 
 
 ```
@@ -295,7 +348,7 @@ unique(parameter_df$graph_path) %>% walk(~{
 #Load the collapse set summaries
 ```{r}
 
-Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries, 
+Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries_path, 
                                         # pattern = ".rds", I saved them wrong, the code has been corrected but not re-run
                                         full.names = TRUE, 
                                         recursive = TRUE) %>%
@@ -316,10 +369,6 @@ Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries,
 
 
 ##After this the strain needs to be added
-
-#Why is the grid loading so high for the alpha == 20 grids?
-test <- Permuted_IEEE_118_results %>% filter(NodesAttacked==0) %>%
-  mutate(alpha = 1/GridLoading)
 
 parameter_df %>%
   filter(v == 1, fract == 1, permutation == 1, simulation_id==1) %>%
