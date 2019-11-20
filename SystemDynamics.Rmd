@@ -135,9 +135,10 @@ fixed_mean_alpha  <- 20:80 %>%
   left_join(tibble(edge = c("A", "B", "C"), 
                    flow = c(20,10,10)), #edge flow is always postive! 
             by = "edge") %>%
-  mutate(alpha = capacity/abs(flow)) %>%
+  mutate(alpha = capacity/abs(flow)) %>% #calculate alpha from the flow and edge capacity
   group_by(groupID) %>%
-  mutate(mean_alpha = mean(alpha), 
+  mutate(mean_alpha = mean(alpha),
+         mean_load = mean(1/alpha), #The harmonic mean of alpha aka mean load
          flow_fract = abs(flow)/sum(ifelse(flow>0,flow,0)),
          excess_cap = sum(alpha*flow_fract)/3) %>%
   group_by(mean_alpha) %>%
@@ -181,15 +182,15 @@ toy_theta_temp <-  fixed_mean_alpha %>%
   select(groupID, edge, alpha, counts) %>%
   spread(key = edge, value = alpha) %>%
   mutate(
-   B= 1/B,
+   B= 1/B, #It appears to make no difference if alpha or load level is used
     C = 1/C,
     ratio = (B)/(C+B)) %>%
   left_join(fixed_mean_alpha %>%
-  select(groupID, mean_alpha) %>%
+  select(groupID, mean_alpha, mean_load) %>%
     distinct) %>%
     select(-A, -B, -C)
 
-#get combine the previous df's together to get the angle across the system for all combinations
+#get combine the previous df's together to get the strain across the system for all combinations
 toy_height_data <- fixed_mean_alpha %>%
 select(groupID, edge, flow, alpha) %>%
   #add in the height data
@@ -220,6 +221,23 @@ latex2exp::TeX(paste("The relationship between strain and ",
                                      "$\\alpha \\,$", 
                                      " in terms of capacity fraction in edge B" ))
 
+
+#This is the mean load.... What the hell is going on?
+  toy_height_data %>%
+    mutate(mean_load = signif(mean_load,3)) %>% 
+    ggplot(aes(x = ratio, y = mean_strain, colour = mean_load)) + 
+    geom_point() +
+    scale_colour_viridis_c()
+  
+  
+  #The relationship between load and strain is wierd and looks similar to entropy
+    toy_height_data %>%
+   mutate(mean_load = signif(mean_load,5)) %>% 
+    ggplot(aes(colour = mean_alpha, y = mean_strain, x = mean_load, group = mean_alpha)) + 
+    geom_line(size = 1)+
+    scale_colour_viridis_c() +
+      scale_x_reverse()
+
 toy_height_data %>%
   filter((mean_strain == min(mean_strain)))
 
@@ -242,11 +260,11 @@ ggplot(aes(x = alpha, y = strain_rat)) +
 ##Entropic degree
 ```{r}
 
-entropy_data<- fixed_mean_alpha %>%
+entropy_data <- fixed_mean_alpha %>%
   group_by(groupID) %>%
-  mutate(p_capacity = capacity/sum(capacity),
-         p_alpha = alpha/sum(alpha),
-         entrop_capacity = -p_capacity*log(p_capacity),
+  mutate(p_capacity = capacity/sum(capacity), #fraction of total capacity
+         p_alpha = alpha/sum(alpha), #fraction of total alpha
+         entrop_capacity = -p_capacity*log(p_capacity), #
          entrop_alpha = -p_alpha*log(p_alpha)) %>%
   summarise(capacity = sum(entrop_capacity),
             alpha = sum(entrop_alpha)) %>%
@@ -259,6 +277,7 @@ toy_height_data %>%
   left_join(entropy_data) %>%
   gather(key = type, value = div, -mean_strain, - mean_alpha,-groupID ) %>%
     mutate(mean_alpha = signif(mean_alpha,5)) %>%  # some of the mean_alpha values are seperating on machine tolerance or something
+  filter(type =="capacity") %>%
   ggplot(aes(x = div, y = mean_strain, colour = mean_alpha, group = mean_alpha)) + 
   geom_line(size = 1) +
   scale_colour_viridis_c() +
@@ -266,11 +285,14 @@ toy_height_data %>%
   labs(title = "The relationship between strain, system tolerance and entropy", 
        x = "Normalised entropy", 
        y ="system strain", 
-       colour =  "Sytem
-       tolerance")
+       colour =  "Sytem tolerance")
 ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
 
 
+
+test <- toy_height_data %>%
+  select(groupID, mean_strain, mean_alpha) %>%
+  left_join(entropy_data)
 
 rm(entropy_data)
 ```

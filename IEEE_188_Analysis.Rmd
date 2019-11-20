@@ -21,6 +21,10 @@ This will chunk need to be copy and pasted into the console or the whole RMD fil
 ~For myriad
 you can use qdel $job_id to delete specific jobs/arrays, or qdel '*' to delete all your jobs
 
+  /tmpdir/job/2059520.10/
+  
+tar -xzvf files_from_job_2063078.3.tgz -C ~/ --strip-components 2
+
 ```{r}
 # library("RStudioAMI")
 # 
@@ -71,7 +75,7 @@ power_grid_graphs_path <- file.path(project_folder, "power_grid_graphs") #The pa
 IEEE_permuted_path <- file.path(power_grid_graphs_path, "IEEE_permuted") #The permuted base IEEE-118 igraphs are stored here
 collapse_sets <- file.path(project_folder, "collapse_sets") #the full collapse set of each power grid and the permutations are stored here
 collapse_set_summaries <- file.path(project_folder, "collapse_set_summaries")
-
+analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
 HPC_startup_parameter_file_path <- file.path(project_folder, "HPC_parameter_files")
 
 c(IEEE_networks, power_grid_graphs_path, IEEE_permuted_path, collapse_sets, collapse_set_summaries ) %>% walk(~{
@@ -1117,14 +1121,37 @@ test2 <- theta_crit_thresh %>%
 
 #Get time to create files
 
-This allows me to set the time for the wallkclock of the HPC
+Time based on the PL system suggest That 
+0.5 minute for 14
+1 minute 30
+2 minute 57
+7 minutes 118
+9 minutes 300
 
-IT looks like I can set the clock to 7 mins for graphs 14-57
+I looked at 118 after running for enough time to create 100 sims it used 2700Mb of ram 
+To the set up requirements would be
 
-20 mins for 118
-and 25 for 300
+7*100 = 700 minutes say 12 hours for a 20 minute buffer
 
-if I do a full 1 fract 1 v aka 100*12 sims then there are 1240 groups, if I add on 0.5 hours for safety then it is 2.4 hours per group. making a total of 25680 hours which is about 3000 hours less than if I do them in blocks of 12 but take the worst case
+Per HPC job times in hours
+
+14  1.5 
+30  2
+57  5
+118 12
+300 16
+
+4GB ram just to be on the safe side
+
+These times were eyeballed from a single round of calculation
+
+strain calc
+14 about 2 mins say 3 1gb ram
+30 between 3.7 and 4.5 say 5
+57
+118 10 mins per collapse try 1gb of ram
+300
+
 
 ```{r}
 
@@ -1256,35 +1283,17 @@ The chunk uses the parameter file for the HPC and the HPC script to run the data
 ##Run collapse script
 ```{r}
 
+start_up_file_name <- "attack_base_IEEE_14_igraph.txt"
 
-library(parallel)
-
-#If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
 #Load the params file. 
-HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "test_attack_base_IEEE_118_igraph.txt" ), delim = " ")
-
-# mclapply(1:nrow(HPC_params), mc.cores= 6, FUN = function(i){
-#   
-#     temp <- HPC_params[i,]
-#   
-#   compute_group <- temp$compute_group
-#   
-#   load_file <- temp$load_file
-#   
-#   source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
-#   
-#   return(NULL)
-#   
-# } )
+HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, start_up_file_name ), delim = " ")
 
 #This appears to be considerably faster than the parallel version
 1:nrow(HPC_params) %>% walk(~{
-  temp <- HPC_params[.x,]
   
-  compute_group_value <- temp$compute_group
-  #compute_group <- temp$compute_group #as the df variable is called compute group, this cannot be otherise the variable just has to equal itself and the grouping is not used
+  task_id <- .x #this is the compute group to be used
   
-  load_file <- temp$load_file
+  HPC_start_up_file <- start_up_file_name
   
   source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
   
@@ -1293,7 +1302,46 @@ HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "test_attack
 })
 
 
-list.files(analysis_parameter_file_path, pattern = "PL") %>%
+#do just a single sim from everything
+list.files(HPC_startup_parameter_file_path, pattern ="attack") %>% walk(~{
+  
+  start_up_file_name <- .x
+  HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, .x), delim = " ")
+  
+  task_id <- 1 #this is the compute group to be used
+  
+  HPC_start_up_file <- start_up_file_name
+  
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+})
+
+
+#do everything #this probably takes ages
+list.files(HPC_startup_parameter_file_path, pattern ="attack") %>% walk(~{
+  
+  start_up_file_name <- .x
+  
+  HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, .x), delim = " ")
+  
+  1:nrow(HPC_params) %>% walk(~{
+
+    task_id <- .x
+    #compute_group <- temp$compute_group #as the df variable is called compute group, this cannot be otherise the variable just has to equal itself and the grouping is not used
+    
+    HPC_start_up_file <-  start_up_file_name 
+    
+    source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_Spring_Embeddings_attack_script.R"), local = TRUE)
+    
+    return(NULL)
+    
+  })
+  
+  return(NULL)
+  
+})
 
 ```
 
@@ -1301,45 +1349,20 @@ list.files(analysis_parameter_file_path, pattern = "PL") %>%
 ```{r}
 #If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
 #Load the params file. 
-HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "strain_base_IEEE_118_igraph.txt" ), delim = " ")
 
 
-mclapply(1:nrow(HPC_params), mc.cores= 6, FUN = function(i){
-  
-  gc()
-  
-  temp <- HPC_params[i,]
-  
-  compute_group_value <- temp$compute_group
-  
-  param_v <- temp$v
-  param_ec <- temp$ec
-  param_fract <- temp$fract
-  
-  load_file <- temp$load_file
-  
-  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_strain_script.R"), local = TRUE)
-  
-  return(NULL)
-  
-} )
+start_up_file_name <- "strain_base_IEEE_14_igraph.txt"
 
-HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, "strain_base_IEEE_118_igraph.txt" ), delim = " ")
+#Load the params file. 
+HPC_params <- read_delim(file.path(HPC_startup_parameter_file_path, start_up_file_name ), delim = " ")
 
+#This appears to be considerably faster than the parallel version
 1:nrow(HPC_params) %>% walk(~{
   
-  gc()
+  task_id <- .x #this is the compute group to be used
   
-  temp <- HPC_params[.x,]
-  
-  compute_group_value <- temp$compute_group
-  
-  param_v <- temp$v
-  param_ec <- temp$ec
-  param_fract <- temp$fract
-  
-  load_file <- temp$load_file
-  
+  HPC_start_up_file <- start_up_file_name
+
   source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_strain_script.R"), local = TRUE)
   
   return(NULL)
@@ -1355,88 +1378,222 @@ submit job to myriad
 qsub ~/Spring_Embeddings_Paper/HPC_attack_bash 
 
 
+##A for loop to submit all the permutation jobs
+#!/bin/bash
+for i in {2..30}
+do
+   qsub  ~/Spring_Embeddings_Paper/bash_scripts/HPC_attack_bash_118_permutation $i
+done
+
 to send files to myriad
  scp /home/jonno/Useful_PhD__R_Functions.tar.xz ucabbou@myriad.rc.ucl.ac.uk:~
+
+
+#Extract the data from the zip files
+
+```{r}
+
+
+
+
+
+list.files("/home/jonno/Dropbox/IEEE_Networks/strain") %>% walk(~{
+  
+  untar_myriad_strain_files("/home/jonno/Dropbox/IEEE_Networks/strain", .x, extraction_directory = file.path(project_folder, "test_strain"))
+  
+})
+
+
+tar_path <-"/home/jonno/HPC_jobs"
+  
+tar_file <- "files_from_job_2059520.30.tgz"
+
+
+
+untar_myriad_collapse_summaries(tar_path, tar_file, extraction_directory = file.path(project_folder, "test_collapse"))
+
+list.files("/home/jonno/HPC_jobs") %>% walk(~{
+  
+  untar_myriad_collapse_summaries("/home/jonno/HPC_jobs", tar_file = .x, extraction_directory = file.path(project_folder, "test_collapse"))
+  
+})
+
+
+```
 
 
 This chunk is to test the output of the model and make sure it all makes sense
 ```{r}
 
-#Load all the collapse files
-collapse_data <- list.files(file.path(collapse_set_summaries_path, "Permutation_IEEE_118_igraph"), 
-                   full.names = TRUE, recursive = TRUE) %>%
-  map_df(~read_rds(.x))
+collapse_point <- c(14,30,57, 118, 300) %>%
+  map_df(~{
+print(.x)    
+    #Load all the collapse files
+    collapse_data <- list.files(file.path("/home/jonno/Dropbox/IEEE_Networks/test_collapse", paste0("IEEE_" , .x, "_igraph")), 
+                                full.names = TRUE, recursive = TRUE) %>%
+      map_df(~read_rds(.x))
+    
+    #Filter to keep the mean point of GC collapse per collapse setting
+    collapse_point <- collapse_data %>%
+      group_by(ec, v, fract, permutation) %>%
+      mutate(alpha = first(mean_alpha),
+             loading = first(mean_loading),
+             test = first(edges)) %>%
+      filter(mean_degree_sqrd< 2*mean_degree) %>%#the giant component is lost
+      arrange(attack_round) %>%
+      group_by(ec, v, fract, permutation, simulation_id) %>% #remove all the attacks after the first point at which the giant component is lost
+      summarise_all(first) %>%
+      ungroup %>%
+      group_by(ec, v, fract, permutation) %>%
+      mutate(counts = n()) %>%
+      summarise_all(mean) %>% ungroup %>%
+      mutate(graph = .x)
+    
+    return(collapse_point)
+  })
 
-#Filter to keep the mean point of GC collapse per collapse setting
-collapse_point <- collapse_data %>%
-  group_by(ec, v, fract, permutation) %>%
-  mutate(alpha = first(mean_alpha),
-         loading = first(mean_loading)) %>%
-  filter(mean_degree_sqrd< 2*mean_degree) %>%#the giant component is lost
-  arrange(attack_round) %>%
-  group_by(ec, v, fract, permutation, simulation_id) %>% #remove all the attacks after the first point at which the giant component is lost
-  summarise_all(first) %>%
-  ungroup %>%
-   group_by(ec, v, fract, permutation) %>%
-  mutate(counts = n()) %>%
-  summarise_all(mean) %>% ungroup
+
+test_embeddings <- c(14,30,57, 118, 300)  %>%
+  map_df(~{
+    print(.x)
+    #Read the embeddings files
+    embeddings_data <- list.files(file.path("/home/jonno/Dropbox/IEEE_Networks/test_strain", paste0("IEEE_" , .x, "_igraph")), 
+                                  full.names = TRUE, recursive = TRUE) %>%
+      map_df(~{
+        
+        specs <- basename(.x) %>% gsub(".rds", "", .) %>% 
+          str_split(., "_", simplify = TRUE) %>% t(.) %>% 
+          as_tibble(., name_repair = "unique") %>%
+          pull(V1)
+        
+        embeddings_list <- read_rds(.x)
+        
+        temp_strain <- embeddings_list$edge_embeddings %>%
+          select(strain, tension, alpha, line_load) %>%
+          summarise_all(.funs = c(mean = mean, median = median))
+        
+        temp_elevation <- embeddings_list$node_embeddings %>%
+          select(elevation = z, force) %>%
+          summarise_all(.funs = c(mean = mean, median = median)) %>%
+          select(elevation_median, elevation_mean)
+        
+        bind_cols(temp_strain, temp_elevation) %>%
+          mutate(fract = specs[2],
+                 ec = specs[4],
+                 v = specs[6])
+        
+      }) %>%
+      mutate(
+        ec = as.numeric(ec),
+        v = as.numeric(v),
+        fract = as.numeric(fract),
+        graph = .x)
+    
+    return(embeddings_data)
+    
+  })
+
+
+edges_per_graph <- list.files(power_grid_graphs_path, pattern = ".rds", full.names = TRUE) %>%
+  map_df(~{
+    
+    g <- read_rds(.x)
+    
+    tibble(graph = str_extract(.x, "([0-9]+)") %>% as.numeric(), edges = ecount(g))
+    
+  }) 
+
+
+params <- list.files(analysis_parameter_file_path, pattern = "^base_IEEE", full.names = T) %>%
+  map_df(~{read_rds(.x)}) %>%
+  filter(simulation_id ==1) %>%
+  mutate(graph = str_extract(permutation, "[0-9]+") %>% as.numeric()) %>%
+  select(seed:fract, graph)
+
+
+
+test_out <- left_join(collapse_point, test_embeddings ) %>%
+  select(attack_round, line_load_mean = loading, alpha_a = alpha, strain_mean, v, ec, graph, fract) %>%
+  filter(complete.cases(.)) %>%
+  left_join(., edges_per_graph) %>%
+ left_join(params) %>%
+  mutate(line_load_mean2 = 1/alpha)
 %>%
-  filter(fract ==1)
+  filter(graph ==118,
+         ec == 2)
 
 
-test<- collapse_data %>%
-  filter(fract==1) %>%
-  group_by(ec,v, attack_round, ) %>%
-  select(nodes, edges , generation, contains("loading"), contains("alpha")) %>%
-  summarise_all(mean) 
+#Plot the data
+test_out  %>%
+  #filter(graph == 57) %>%
+    mutate(alpha = 1/alpha) %>%
+  pivot_longer(., cols =c("alpha", "strain_mean"), names_to = "metric" ) %>%
+  group_by(metric, graph) %>%
+  mutate(value = (value-min(value))/(max(value)-min(value)),
+         attack_fract = attack_round/edges) %>%  #rough way of getting the limits
+  ggplot(aes(x = value, y = attack_fract)) +
+ # scale_color_viridis_d()+
+  geom_point(aes(colour = as.factor(ec))) +
+ # facet_grid(graph~metric) +
+  facet_grid(metric~graph) +
+  geom_smooth(method = "loess", formula = y ~ x, se = FALSE)
 
-collapse_point %>%
-#  filter(fract ==1) %>%
-  ggplot(aes(x = loading, y = attack_round, colour = as.factor(ec))) + geom_point()
+test_out %>% ggplot(aes(x = line_load_mean, y= strain_mean, colour = factor(ec))) + 
+  geom_point() + 
+#  scale_color_viridis_c() +
+  facet_grid(~graph)
 
-#Read the embeddings files
-embeddings_data <- list.files(file.path(embeddings_path, "IEEE_14_igraph"), 
-                              full.names = TRUE, recursive = TRUE) %>%
+
+
+  
+  library(yardstick)
+
+#model the fit of strain vs alpha
+model_res <- c(14,30,57, 118, 300) %>%
   map_df(~{
 
-    specs <- basename(.x) %>% gsub(".rds", "", .) %>%str_split(., "_", simplify = TRUE) %>% t(.) %>% as_tibble(., name_repair = "unique") %>%
-      pull(V1)
+    temp <- test_out %>%
+      filter(graph==.x)
     
-    embeddings_list <- read_rds(.x)
-    
-    temp_strain <- embeddings_list$edge_embeddings %>%
-      select(strain, tension, alpha, line_load) %>%
-      summarise_all(.funs = c(mean = mean, median = median))
-    
-    temp_elevation <- embeddings_list$node_embeddings %>%
-      select(elevation = z, force) %>%
-      summarise_all(.funs = c(mean = mean, median = median)) %>%
-      select(elevation_median, elevation_mean)
-    
-    bind_cols(temp_strain, temp_elevation) %>%
-      mutate(fract = specs[2],
-             ec = specs[4],
-             v = specs[6])
-    
-  }) %>%
-  mutate(
-         ec = as.numeric(ec),
-         v = as.numeric(v),
-         fract = as.numeric(fract))
+loess_alpha <- loess(formula = attack_round~ line_load_mean, 
+      data = temp)
 
 
-#This is a pure cloud when IEEE-14 is used. Is this correct?
-left_join(collapse_point, embeddings_data ) %>%
-  select(attack_round, line_load_mean, strain_mean, v, ec) %>%
-  filter(complete.cases(.)) %>%
-  gather(key = metric, value = value, -attack_round, -v,-ec) %>%
-  group_by(metric) %>%
-  mutate(value = value/max(value)) %>% #rough way of getting the limits
-  ggplot(aes(x = value, y = attack_round, colour = as.factor(ec))) +
-  geom_point() +
-  facet_grid(~metric)
+loess_strain <-  loess(formula = attack_round~ strain_mean, 
+      data = temp)
 
 
+model_comp <- temp  %>%
+  mutate(alpha_preds = predict(loess_alpha),
+         strain_preds = predict(loess_strain))
+
+Out <- bind_rows(
+  #the raw relationship
+  metrics(temp, attack_round, line_load_mean) %>% mutate(type = "alpha",
+                                                             class = "raw"),
+  metrics(temp, attack_round, strain_mean) %>% mutate(type = "strain",
+                                                          class = "raw"),
+  #the predictive model
+  metrics(model_comp, attack_round, alpha_preds) %>% mutate(type = "alpha",
+                                                            class = "loess"),
+  metrics(model_comp, attack_round, strain_preds) %>% mutate(type = "strain",
+                                                             class = "loess")
+  ) %>%
+    mutate(graph = .x) %>%
+  rename(metric = .metric, estimate = .estimate) %>%
+  select(-.estimator)
+  
+  return(Out)
+})
+
+model_res2 <- model_res %>%
+  pivot_wider(., names_from = type, values_from = estimate )
+
+
+model_res2 %>%
+  filter(#metric == "rmse",
+         class !="raw") %>%
+  arrange(metric)
 
 ```
 

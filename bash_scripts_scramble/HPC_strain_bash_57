@@ -1,0 +1,53 @@
+#!/bin/bash -l
+
+#
+# Things to check before file ready to submit
+#
+# When filling out this script start at the BOTTOM and finish at the TOP. 
+#
+# HPC_start_up_file is the correct name. Folder path only necessary for permutation or PL simulations
+# The job name matches the type and graph e.g. base_attack_IEEE_300 or base_strain_IEEE_14
+# Number of tasks in the array matches the number of rows inthe HPC_start_up_file
+# Time is correct for graph size
+
+# R Version 3.6.1
+
+# 1. Request 30 minutes of wallclock time (format hours:minutes:seconds).
+#    Change this to suit your requirements.
+#$ -l h_rt=00:07:0
+
+#$ -t 1-480
+
+# 2. Request 1 gigabyte of RAM. Change this to suit your requirements.
+#$ -l mem=2G
+
+# 3. Set the name of the job. You can change this if you wish.
+#$ -N base_strain_IEEE_57
+
+# 4. Set the working directory to somewhere in your scratch space.  This is
+# a necessary step with the upgraded software stack as compute nodes cannot
+# write to your $HOME.
+#
+# NOTE: this directory must exist.
+#
+# Replace "<your_UCL_id>" with your UCL user ID :)
+#$ -wd /home/ucabbou/Scratch/R_output
+ 
+# 5. Your work *must* be done in $TMPDIR 
+cd $TMPDIR
+
+# 6. Run your R program.
+module unload compilers
+module unload mpi
+module load r/recommended
+
+#remember the variable needs to be exported so that R can use it
+#THIS is the main thing that needs to be changed along with the number of -t which is the number of rows in the below script
+export HPC_start_up_file="strain_base_IEEE_57_igraph.txt"
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_strain_script.R > HPC_strain_script.R.out
+
+# 7. Preferably, tar-up (archive) all output files onto the shared scratch area
+#    this will include the R_output file above.
+tar zcvf $HOME/Scratch/R_output/files_from_job_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR
+
+# Make sure you have given enough time for the copy to complete!

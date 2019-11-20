@@ -13,6 +13,7 @@
 # # 
 ###########################
 ###########################
+start_time <- Sys.time()
 
 packages <- c("rlang", "dplyr", "tidyr", "purrr", "tibble", "forcats", "igraph")#, "devtools", "minpack.lm" )#this may be can be removeed
 
@@ -34,8 +35,9 @@ if(dir.exists("/home/jonno")){
   project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
   analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
-  HPC_script_path <- file.path(project_folder, "HPC_parameter_files")
-  data_files_path <- file.path(project_folder)
+  HPC_script_path <- file.path(project_folde/tmpdir/job/2059520.10/r, "HPC_parameter_files")
+  load_data_files_path <- file.path(project_folder) #load the files
+  save_data_files_path <- file.path(project_folder) #save the files
 }else{
   #This is for the folder that is on the cloud
   project_folder <- getwd()
@@ -43,8 +45,15 @@ if(dir.exists("/home/jonno")){
   analysis_parameter_file_path <- file.path(basewd, "analysis_parameter_files") #In myriad the parameter files are in a folder on the home dir
   #not in the project folder like when it is done on my own comp
   HPC_script_path <- file.path(basewd, "HPC_parameter_files")
-  data_files_path <- file.path(project_folder)
-}
+  load_data_files_path <- file.path(basewd) #load the files
+  save_data_files_path <- file.path(project_folder) #save the files
+
+  
+  #If it is not on my computer then the variables need to be loaded from the system environment
+  #Get the task ID
+  task_id <- Sys.getenv("SGE_TASK_ID")
+  HPC_start_up_file <- Sys.getenv("HPC_start_up_file")
+  }
 
 
 #Load some other useful functions
@@ -53,11 +62,6 @@ list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.na
 
 list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
   walk(~source(.x))
-
-
-#Get the task ID
-task_id <- Sys.getenv("SGE_TASK_ID")
-HPC_start_up_file <- Sys.getenv(("HPC_start_up_file"))
 
 temp <- read.delim(file.path(HPC_script_path, HPC_start_up_file), sep =" ", header = TRUE) %>%
   filter(compute_group == task_id)
@@ -87,7 +91,9 @@ parameter_df_temp <- readRDS(file.path(analysis_parameter_file_path, load_file))
       slice(.x)
     
     scramble_network <- Iter$scramble_network #Needs to be added into the target orders file
-    graph_path <- Iter$graph_path
+    graph_path <- file.path(load_data_files_path, Iter$graph_path)
+    Iter_collapse_path <- file.path(save_data_files_path, Iter$collapse_path)
+    Iter_collapse_summary_path <- file.path(save_data_files_path, Iter$collapse_summary_path)
     scramble_seed <- Iter$seed
     ec <- Iter$ec
     v <- Iter$v
@@ -95,8 +101,7 @@ parameter_df_temp <- readRDS(file.path(analysis_parameter_file_path, load_file))
     permutation <- Iter$permutation
     deletion_seed <- Iter$deletion_seed
     simulation_id <- Iter$simulation_id
-    Iter_collapse_path <- file.path(data_files_path, Iter$collapse_path)
-    Iter_collapse_summary_path <- file.path(data_files_path, Iter$collapse_summary_path)
+
 
     ##
     ##
@@ -184,8 +189,11 @@ parameter_df_temp <- readRDS(file.path(analysis_parameter_file_path, load_file))
     #I don't know if it works
   })
 
+stop_time <- Sys.time()
 
-  #Once all the simulations in the compute group have been saved the script is complete
+print(stop_time-start_time)
+  
+#Once all the simulations in the compute group have been saved the script is complete
 
 #                                  !!!!!!!!!!!!!!!!!!!!!N.B.!!!!!!!!!!!!!!!!!
 #when this script is run on the HPC the shell script will tar up all the files and export them from the temp directory to the Scratch directory

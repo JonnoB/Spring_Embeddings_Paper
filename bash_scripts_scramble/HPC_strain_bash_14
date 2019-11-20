@@ -1,22 +1,28 @@
 #!/bin/bash -l
 
-# Batch script to run a serial R job on Legion with the upgraded
-# software stack under SGE. This version works with the modules
-# environment upgraded in 2015.
+#
+# Things to check before file ready to submit
+#
+# When filling out this script start at the BOTTOM and finish at the TOP. 
+#
+# HPC_start_up_file is the correct name. Folder path only necessary for permutation or PL simulations
+# The job name matches the type and graph e.g. base_attack_IEEE_300 or base_strain_IEEE_14
+# Number of tasks in the array matches the number of rows inthe HPC_start_up_file
+# Time is correct for graph size
 
 # R Version 3.6.1
 
 # 1. Request 20 minutes of wallclock time (format hours:minutes:seconds).
 #    Change this to suit your requirements.
-#$ -l h_rt=0:20:0
+#$ -l h_rt=00:04:0
 
-#$ -t 1-2
+#$ -t 1-480
 
 # 2. Request 1 gigabyte of RAM. Change this to suit your requirements.
-#$ -l mem=1G
+#$ -l mem=2G
 
 # 3. Set the name of the job. You can change this if you wish.
-#$ -N test_attack
+#$ -N base_strain_IEEE_14
 
 # 4. Set the working directory to somewhere in your scratch space.  This is
 # a necessary step with the upgraded software stack as compute nodes cannot
@@ -36,11 +42,12 @@ module unload mpi
 module load r/recommended
 
 #remember the variable needs to be exported so that R can use it
-export HPC_start_up_file="/home/ucabbou/HPC_parameter_files/test_attack_base_IEEE_118_igraph.txt"
-Rscript --vanilla /home/ucabbou/Scratch/HPC_Spring_Embeddings_attack_script.R > HPC_Spring_Embeddings_attack_script.R.out
+#THIS is the main thing that needs to be changed along with the number of -t which is the number of rows in the below script
+export HPC_start_up_file="strain_base_IEEE_14_igraph.txt"
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_strain_script.R > HPC_strain_script.R.out
 
 # 7. Preferably, tar-up (archive) all output files onto the shared scratch area
 #    this will include the R_output file above.
-tar zcvf $HOME/Scratch/R_output/files_from_job_$JOB_ID.tgz $TMPDIR
+tar zcvf $HOME/Scratch/R_output/files_from_job_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR
 
 # Make sure you have given enough time for the copy to complete!
