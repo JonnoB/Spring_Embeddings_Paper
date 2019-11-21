@@ -34,14 +34,12 @@ if(dir.exists("/home/jonno")){
   #This folder is for use on my machine
   project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
-  analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files_concentrator")
   load_data_files_path <- file.path(project_folder) #load the files
   save_data_files_path <- file.path(project_folder) #save the files
 }else{
   #This is for the folder that is on the cloud
   project_folder <- getwd()
   basewd <- "/home/ucabbou"
-  analysis_parameter_file_path <- file.path(basewd, "analysis_parameter_files_concentrator") #In myriad the parameter files are in a folder 
   #on the home dir not in the project folder like when it is done on my own comp
   load_data_files_path <- file.path(basewd) #load the files
   save_data_files_path <- file.path(project_folder) #save the files
@@ -65,11 +63,9 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
 #amounts of networks from each load level. This allows for stable blocks of time.
 compute_group_value <- task_id
 print("Load the parameter sheet")
-parameter_df_temp <- readRDS(file.path(analysis_parameter_file_path, load_file)) %>% #arrange(compute_group) %>% #temporary to get timings
-  filter(compute_group_strain == compute_group_value,
-         simulation_id ==1) %>% #this variable is inserted into the file
-  ungroup #just incase
-
+parameter_df_temp <-  generate_concentrator_parameters(load_file) %>% #arrange(compute_group) %>% #temporary to get timings
+  filter(compute_group_strain == compute_group_value, #this variable is inserted into the file
+         simulation_id ==1) #only 1 sim from each set needs the strain calculated as they are all the same.
 
 print(paste("pararmeters loaded. Task number", task_id))
 print("run sims")
