@@ -15,7 +15,7 @@
 ###########################
 #start_time <- Sys.time()
 
-packages <- c("rlang", "dplyr", "tidyr", "purrr", "tibble", "forcats", "igraph", "devtools", "minpack.lm")#, "devtools", "minpack.lm" )#this may be can be removeed
+packages <- c("rlang", "dplyr", "tidyr", "purrr", "tibble", "forcats", "igraph", "devtools", "minpack.lm")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -46,7 +46,7 @@ if(dir.exists("/home/jonno")){
   analysis_parameter_file_path <- file.path(basewd, "analysis_parameter_files") #In myriad the parameter files are in a folder on the home dir
   #not in the project folder like when it is done on my own comp
   HPC_script_path <- file.path(basewd, "HPC_parameter_files")
-  load_data_files_path <- "~/completed_files" #load the files
+  load_data_files_path <- "~/Scratch/attack/IEEE_118" #load the files
   save_data_files_path <- file.path(project_folder) #save the files
   
   

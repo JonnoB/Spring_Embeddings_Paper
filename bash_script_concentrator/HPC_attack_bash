@@ -1,0 +1,45 @@
+#!/bin/bash -l
+
+#
+# Things to check before file ready to submit
+#
+# When filling out this script start at the BOTTOM and finish at the TOP. 
+#
+# GRAPH_NAME is the correct name. 
+# The job name matches the type and graph e.g. base_attack_IEEE_300 or base_strain_IEEE_14
+# Number of tasks in the array matches the number of rows inthe HPC_start_up_file
+# Time is correct for graph size
+
+# R Version 3.6.1
+
+# The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-480
+# In the permutation attack script this will be 1-1200 (i.e 40*480)
+#$ -t 1-1
+
+# 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
+#$ -l mem=4G
+
+#This is the name of the graph that is going to be tested.
+#It is exported as a global variable so that R can import it to the HPC script
+export GRAPH_NAME=${1}
+# 5. Your work *must* be done in $TMPDIR 
+cd $TMPDIR
+
+# 6. Run your R program.
+module unload compilers
+module unload mpi
+module load r/recommended
+
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files_concentrator/HPC_attack_concentrator_script.R > HPC_attack_concentrator_script.R.out
+
+#The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
+
+#The file parts are tarred up separately so that the summaries and the collapse sets can be easily separated and the summaries sued without running any additional scripts
+tar zcvf $HOME/Scratch/attack/$1/collapse_summaries_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_summaries 
+#These files are masssive and I haven't used them for a long time... not saving them is a guarenteed way to need them again!
+#tar zcvf $HOME/Scratch/attack/$1/collapse_sets_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_sets 
+
+#The R output is moved not tarred as it is small and there is only 1 of it. It contains the job runtime so is useful for analysis
+cp $TMPDIR/HPC_attack_concentrator_script.R.out $HOME/Scratch/attack/$1/HPC_attack_concentrator_script.R.out_$JOB_ID.$SGE_TASK_ID
+
+# Make sure you have given enough time for the copy to complete!

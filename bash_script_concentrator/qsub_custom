@@ -1,0 +1,30 @@
+#!/bin/bash -l
+
+# This is a bash script to create a variant of the qsub command that will allow variables to be entered such that 
+# It takes certain commands that are used by the real qstat and pass arguments to the bash script allowing a single bash
+# script to be used fall all graphs when the time required and the graph name are entered as arguments
+
+# Arguement 1 $1 the name of the graph file e.g. IEEE_118_igraph N.B. do not include ".rds"
+# Arguement 2 $2 the name of the type of calculation is either 'attack' or 'strain'
+# Arguement 4 $3 the time value in format 00:00:00
+
+# 1. Request wallclock time (format hours:minutes:seconds). This is an argument of the script when it is called
+# -l h_rt=$3 
+
+# 2. Set the name of the job. This uses the graph name
+# -N attack_$1
+
+# 3. Set the working directory to somewhere in your scratch space.  This is
+# a necessary step with the upgraded software stack as compute nodes cannot
+# write to your $HOME.
+#
+# NOTE: this directory must exist.
+#
+# Replace "<your_UCL_id>" with your UCL user ID :)
+# -wd /home/ucabbou/Scratch/attack/$1
+
+#create the output folder
+mkdir -p $HOME/Scratch/${2}/$1
+
+#The $1 graph name gets passed to the bash file ensuring that the bash file includes the graph name in all outputs
+qsub -l h_rt=$3 -N ${2}_${1} -wd /home/ucabbou/Scratch/${2}/$1 ~/Spring_Embeddings_Paper/bash_script_concentrator/HPC_${2}_bash $1

@@ -12,6 +12,10 @@ stplanr R package for transport
 https://docs.ropensci.org/stplanr/articles/stplanr-od.html
 
 
+Origin destination data for London
+http://passenger.data.tfl.gov.uk/
+
+
 Some bike share stuff that can be used. has data and code. Might only need projection
 https://urbandatacyclist.com/2018/03/15/predicting-route-preferences-in-bike-sharing/
 #Set up
@@ -303,7 +307,7 @@ save_params_for_HPC(parameter_df = parameter_df, HPC_startup_parameter_file_path
 
 test <- read_delim(file.path(HPC_startup_parameter_file_path, ))
 
-Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries_path, 
+Permuted_IEEE_118_results <- list.files(path = "/home/jonno/Dropbox/IEEE_Networks/test_collapse",#collapse_set_summaries_path, 
                                         # pattern = ".rds", I saved them wrong, the code has been corrected but not re-run
                                         full.names = TRUE, 
                                         recursive = TRUE) %>%
@@ -315,9 +319,9 @@ Permuted_IEEE_118_results <- list.files(path = collapse_set_summaries_path,
   group_by(file_path) %>%
   summarise_all(first)  %>%
   #### This is not necessary after re-calc as all the info is included with the extracted data
-  left_join(parameter_df %>% 
-              select(file_path  = collapse_summary_path, 
-                     ec:permutation), by  = "file_path") %>%
+  # left_join(parameter_df %>% 
+  #             select(file_path  = collapse_summary_path, 
+  #                    ec:permutation), by  = "file_path") %>%
   ###
   group_by(ec, v, fract, permutation) %>%
   summarise(NodesAttacked = mean(NodesAttacked)) 
@@ -344,3 +348,280 @@ test <- edge_order_df %>%
 
 ```
 
+
+#load robin hood data
+
+make everything right then sim the last few bits
+
+
+```{r}
+
+
+file_path <-   "/home/jonno/HPC_jobs/IEEE_118_igraph/fract_0.25_ec_1.005_largest_0_smallest_0_robin_hood_FALSE/simulation_id_11.rds"
+.x <- file_path
+
+IEEE_118_results <- list.files(path = "/home/jonno/HPC_jobs/IEEE_118_igraph", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+#The previous takes a long time so an rds should be saved for speed
+saveRDS(IEEE_118_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "IEEE_118_attack_results") )
+
+
+
+IEEE_118_agg_res <- IEEE_118_results %>%
+  group_by(file_path) %>%
+  summarise_all(mean) %>%
+  mutate(mean_alpha = 1/mean_alpha,
+         median_alpha = 1/median_alpha) %>%
+  select(-median_alpha) %>%
+  mutate(carrying_capacity = signif(carrying_capacity),
+         smallest = signif(smallest),
+         largest = signif(largest),
+         fract = signif(fract))
+
+
+test <- IEEE_118_agg_res  %>% #there is an error on 118 where mean alpha and median alpha is equal. However, this is not important as median_alpha and median_load are identical anyway. As such median alpha can be removed
+  pivot_longer(., cols = c("mean_loading", "median_loading", "mean_alpha"), names_to = "metric" )
+
+
+
+test %>%
+   filter(
+          #!robin_hood_mode,
+         fract ==1,
+          carrying_capacity==20
+          ) %>%
+  ggplot(aes(x = value, y = attack_round, colour = factor(carrying_capacity))) + 
+  geom_point() +
+  facet_grid(~metric)
+
++
+  scale_color_viridis_c()
+
+
+
+#load strain
+strain_df <- c(list.files("/home/jonno/test_strain/IEEE_118_igraph/IEEE_118_igraph", full.names = T) 
+               ) %>%
+  map_df(~{
+    
+    elements <- basename(.x) %>% str_remove(pattern = ".rds") %>% str_split(pattern = "_")
+    
+    edge_embeddings <-read_rds(.x)$edge_embeddings  %>%
+      summarise(mean_strain = mean(strain),
+                median_strain = median(strain),
+                mean_tension = mean(tension),
+                median_tension = median(tension)) %>%
+      mutate(fract = elements[[1]][2],
+             carrying_capacity = elements[[1]][4],
+             largest = elements[[1]][6],
+             smallest = elements[[1]][8],
+             robin_hood_mode = elements[[1]][11])
+    
+    return(edge_embeddings)
+    
+  }) %>%
+  mutate(
+    fract = as.numeric(fract),
+    carrying_capacity = as.numeric(carrying_capacity),
+         largest = as.numeric(largest),
+         smallest = as.numeric(smallest),
+         robin_hood_mode = as.logical(robin_hood_mode)) #this needs to be checked when FALSE is present
+
+
+test <- strain_df  %>%
+  filter(carrying_capacity == 20,
+         smallest == 0.5,
+         largest == 0.1,
+         fract == 1,
+         robin_hood_mode == T)
+  
+
+
+kappa <- function(value){
+  
+  (value-min(value))/(max(value)-min(value))
+  
+}
+
+
+strain_norm_df <- strain_df %>%
+  mutate(#force strain to be relative
+  mean_strain = kappa(mean_strain),
+                median_strain = kappa(median_strain),
+                mean_tension = kappa(mean_tension),
+                median_tension = kappa(median_tension)
+)
+
+test_strain <- IEEE_118_agg_res %>%
+  left_join(strain_norm_df, by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
+  rename(harmonic_alpha = mean_loading) %>%
+  filter(!is.na(mean_strain)) %>%
+    pivot_longer(., cols = c("harmonic_alpha", "median_loading", "mean_alpha", "mean_tension", "mean_strain", "median_strain",
+                             "mean_tension", "median_tension"), 
+                 names_to = "metric" ) %>%
+  mutate(embeddings = case_when(
+    grepl("tension|strain", metric) ~ "embeddings",
+    TRUE ~"alpha" 
+  ))
+
+
+test_strain %>%
+   filter(
+        # fract ==1,
+        #  carrying_capacity==20
+          ) %>%
+  ggplot(aes(x = value, y = attack_round, colour = as.factor(robin_hood_mode))) + 
+  geom_point() +
+  facet_wrap(~embeddings + metric) +
+  labs(colour = "capacity")
++
+  geom_smooth()
+
+
+test_strain %>%
+  filter(metric =="harmonic_alpha"
+#        carrying_capacity == 5
+         ) %>%
+  ggplot(aes(x = value, y = attack_round, colour = factor(carrying_capacity))) + 
+  geom_point() +
+  facet_wrap(~factor(fract)) +
+  geom_smooth(se = FALSE)
+
+
+test2 <- test %>%
+   filter(metric !="mean_alpha",
+          carrying_capacity==3)
+
+test <- read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+  group_by(file_path) %>%
+  summarise_all(first) 
+
+  #compare the different metrics in terms of accuracy
+  
+  multi_metric <- metric_set(rmse, rsq, mae, smape)
+  results <-unique(test_strain$metric) %>%
+    map_df(~{
+      
+      temp <- test_strain %>%
+        filter(
+          !is.na(value),
+          fract==1,
+          metric ==.x)
+      
+      loess_mod <- loess(formula =attack_round~ value, 
+                         data = temp)
+      
+      model_comp <- temp  %>%
+        mutate(preds = predict(loess_mod)
+        )
+      
+      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
+        mutate(type = .x)
+      
+    })
+  
+  
+results %>%
+  group_by(.metric) %>%
+  mutate(estimate =kappa(.estimate)) %>%
+  ggplot(aes(x = .metric, y = estimate, colour = type, group = type)) + geom_line() + geom_point()
+  
+  missing_strain <- IEEE_118_agg_res %>%
+    left_join(strain_norm_df, by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
+    rename(harmonic_alpha = mean_loading) %>%
+    filter(is.na(mean_strain)) 
+
+  
+tar_files <- list.files("/home/jonno/test_strain/IEEE_118/") %>% gsub(".tgz", "",.)
+missing_vect <- (list.dirs("/home/jonno/test_strain/IEEE_118") %in% missing_strain$file_path)
+  
+list.dirs("/home/jonno/HPC_jobs/IEEE_118_igraph/")[missing_vect]
+
+
+```
+
+
+##Find missing
+
+```{r}
+missing_df <- generate_concentrator_parameters("IEEE_118_igraph") 
+
+
+missing_attack <- missing_df %>%
+  left_join(IEEE_118_results %>% 
+              mutate(missing = FALSE) %>% 
+              rename(fraction = fract) %>% 
+              select(simulation_id:robin_hood_mode, missing)) %>%
+  filter(is.na(missing)) %>%
+  mutate(missing = TRUE)
+#only missing from two groups this is clearly a timing issue
+table(missing_attack$compute_group)
+
+missing_strain <- missing_df %>%
+  filter(simulation_id ==1) %>%
+  left_join(strain_df %>%  
+              mutate(missing = FALSE) %>% 
+              rename(fraction = fract) %>% 
+              select(fraction:robin_hood_mode, missing)) %>%
+  filter(is.na(missing)) %>%
+  mutate(compute_group_strain_2 = 1:n()) %>%
+  select(embeddings_path, 
+          #compute_group_strain,
+         compute_group_strain_2
+         )
+  
+saveRDS(missing_strain, file.path(project_folder, "missing_files", "strain_concentrator.rds"))
+
+
+
+
+```
+
+
+```{r}
+IEEE_14_igraph]$ ~/Spring_Embeddings_Paper/bash_script_concentrator/qsub_custom IEEE_14_igraph attack 01:00:00
+
+load_file <- "IEEE_118_igraph"
+task_id <- 1
+
+#untar specific file
+tar -xzf files_from_job_2101622.99.tgz -C ~/Scratch/attack_out --wildcards --no-anchored '*collapse_summaries*' --strip-components 4
+
+#untar all files and move them to a new folder. All the files are collected in the final folder structure which is very helpful
+for f in *.tgz; do tar -xzf $f -C ~/Scratch/attack_out --wildcards --no-anchored '*collapse_summaries*' --strip-components 4; done
+
+tar -czvf IEEE_118.tgz /IEEE_118
+
+#use rsync to get the files off
+
+list.files( "/home/jonno/test_strain/IEEE_118", pattern = ".tgz") %>%
+  walk(~{
+    
+    untar_myriad_strain_files(tar_path = "/home/jonno/test_strain/IEEE_118", 
+                              tar_file = .x, 
+                              extraction_directory = "/home/jonno/test_strain/Extracted_118")
+    
+    
+  })
+  
+
+```
+
+#

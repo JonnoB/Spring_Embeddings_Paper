@@ -43,6 +43,7 @@ if(dir.exists("/home/jonno")){
   load_data_files_path <- file.path(basewd) #load the files
   save_data_files_path <- file.path(project_folder) #save the files
 
+  
   #If it is not on my computer then the variables need to be loaded from the system environment
   #Get the task ID
   task_id <- Sys.getenv("SGE_TASK_ID")
@@ -60,16 +61,14 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
 #The compute group used for this calculation filters the parameter df down to groups which have equal
 #amounts of networks from each load level. This allows for stable blocks of time.
 compute_group_value <- task_id
-print(paste0("Target graph ", load_file, " Compute group ", compute_group_value))
 print("Load the parameter sheet")
 #The parameter file is generated here. It only takes 2 seconds so is not a problem for in code generation
-parameter_df_temp <-  generate_concentrator_parameters(load_file) %>% #temporary to get timings
+parameter_df_temp <-  generate_pl_parameters(load_file) %>% #temporary to get timings
   filter(
-    #   simulation_id ==1,
     compute_group == compute_group_value) #this variable is inserted into the file
-  #To test this file add in a filter so that only simulation 1 is calculated.
-print(paste0("run ", nrow(parameter_df_temp), " sims"))
+#To test this file add in a filter so that only simulation 1 is calculated.
 
+print("run sims")
 1:nrow(parameter_df_temp) %>%
   walk(~{
     
@@ -100,15 +99,7 @@ print(paste0("run ", nrow(parameter_df_temp), " sims"))
       g <- readRDS(file = graph_path) 
       
       #Proportionally load the network and redistribute that load according to the parameter settings
-      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity") %>%
-        redistribute_excess(., 
-                            largest = Iter$largest, 
-                            smallest = Iter$smallest, 
-                            fraction = Iter$fraction, 
-                            flow = power_flow, 
-                            edge_capacity = edge_capacity,
-                            robin_hood_mode = Iter$robin_hood_mode,
-                            output_graph = TRUE)
+      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity")
       
       #Set the seed for the random order and generate the edge deletion order
       set.seed(Iter$deletion_seed)

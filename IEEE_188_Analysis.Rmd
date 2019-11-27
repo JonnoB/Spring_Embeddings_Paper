@@ -1469,6 +1469,7 @@ test_embeddings <- c(14,30,57, 118, 300)  %>%
         embeddings_list <- read_rds(.x)
         
         temp_strain <- embeddings_list$edge_embeddings %>%
+          mutate(tension = k*(H-1)) %>% #there was an error when strain was calculated previously it was simply H*k
           select(strain, tension, alpha, line_load) %>%
           summarise_all(.funs = c(mean = mean, median = median))
         
@@ -1513,7 +1514,7 @@ params <- list.files(analysis_parameter_file_path, pattern = "^base_IEEE", full.
 
 
 test_out <- left_join(collapse_point, test_embeddings ) %>%
-  select(attack_round, line_load_mean = loading, alpha_a = alpha, strain_mean, v, ec, graph, fract) %>%
+  select(attack_round,  alpha_a = alpha, strain_mean:line_load_median, v, ec, graph, fract) %>% #line_load_mean = loading,
   filter(complete.cases(.)) %>%
   left_join(., edges_per_graph) %>%
  left_join(params) %>%
@@ -1527,7 +1528,7 @@ test_out <- left_join(collapse_point, test_embeddings ) %>%
 test_out  %>%
   #filter(graph == 57) %>%
     mutate(alpha = 1/alpha) %>%
-  pivot_longer(., cols =c("alpha", "strain_mean"), names_to = "metric" ) %>%
+  pivot_longer(., cols =c("line_load_median", "strain_median"), names_to = "metric" ) %>%
   group_by(metric, graph) %>%
   mutate(value = (value-min(value))/(max(value)-min(value)),
          attack_fract = attack_round/edges) %>%  #rough way of getting the limits
@@ -1553,13 +1554,13 @@ model_res <- c(14,30,57, 118, 300) %>%
   map_df(~{
 
     temp <- test_out %>%
-      filter(graph==.x)
+      filter(graph==.x) 
     
 loess_alpha <- loess(formula = attack_round~ line_load_mean, 
       data = temp)
 
 
-loess_strain <-  loess(formula = attack_round~ strain_mean, 
+loess_strain <-  loess(formula = attack_round~ strain_median, 
       data = temp)
 
 
@@ -1569,14 +1570,14 @@ model_comp <- temp  %>%
 
 Out <- bind_rows(
   #the raw relationship
-  metrics(temp, attack_round, line_load_mean) %>% mutate(type = "alpha",
+  metrics(temp, attack_round, line_load_median) %>% mutate(type = "alpha",
                                                              class = "raw"),
   metrics(temp, attack_round, strain_mean) %>% mutate(type = "strain",
                                                           class = "raw"),
   #the predictive model
-  metrics(model_comp, attack_round, alpha_preds) %>% mutate(type = "alpha",
+  mape(model_comp, attack_round, alpha_preds) %>% mutate(type = "alpha",
                                                             class = "loess"),
-  metrics(model_comp, attack_round, strain_preds) %>% mutate(type = "strain",
+  mape(model_comp, attack_round, strain_preds) %>% mutate(type = "strain",
                                                              class = "loess")
   ) %>%
     mutate(graph = .x) %>%

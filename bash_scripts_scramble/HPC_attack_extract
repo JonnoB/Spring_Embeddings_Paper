@@ -42,7 +42,7 @@ module load r/recommended
 #remember the variable needs to be exported so that R can use it
 #THIS is the main thing that needs to be changed along with the number of -t which is the number of rows present in the text file used for HPC start up.
 
-Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_attack_extract.R > HPC_attack_extract.R.out
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_attack_extract.R > HPC_attack_extract.R.out
 
 # 7. Preferably, tar-up (archive) all output files onto the shared scratch area
 #    this will include the R_output file above.

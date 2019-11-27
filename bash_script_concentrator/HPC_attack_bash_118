@@ -52,6 +52,12 @@ Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files_concentrator/H
 
 # 7. Preferably, tar-up (archive) all output files onto the shared scratch area
 #    this will include the R_output file above.
-tar zcvf $HOME/Scratch/attack/IEEE_118/files_from_job_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR
+tar zcvf $HOME/Scratch/attack/IEEE_118/collapse_summaries_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_summaries
+
+tar zcvf $HOME/Scratch/attack/IEEE_118/collapse_sets_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_sets
+
+#Then copy the last file
+
+cp $TMPDIR/HPC_attack_concentrator_script.R.out $HOME/Scratch/attack/IEEE_118/HPC_attack_concentrator_script.R.out_$JOB_ID.$SGE_TASK_ID
 
 # Make sure you have given enough time for the copy to complete!

@@ -63,32 +63,14 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
 #amounts of networks from each load level. This allows for stable blocks of time.
 compute_group_value <- task_id
 print("Load the parameter sheet")
-parameter_df_temp <-  generate_concentrator_parameters(load_file) #%>%
-  # filter(carrying_capacity == 20,
-  #        smallest == 0.5,
-  #        largest == 0.1,
-  #        fraction == 1,
-  #        robin_hood_mode == T)
-
-#I messed up the times so need to insert this if statment to selectively delete the files that have been calculated already
-#then re-run the files that have not been re-calculated yet
-if(file.exists(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))){
-    
-  parameter_df_temp <- parameter_df_temp %>%  
-  left_join(readRDS(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))) %>%
-    filter(is.na(compute_group_strain_2),
-           simulation_id ==1) %>% #remove all files that have been made already
-  mutate(compute_group_strain = 1:n())
-  
-}
-
-#filter to current job number
-parameter_df_temp <- parameter_df_temp %>%
+parameter_df_temp <-  generate_pl_parameters(load_file) %>% #arrange(compute_group) %>% #temporary to get timings
   filter(compute_group_strain == compute_group_value, #this variable is inserted into the file
          simulation_id ==1) #only 1 sim from each set needs the strain calculated as they are all the same.
 
 print(paste("pararmeters loaded. Task number", task_id))
+
 print("run sims")
+
 1:nrow(parameter_df_temp) %>%
   walk(~{
     
@@ -104,7 +86,7 @@ print("run sims")
     Iter_collapse_path <- file.path(save_data_files_path, "collapse_sets", Iter$collapse_base)
     Iter_collapse_summary_path <- file.path(save_data_files_path, "collapse_summaries", Iter$collapse_base)
     Iter_embedding_path <- file.path(save_data_files_path, Iter$embeddings_path)
-  
+    
     
     ##
     ##
@@ -123,22 +105,11 @@ print("run sims")
       g <- readRDS(file = graph_path) #read the target graph
       
       
-      #Proportionally load the network and redistribute that load according to the parameter settings
-      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity") %>%
-        redistribute_excess(., 
-                            largest = Iter$largest, 
-                            smallest = Iter$smallest, 
-                            fraction = Iter$fraction, 
-                            flow = power_flow, 
-                            edge_capacity = edge_capacity,
-                            robin_hood_mode = Iter$robin_hood_mode,
-                            output_graph = TRUE)
+      #Proportionally load the network
+      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity")
       
-
-      
-      
-      common_time <- 0.005
-      common_Iter <- 40000
+      common_time <- 0.01
+      common_Iter <- 20000
       common_tol <- 1e-10
       common_mass <- 1
       
@@ -224,7 +195,7 @@ print("run sims")
       #After the simulation and its summary are saved to the drive the next in the compute group is calculated
     } 
     
-      return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 
+    return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 
     #I don't know if it works
   })
 
