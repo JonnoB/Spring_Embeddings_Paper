@@ -30,7 +30,7 @@ module unload compilers
 module unload mpi
 module load r/recommended
 
-Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files_concentrator/HPC_attack_concentrator_script.R > HPC_attack_concentrator_script.R.out
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_files_concentrator/HPC_attack_concentrator_script.R > HPC_attack_concentrator_script.R.out
 
 #The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
 

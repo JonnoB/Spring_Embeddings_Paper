@@ -24,7 +24,7 @@
 # -wd /home/ucabbou/Scratch/attack/$1
 
 #create the output folder
-mkdir -p $HOME/Scratch/${2}/$1
+mkdir -p $HOME/Scratch/${2}/PL_$1
 
 #The $1 graph name gets passed to the bash file ensuring that the bash file includes the graph name in all outputs
-qsub -l h_rt=$3 -N ${2}_${1} -wd /home/ucabbou/Scratch/${2}/PL_${1} ~/Spring_Embeddings_Paper/bash_script_PL/HPC_${2}_bash $1
+qsub -l h_rt=$3 -N ${2}_${1} -wd /home/ucabbou/Scratch/${2}/PL_${1} ~/Spring_Embeddings_Paper/bash_scripts/bash_script_PL/HPC_${2}_bash $1

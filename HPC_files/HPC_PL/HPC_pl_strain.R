@@ -119,7 +119,7 @@ print("run sims")
         set.edge.attribute(., "Area", value = 1) %>%
         calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
         calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
-        normalise__dc_load(.,  
+        normalise_dc_load(.,  
                            generation = "generation", 
                            demand  = "demand",
                            net_generation = "net_generation", 
