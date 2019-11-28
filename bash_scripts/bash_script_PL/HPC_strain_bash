@@ -30,7 +30,7 @@ module unload compilers
 module unload mpi
 module load r/recommended
 
-Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_PL/HPC_strain_pl.R > HPC_strain_pl.R.out
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_PL/HPC_strain_pl.R > HPC_pl_strain.R.out
 
 #The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
 
@@ -39,6 +39,6 @@ Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_PL/HPC_str
 cp -r $TMPDIR/embeddings/* $HOME/Scratch/strain/PL_${1}/
 
 #The R output is moved not tarred as it is small and there is only 1 of it. It contains the job runtime so is useful for analysis
-cp $TMPDIR/HPC_strain_concentrator_script.R.out $HOME/Scratch/strain/PL_${1}/HPC_strain_pl.R.out_$JOB_ID.$SGE_TASK_ID
+cp $TMPDIR/HPC_pl_strain.R.out $HOME/Scratch/strain/PL_${1}/HPC_pl_strain.R.out_$JOB_ID.$SGE_TASK_ID
 
 # Make sure you have given enough time for the copy to complete!

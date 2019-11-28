@@ -14,7 +14,7 @@
 
 # The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-480
 # In the permutation attack script this will be 1-1200 (i.e 40*480)
-#$ -t 1-1
+#$ -t 1-100
 
 # 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
 #$ -l mem=4G
