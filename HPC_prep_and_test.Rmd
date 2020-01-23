@@ -11,7 +11,7 @@ This markdown contains the code that is used to feed the HPC as well as the post
 
 #Set up
 ```{r}
-packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm")
+packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm", "ggraph", "yardstick")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -20,6 +20,7 @@ sapply(packages, library, character.only = TRUE)
 
 #install_github("JonnoB/PowerGridNetworking")
 library(PowerGridNetworking)
+#library(NetworkSpringEmbedding)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
 
@@ -46,16 +47,40 @@ HPC_startup_parameter_file_path <- file.path(project_folder, "HPC_parameter_file
 embeddings_path <- file.path(project_folder, "embeddings") 
 
 #make sure all the paths exist
-ls(pattern = "_path") %>% walk(~{
-  if(!file.exists(.x)) dir.create(.x, recursive = T)
-})
+#this is really annoying as it keeps making folders in the home directory
+# ls(pattern = "_path") %>% walk(~{
+#   if(!file.exists(.x)) dir.create(.x, recursive = T)
+# })
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
   walk(~source(.x))
 
-list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
+list.files(file.path(basewd, "NetworkSpringEmbedding/R"), pattern = ".R", full.names = T) %>%
   walk(~source(.x))
+
+```
+
+
+#test brain graphs
+http://braingraph.org/cms/download-pit-group-connectomes/
+```{r}
+
+brains <- list.files("/home/jonno/Downloads/repeated_10_scale_60", full.names = T)
+test <-read_graph(brains[2], format = "graphml")
+
+ggraph(test, layout = layout_with_fr(test)) +
+   geom_edge_link2(aes(colour = FA_mean)) +
+  scale_edge_colour_viridis() +
+  geom_node_point( aes(colour = betweenness(test) ),
+                   size = 2.5) 
+
+
+edge_attr(test)
+
+as_data_frame(test ) %>%
+  ggplot(aes(x = number_of_fibers)) +geom_density()
+
 
 ```
 
@@ -75,7 +100,7 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
   
   load_file <- "IEEE_118_igraph"
 
-  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_strain_script.R"), local = TRUE)
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_attack_script.R"), local = TRUE)
   
   return(NULL)
   
@@ -105,6 +130,466 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
 
 
 ```
+
+
+##Test r and c script
+
+This tests to see if the system diverges for all the test r and c values using the most extreme cases of 1 and infinity
+
+The results of this test allow me to set the simulation parameters  for the r c test on IEEE118. This means I can run the test on the HPC and hopefully not have too many failed simulations
+
+question: if I do a 100 by 100 raster of r and c for single edge, and also do it for a real network, what do the differences mean or look like?
+
+```{r}
+#If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
+#Load the params file. 
+
+
+#This appears to be considerably faster than the parallel version
+1:1 %>% walk(~{
+  
+  task_id <- .x #this is the compute group to be used
+  
+  load_file <- "IEEE_118_igraph"
+
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_PL", "HPC_pl_strain_test_r_c.R"), 
+         local = TRUE)
+  
+  return(NULL)
+  
+} )
+
+
+r_c_test_node_df <- list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph") %>%
+  map_df(~{
+    print(.x)
+    parts <-str_remove(.x, ".rds") %>%
+      str_split(., "_", simplify = T)
+    Out <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph", .x))$node_embeddings %>%
+      mutate(
+        ec = as.numeric(parts[2]),
+        r = as.integer(parts[4]),
+        c = as.integer(parts[6]))
+    
+    return(Out)
+    
+  }
+  ) 
+
+r_c_test_df <- list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph") %>%
+  map_df(~{
+    print(.x)
+    parts <-str_remove(.x, ".rds") %>%
+      str_split(., "_", simplify = T)
+    Out <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph", .x))$edge_embeddings %>%
+      mutate(
+        ec = as.numeric(parts[2]),
+        r = as.integer(parts[4]),
+        c = as.integer(parts[6]))
+    
+    return(Out)
+    
+  }
+  )
+
+r_c_dynamics_df <- list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph")%>%
+  map_df(~{
+    #print(.x)
+    parts <-str_remove(.x, ".rds") %>%
+      str_split(., "_", simplify = T)
+    Out <- read_rds(
+      file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph", .x))$network_dynamics %>% 
+      summarise_all(last) %>%
+      #slice(5e3) %>%
+      mutate(
+        ec = as.numeric(parts[2]),
+        r = as.integer(parts[4]),
+        c = as.integer(parts[6]),
+        tstep = as.numeric(parts[8]),
+        coef_drag = as.numeric(parts[11]))
+    
+    return(Out)
+    
+  }
+  ) %>%
+  mutate(total_energy = potential_energy + kinetic_energy,
+         combo = paste(r,c, sep = "_"))
+
+#at the point of convergence
+r_c_dynamics_df2 <- list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph")%>%
+  map_df(~{
+    #print(.x)
+    parts <-str_remove(.x, ".rds") %>%
+      str_split(., "_", simplify = T)
+    Out <- read_rds(
+      file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph", .x))$network_dynamics %>% 
+      filter(static_force<=2e-3) %>%
+      summarise_all(first) %>%
+      #slice(5e3) %>%
+      mutate(
+        ec = as.numeric(parts[2]),
+        r = as.integer(parts[4]),
+        c = as.integer(parts[6]),
+        tstep = as.numeric(parts[8]),
+        coef_drag = as.numeric(parts[11]))
+    
+    return(Out)
+    
+  }
+  ) %>%
+  mutate(total_energy = potential_energy + kinetic_energy,
+         combo = paste(r,c, sep = "_"))
+
+
+#look at the last element of the RC data frame for each simulation
+#discard non converged values
+r_c_dynamics_df %>%
+  filter((static_force)<2e-3, total_energy<1) %>%
+  ggplot(aes(x = log10(static_force+kinetic_force), y = total_energy, colour = factor(coef_drag))) + geom_point() +
+    facet_grid(r~c)
+
+
+  r_c_dynamics_df %>%
+  filter(ec ==1) %>%
+  mutate(converged = (static_force)<1e-3,
+         total_force = static_force+kinetic_force) %>%
+  ggplot(aes(x= factor(coef_drag, levels= unique(coef_drag)), y = factor(tstep), fill = converged)) +
+  geom_raster() +
+    facet_grid(r~c)
+  
+  #It is easier to converge large numbers to low force levels, however, large force levels are more likely to diverge!
+  #When ec is 1 the rasters are all dependent on c alone as the k value is c
+  #When the ec value is Inf the rasters are dependent on both r and c
+  ec_val <- Inf
+  convergance_raster_prep <-   r_c_dynamics_df %>%
+  #    filter(r == 1, c == 1) %>%
+  mutate(converged = static_force<2e-3,
+         static_force = ifelse(static_force>2e1, NA, static_force), #If the static force exceeds the threshold set to that threshold. This prevents large ranges when trying to plot colour
+         total_force = static_force+kinetic_force,
+         total_force = ifelse(total_force<1, total_force, NA)) 
+      
+     convergance_raster_prep  %>%
+  filter(ec ==ec_val,
+         #static_force<2e-3
+         ) %>%
+  ggplot(aes(x= factor(coef_drag), 
+             y = factor(tstep, levels = unique(tstep)), 
+             fill = log10(Iter))) +
+  geom_raster() +
+    facet_grid(r~c) + scale_fill_viridis_c() +
+      labs(title = paste("residual force of 118 with PL of", ec_val,"across different r,c, tstep and drag values"),
+           fill = "log static force",
+           x = "drag",
+           y = "time step")
+
+ #These are the parameters that will converge for both 1 and Inf and that give the lowest static_force across all iterations
+ #for 120k iterations.
+ converging_parameters_df <- convergance_raster_prep %>%
+   filter(r>=100, c >=100, !is.na(static_force)) %>%
+    group_by(coef_drag, tstep, r,c) %>%
+    summarise(converged = sum(converged),
+              total = n(),
+              min = min(static_force),
+              max = max(static_force),
+              max_kin = max(kinetic_force)) %>%
+   filter(converged == 2) %>%
+   group_by(r,c) %>%
+   slice(which.min(max)) %>%
+   ungroup
+ 
+  converging_parameters_df %>%
+   ungroup %>%
+   select(1:4) %>% 
+   mutate(compute_group_strain = as.integer(1:n())) %>%
+   dput
+ 
+ 
+ #linear relation between log static force and log kinetic energy/force
+ convergance_raster_prep %>%
+   filter(!is.na(static_force)) %>%
+    filter(r>=100, c >=100) %>%
+   ggplot(aes(x = log10(static_force), y = log10(kinetic_energy), colour = as.factor(paste(coef_drag)))) + 
+   geom_point()
+
+ 
+
+
+tension_strain_relationship <- r_c_test_df %>%
+  select(tension:c ) %>%
+  select(-percentile_strain) %>%
+  group_by(ec, r,c) %>% 
+  summarise_all(list(mean =mean, median = median,min =  min, max =  max))
+
+tension_strain_relationship %>%
+  mutate(ratio = strain_mean/tension_mean) %>%
+ # filter(ec == Inf) %>%
+ggplot(., aes(x = as.factor(r), y = as.factor(c), fill = tension_mean)) + geom_raster() +
+  facet_grid(~ec) +
+  scale_fill_viridis_c(option = "B")
+
+
+
+#Rows are r and columns are c.
+#r/c ratio determins the maximum energy range in the network the larger the ratio the bigger the gap
+#also the larger c the lower the absolute amount of the energy in the system
+#also 
+r_c_dynamics_df %>%
+   filter((round(t/0.01)%%100)==0,
+  #  paste(r,c)!="10000 10000",
+  #  t>580
+         ) %>%
+  ggplot(aes(x = t, y = log10(total_energy), colour = as.factor(ec))) + geom_line()+
+  facet_grid(r~c)
+
+
+
+r_c_dynamics_df %>%
+   filter((round(t/0.01)%%100)==0,
+  #  paste(r,c)!="10000 10000",
+  #  t>580
+         ) %>%
+ggplot(aes(x = (t), y =log10(static_force), colour =  factor(ec))) + geom_line()+
+  facet_grid(c~r)
+
+
+combined_summary <-r_c_test_node_df %>%
+  group_by(ec,r,c) %>%
+  summarise(kinetic_energy = sum(kinetic_energy),
+          force_energy = sum(abs(NetForce + friction))) 
+  
+
+combined_summary  %>%
+   filter((round(t/tstep)%%100)==0,
+         #t<10
+       #  node %in% c(1,2)
+         ) %>%
+  ggplot(aes(x = log10(kinetic_energy), y = log10(potential_energy), colour = paste(r,c))) +geom_jitter()
+
+test <- r_c_dynamics_df %>%
+  #filter(ec ==1) %>%
+  group_by(total_energy>4000, combo, ec) %>%
+  summarise(counts = n())
+  
+test <- r_c_dynamics_df %>%
+  filter(combo =="100_10000", ec==Inf)
+
+#test the versions done on HPC
+list.files("/home/jonno/test_strain/strainrc/IEEE_118_igraph", pattern = ".")
+spec_file <- readRDS(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph", "ec_1_r_10000_c_10000_tstep_0.01_coef_drag_0.5.rds")  )
+
+
+node_status <- spec_file$node_embeddings
+
+dynamics <- spec_file$network_dynamics
+
+dynamics %>%
+  filter(Iter!=0)%>% #stops a line going up from 0
+  filter(t>20) %>%
+  #filter(static_force<10) %>%
+  ggplot(aes(x = (t), y = log10(static_force))) + geom_line()
+tail(dynamics)
+
+
+     #This shows the convergence relationship for 
+    convergance_raster_prep2 <-   r_c_dynamics_df2 %>%
+  mutate(converged = static_force<2e-3,
+         static_force = ifelse(static_force>2e1, NA, static_force), #If the static force exceeds the threshold set to that threshold. This prevents large ranges when trying to plot colour
+         total_force = static_force+kinetic_force,
+         total_force = ifelse(total_force<1, total_force, NA)) %>%
+             select(Iter, r,c, ec, tstep, coef_drag, combo, static_force, kinetic_force) %>%
+            filter(
+       is.finite(Iter),
+         static_force<=2e-3,
+         ) %>%
+       mutate(tstep_drag = tstep/coef_drag,
+              rxc = log10(r*c),
+              r_c = log10(r/c),
+              rc = paste("r = ", r, "c=", c),
+              ec = paste0("alpha_", ec),
+              lgIter = log10(Iter),
+              lgtstep_drag = log10(tstep_drag)
+              )
+
+    
+    #The relationship between the ratio of the tstep and drag with the time to convergence
+    convergance_raster_prep2 %>%
+      ggplot(aes(
+        y = log10(Iter), 
+        x = log10(tstep_drag), 
+        colour = rxc,
+        linetype = factor(ec), 
+        group = interaction(factor(ec), rc))) + 
+      geom_line() +
+      labs(title = "Ratio of time step size over coefficient of drag against iterations",
+           y = "log10 Number of Iterations to convergence",
+           x = "log10 timestep size divided by drag coefficient") +
+      facet_wrap(~r_c) +
+      scale_color_viridis_c()
+          
+          #Model coefficients
+         model_coefs <- -4:4 %>%
+            map_df(~{
+              
+              data_df <-  convergance_raster_prep2 %>% filter( r_c==.x)
+              
+              lm(lgIter~ lgtstep_drag + ec+ rxc , data = data_df ) %>%
+                tidy %>% mutate(r_c = .x,
+                                total_rxc = length(unique(data_df$rxc)))
+              
+            })
+          
+          #model performance
+          model_perf <- -4:4 %>%
+            map_df(~{
+              
+              
+              lm(lgIter~ lgtstep_drag + ec+ rxc +r_c , data = convergance_raster_prep2 %>% filter( r_c==.x) ) %>%
+                glance %>% mutate(r_c = .x)
+              
+            })
+          
+          
+          #The most extreme r_c ratios have the least sucessful convergences
+          #
+          model_coefs %>%
+            ggplot(aes(x = r_c, y = estimate, colour = factor(total_rxc))) + geom_point() +
+            facet_wrap(~term, scales = "free_y")
+          
+          
+          test <- convergance_raster_prep2 %>%
+            group_by(r_c, rxc) %>%
+            summarise(counts = n())
+          #wot dis mean? can I fill in the gaps what does it even tell me apart from it is cool?
+          test %>%
+            ggplot(aes(x = r_c,y = rxc, fill = counts)) + geom_raster() +
+            scale_fill_viridis_c()
+          
+          #This is a pretty clear pattern
+          #It shows that the central rxc combo has the most examples of convergence in it
+          test %>%
+            group_by(rxc) %>%
+            summarise(counts = n()) %>%
+            ggplot(aes(x = rxc, y = counts)) + geom_col()
+
+test <-list.files("/home/jonno/test_strain/strain_2533925.1/tmpdir/job/2533925.1/embeddings/IEEE_118_igraph", full.names = T)[7] %>%
+  read_rds(.)
+
+test1 <- test$node_embeddings
+test2 <- test$edge_embeddings
+test3 <- test$network_dynamics
+
+```
+
+#Test tstep and drag
+This is similar to the above code except that it produces a more high def coef and drag plot for a single r c value
+```{r}
+  task_id <- 1 #this is the compute group to be used
+  
+  load_file <- "IEEE_118_igraph"
+
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_PL", "HPC_pl_strain_test_drag_tstep.R"), 
+         local = TRUE)
+  
+  
+ file_path <-  "/home/jonno/Dropbox/IEEE_Networks/embeddings/PL_IEEE_118_igraph_tstep_drag"
+  
+  
+  
+  
+tstep_drag_dynamics_df <- list.files(file_path)%>%
+  map_df(~{
+    #print(.x)
+    parts <-str_remove(.x, ".rds") %>%
+      str_split(., "_", simplify = T)
+    Out <- read_rds(
+      file.path(file_path, .x))$network_dynamics %>% 
+      summarise_all(last) %>%
+      #slice(5e3) %>%
+      mutate(
+        ec = as.numeric(parts[2]),
+        r = as.integer(parts[4]),
+        c = as.integer(parts[6]),
+        tstep = as.numeric(parts[8]),
+        coef_drag = as.numeric(parts[11]))
+    
+    return(Out)
+    
+  }
+  ) %>%
+  mutate(total_energy = potential_energy + kinetic_energy,
+         converged = static_force < 2e-3)
+
+
+
+unique(tstep_drag_dynamics_df$c)
+
+  tstep_drag_dynamics_df %>%
+  filter(c ==100,
+         r== 1e4) %>%
+  mutate(converged = (static_force)<=2e-3,
+         total_force = static_force+kinetic_force) %>%
+  ggplot(aes(x= factor(coef_drag, levels= unique(coef_drag)), y = factor(tstep), fill = converged)) +
+  geom_raster() 
+  
+  #It is easier to converge large numbers to low force levels, however, large force levels are more likely to diverge!
+
+  ec_val <- Inf
+  convergance_raster_prep <-   tstep_drag_dynamics_df%>%
+  #    filter(r == 1, c == 1) %>%
+  mutate(converged = static_force < 2e-3,
+     #    static_force = ifelse(static_force > 2e1, NA, static_force), #If the static force exceeds the threshold set to that threshold. This prevents large ranges when trying to plot colour
+         total_force = static_force+kinetic_force,
+         total_force = ifelse(total_force<1, total_force, NA)) 
+      
+     convergance_raster_prep  %>%
+  filter(ec ==ec_val,
+         static_force<=2e-3,
+         c ==100,
+         r== 1e4) %>%
+  ggplot(aes(x= factor(coef_drag), 
+             y = factor(tstep, levels = unique(tstep)), 
+             fill = (Iter))) +
+  geom_raster() + scale_fill_viridis_c() +
+      labs(title = paste("residual force of 118 with PL of", ec_val,"across different r,c, tstep and drag values"),
+           fill = "log10 Iterations to convergence",
+           x = "drag",
+           y = "time step")
+     
+     convergance_raster_prep %>% filter(
+       #ec ==ec_val,
+         static_force<=2e-3,
+       #  c ==100,
+        # r== 1e4
+         ) %>%
+       mutate(ratio = tstep/coef_drag,
+              rc = paste("r = ", r, "c=", c)) %>%
+       ggplot(aes(x = Iter, y = ratio, colour = rc)) + geom_point() +
+       labs(title = "Ratio of time step size over coefficient of drag against iterations",
+            x = "Number of Iterations to convergence",
+            y = "timestep size divided by drag coefficient") +
+       facet_grid(~ec)
+  
+```
+
+
+
+#Accuracy of converged state
+This chunk calculates the full movement of the nodes 
+
+```{r}
+1:3 %>% walk(~{
+  
+  task_id <- .x #this is the compute group to be used
+  
+  load_file <- "UK_high_voltage"
+
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files", "HPC_attack_random.R"), local = TRUE)
+  
+  return(NULL)
+  
+} )
+```
+
 
 
 #Extract the data from the zip files
@@ -169,40 +654,27 @@ saveRDS(IEEE_118_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", 
 
 
 ##Strain data
+
+This is for the rc test data on IEEE118. The data is aggregated and then saved to a file for faster loading and analysis
+This data demonstrates that tension is unaffected by R or C and that tension is also the best proxy for robustness
 ```{r}
 
-#load strain from all individual files
-strain_df <- list.files("/home/jonno/test_strain/IEEE_118_igraph/IEEE_118_igraph", 
-                          full.names = T)%>%
-  map_df(~{
-    
-    elements <- basename(.x) %>% str_remove(pattern = ".rds") %>% str_split(pattern = "_")
-    
-    edge_embeddings <-read_rds(.x)$edge_embeddings  %>%
-      summarise(mean_strain = mean(strain),
-                median_strain = median(strain),
-                mean_tension = mean(tension),
-                median_tension = median(tension)) %>%
-      mutate(fract = elements[[1]][2],
-             carrying_capacity = elements[[1]][4],
-             largest = elements[[1]][6],
-             smallest = elements[[1]][8],
-             robin_hood_mode = elements[[1]][11])
-    
-    return(edge_embeddings)
-    
-  }) %>%
-  mutate(
-    fract = as.numeric(fract),
-    carrying_capacity = as.numeric(carrying_capacity),
-         largest = as.numeric(largest),
-         smallest = as.numeric(smallest),
-         robin_hood_mode = as.logical(robin_hood_mode)) #this needs to be checked when FALSE is present
+(1:9) %>% walk(~{
+  print(.x)
+  file_name <- paste0("/home/jonno/test_strain/strainrc/strain_2547988.", .x,"/tmpdir/job/2547988.",.x, "/embeddings/IEEE_118_igraph")
+  
+ Out <- aggreagte_strain_files(file_name) 
+ 
+ 
+ file_name <- paste0("IEEE_118_strain_summaries_r", unique(Out$r), "_c_", unique(Out$c), ".rds")
+ 
+ saveRDS(Out, file.path( project_folder, "testing_strain_r_c _118", file_name))
 
-#The previous loop takes a long time so an rds should be saved for speed
-saveRDS(strain_df, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "strain_df.rds") )
+ 
+})
+
+
 ```
-
 
 #Aggregate and plot IEEE-118 data
 
@@ -210,8 +682,9 @@ The results of this plot show that SETS is less affect by the change in concentr
 ```{r}
 
 #using the combined data frame aggregate the results by parameter group
-IEEE_118_agg_res <- IEEE_118_results %>%
+IEEE_118_agg_res <- readRDS(file = file.path(project_folder, "IEEE_118_attack_results.rds") ) %>%
   group_by(file_path) %>%
+  mutate(auc = sum(1-blackout_size)/179) %>% #the auc is the sum of all blackouts divided by the total edges aka attacks
   summarise_all(mean) %>%
   mutate(mean_alpha = 1/mean_alpha,
          median_alpha = 1/median_alpha) %>%
@@ -222,63 +695,97 @@ IEEE_118_agg_res <- IEEE_118_results %>%
          fract = signif(fract))
 
 
-#function that finds what fraction of the full range the metric is
+  #function that finds what fraction of the full range the metric is
 kappa <- function(value){
   
-  (value-min(value))/(max(value)-min(value))
+  (value-min(value))/(max(value) - min(value))
   
 }
 
-#convert to range values
-strain_norm_df <- strain_df %>%
+
+```
+
+#test all strainRC
+```{r}
+
+all_metrics_df <- list.files(file.path( project_folder, "testing_strain_r_c _118"), full.names = T) %>% map_df(~{
+
+ test <- readRDS(.x)#aggreagte_strain_files(file_name)
+
+  #convert to range values
+strain_norm_df <-test %>% filter(converged==1) %>%#readRDS(file = file.path("/home/jonno/Dropbox/IEEE_Networks", "strain_df.rds") )%>%
   mutate(#force strain to be relative
-  mean_strain = kappa(mean_strain),
-                median_strain = kappa(median_strain),
-                mean_tension = kappa(mean_tension),
-                median_tension = kappa(median_tension)
-)
+    mean_strain = kappa(mean_strain),
+    median_strain = kappa(median_strain),
+    mean_tension = kappa(mean_tension),
+    median_tension = kappa(median_tension),
+    energy = kappa(energy)
+  )
+  
 
 #bind the attack and strain data together
 all_metrics_df <- IEEE_118_agg_res %>%
   left_join(strain_norm_df, by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
   rename(harmonic_alpha = mean_loading) %>%
   filter(!is.na(mean_strain)) %>%
-    pivot_longer(., cols = c("harmonic_alpha", "median_loading", "mean_alpha", "mean_tension", "mean_strain", "median_strain",
-                             "mean_tension", "median_tension"), 
-                 names_to = "metric" ) %>%
+  pivot_longer(., cols = c("harmonic_alpha", 
+                           #"median_loading", 
+                           "mean_alpha", 
+                           "mean_tension", 
+                           "mean_strain", 
+                          # "median_strain",
+                           "mean_tension"#, 
+                          # "median_tension", 
+                           #"energy"
+                          ), 
+               names_to = "metric" ) %>%
   mutate(embeddings = case_when(
     grepl("tension|strain", metric) ~ "embeddings",
     TRUE ~"alpha" 
-  ))
+  ))  
 
-#plot the results for the IEEE-118 data
+})
+
+
+#plot the relationship between number of attacks and the metric
+#choose r and c and fraction. fraction is optional
 all_metrics_df %>%
    filter(
-        # fract ==1,
-        # carrying_capacity==20
+       #fract ==1,
+       r ==100,
+       c ==10000
           ) %>%
-  ggplot(aes(x = value, y = attack_round, colour = as.factor(robin_hood_mode), group = metric)) + 
+  ggplot(aes(x = value, y = auc, colour = factor(carrying_capacity), group = metric)) + 
   geom_point() +
   facet_wrap(~embeddings + metric) +
-  labs(colour = "capacity")+
-  geom_smooth()
+  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
+  geom_smooth(method = "loess",se = FALSE) +
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+          y = "Number of rounds until loss of giant component")
+
 
 ```
 
-#Model attack data
 
-The loess model created here shows that mean tension is the best predictor of giant component collapse
+#Metric performance
 ```{r}
-  #compare the different metrics in terms of accuracy using a loess model
-  multi_metric <- metric_set(rmse, rsq, mae, smape)
-  results <-unique(all_metrics_df$metric) %>%
+
+#Plot the performance of the metric across different r c values
+ multi_metric <- metric_set(rmse, rsq, mae, smape)
+ 
+metric_combos <- expand_grid(metrics = unique(all_metrics_df$metric),
+             r = 10^(2:4),
+             c = 10^(2:4))
+ 
+  metric_performance <-1:nrow(metric_combos) %>%
     map_df(~{
       
       temp <- all_metrics_df %>%
         filter(
           !is.na(value),
-          fract==1,
-          metric ==.x)
+          r == metric_combos$r[.x],
+          c == metric_combos$c[.x],
+          metric == metric_combos$metrics[.x])
       
       loess_mod <- loess(formula =attack_round~ value, 
                          data = temp)
@@ -288,15 +795,16 @@ The loess model created here shows that mean tension is the best predictor of gi
         )
       
       multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
-        mutate(type = .x)
+        mutate(type = metric_combos$metrics[.x],
+               r = temp$r[1],
+               c = temp$c[1])
       
     })
-  
-  
-results %>%
-  group_by(.metric) %>%
-  mutate(estimate =kappa(.estimate)) %>%
-  ggplot(aes(x = .metric, y = estimate, colour = type, group = type)) + geom_line() + geom_point()
+
+metric_performance %>%
+#  filter(type != "mean_alpha") %>%
+  ggplot(aes(x = type, y = .estimate, fill = type)) + geom_boxplot() + 
+  facet_wrap(~.metric, scales = "free_y") + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 ```
 
 #Find missing
@@ -336,4 +844,122 @@ saveRDS(missing_strain, file.path(project_folder, "missing_files", "strain_conce
 
 ```
 
+#What time?
+how long did it take to calulate each strain
+```{r}
+
+test <- list.files("/home/jonno/test_strain/IEEE_118_igraph", 
+                   pattern = "HPC_strain_concentrator_script.R.out_2113018",
+                   full.names = TRUE) %>%
+  map_chr(~{
+    
+   file_lines <- readLines(.x)
+   
+  file_lines[length(file_lines)]
+    
+  }) %>%str_replace(., "Time difference of ", "") %>%
+  str_replace(., " mins", "") %>%
+  as.numeric()
+
+test2 <- tibble(time = test)
+ggplot(test2, aes(x = time)) + geom_density()
+
+```
+
+
+#Attack UK 10k
+This chunk deals with the prep test and load of the 10k attacks against the UK grid
+```{r}
+
+1:nrow(288) %>% walk(~{
+  
+  task_id <- .x #this is the compute group to be used
+  
+  load_file <- "IEEE_118_igraph"
+
+  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_attack_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+} )
+
+microbenchmark({  task_id <- 1 #this is the compute group to be used
+  
+  load_file <- "UK_high_voltage"
+
+  source(file.path("/home/jonno/setse_and_network_robustness", "HPC_files","HPC_attack_random.R"), local = TRUE)},
+  times = 30)
+
+
+test <- list.files("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage", 
+                   pattern = ".rds",
+                   full.names = TRUE,
+                   recursive = T) %>%
+  map_df(~{
+    Out <- .x %>% readRDS()  %>%  
+      arrange(-nodes) %>%
+      mutate(has_gc = mean_degree_sqrd > 2*mean_degree,
+             auc = 1-mean(blackout_size),
+             simulation_id = str_remove(basename(.x), "simulation_id_") %>% str_remove(., ".rds") %>% as.integer()) %>%
+      filter(!has_gc) %>%
+      slice(1) 
+    
+    return(Out)
+    
+  })
+
+```
+
+#Other network data
+
+This chunk loads the data for the other networks
+```{r}
+list.files("/home/jonno/HPC_jobs/attack/IEEE_14_igraph", pattern = ".tgz", full.names = F) %>% 
+  walk(~{
+  untar(tarfile = file.path("/home/jonno/HPC_jobs/attack/IEEE_14_igraph", .x), 
+        exdir = extraction_directory,#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+list.files("/home/jonno/HPC_jobs/attack/IEEE_30_igraph", pattern = ".tgz", full.names = F) %>% 
+  walk(~{
+  untar(tarfile = file.path("/home/jonno/HPC_jobs/attack/IEEE_30_igraph", .x), 
+        exdir = extraction_directory,#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+list.files("/home/jonno/HPC_jobs/attack/IEEE_57_igraph", pattern = ".tgz", full.names = F) %>% 
+  walk(~{
+  untar(tarfile = file.path("/home/jonno/HPC_jobs/attack/IEEE_57_igraph", .x), 
+        exdir = extraction_directory,#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+
+
+
+
+list.files("/home/jonno/HPC_jobs/attack/IEEE_300_igraph", pattern = ".tgz", full.names = F) %>% 
+  walk(~{
+  untar(tarfile = file.path("/home/jonno/HPC_jobs/attack/IEEE_300_igraph", .x), 
+        exdir = extraction_directory,#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+```
+
+
+
+```{r}
+
+
+```
 

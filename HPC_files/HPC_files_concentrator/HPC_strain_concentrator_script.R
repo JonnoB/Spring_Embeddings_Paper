@@ -72,15 +72,15 @@ parameter_df_temp <-  generate_concentrator_parameters(load_file) #%>%
 
 #I messed up the times so need to insert this if statment to selectively delete the files that have been calculated already
 #then re-run the files that have not been re-calculated yet
-if(file.exists(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))){
-    
-  parameter_df_temp <- parameter_df_temp %>%  
-  left_join(readRDS(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))) %>%
-    filter(is.na(compute_group_strain_2),
-           simulation_id ==1) %>% #remove all files that have been made already
-  mutate(compute_group_strain = 1:n())
-  
-}
+# if(file.exists(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))){
+#     
+#   parameter_df_temp <- parameter_df_temp %>%  
+#   left_join(readRDS(file.path(load_data_files_path, "missing_files", "strain_concentrator.rds"))) %>%
+#     filter(is.na(compute_group_strain_2),
+#            simulation_id ==1) %>% #remove all files that have been made already
+#   mutate(compute_group_strain = 1:n())
+#   
+# }
 
 #filter to current job number
 parameter_df_temp <- parameter_df_temp %>%
@@ -146,7 +146,7 @@ print("run sims")
       current_graph  <- g %>%
         set.edge.attribute(. , "distance", value = 1) %>%
         set.edge.attribute(., "Area", value = 1) %>%
-        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
+        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 1100, stretch_range = 1000) %>%
         calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
         normalise_dc_load(.,  
                            generation = "generation", 

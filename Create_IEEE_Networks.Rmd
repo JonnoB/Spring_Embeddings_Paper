@@ -6,7 +6,25 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 ---
-This code needs to be run after the SytemDynamics set up chunk
+
+This script is used to create and save the IEEE networks into a usable R format that can be smoothly integrated with the powergridnetworking pacakge.
+
+The IEEE networks are loaded from matpower format using the PES power grid library. https://github.com/power-grid-lib props to them for doing all the hard work of gathering and standardising.
+
+```{r}
+packages <- c("tidyverse", "igraph","readr","readxl", "ggraph")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+select <- dplyr::select
+arrange <- dplyr::arrange
+sapply(packages, library, character.only = TRUE)
+
+library(PowerGridNetworking)
+library(NetworkSpringEmbedding)
+```
+
 
 ```{r}
 IEEE_data_folder <- file.path(basewd, "IEEE power flow data")
@@ -80,44 +98,76 @@ c(14, 30, 57, 118, 300) %>% walk(~{
 
 ```{r}
 
- {
-   IEEE_number <- 118
+  IEEE_number <- 118
 
 g <- read_rds(file.path(power_grid_graphs_path , paste0("IEEE_", IEEE_number, "_igraph.rds"))) %>%
   PowerFlow(., SlackRef = "1", EdgeName ="edge_name", VertexName = "name", Net_generation = "net_generation", power_flow = "power_flow")
 
-test2 <- as_data_frame(g) %>%
-  mutate(absPF = abs(power_flow),
-         rank = rank(absPF))
 
-NodePosition <- test2 %>%
-  select(from, to, edge_name, power_flow) %>%
-  gather(key = type, value = node, -edge_name, - power_flow)
 
- set.seed(158)
-  BaseCoords <- layout_with_fr(g) %>% 
-    as_tibble %>% 
-    mutate(node = names(V(g))) %>%
-    rename(Longitude = V1,
-           Latitude = V2) %>%
-    left_join(NodePosition, .) %>%
-    left_join(as_data_frame(g, what = "vertices") %>% 
-                select(node = name, Name, net_generation) %>% 
-                mutate(node = as.character(node),
-                       node_type = case_when(net_generation ==0 ~"Transmission",
+#uses ggraph!
+set.seed(158)
+ggraph(g, layout = layout_with_fr(g)) +
+   geom_edge_link2(aes(colour = abs(power_flow)), width = 0.7) +
+  scale_edge_colour_viridis() +
+  geom_node_point( aes(shape =  case_when(net_generation ==0 ~"Transmission",
                                         net_generation > 0 ~"Generation",
-                                        TRUE ~"Demand")), .)
+                                        TRUE ~"Demand")),
+                   size = 2.5) +
+  labs(edge_colour = "Power flow", shape = "Node type", "") +
+  ggtitle("IEEE 118 power grid with Fruchtman Reingold projection")
+ggsave(file.path(Figures_path, "IEEE_118_fr_proj.pdf"))
 
-  BaseCoords %>%
-  ggplot(aes(x = Longitude, y = Latitude, group = edge_name)) + geom_line() +  
-    geom_point(aes(shape = node_type, colour = node_type))
-  
-    BaseCoords %>%
-  ggplot(aes(x = Longitude, y = Latitude, group = edge_name, colour = abs(power_flow))) + geom_line() +  
-    geom_point(aes(shape = node_type), size = 2) +
-    scale_color_viridis_c()}
+```
+
+#Convert UK high voltage
+This chunk re-creates the UK high voltage network as a standardised network with the same properties and names as the IEEE network.
+This just makes the network more interchangeable with the other networks and so smoothes the coding.
+```{r}
+source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
+
+test <- as_data_frame(g)
+
+UK_edges <- gbase %>% as_data_frame() %>%
+  rename(power_flow = PowerFlow, 
+         edge_name = Link, 
+         edge_capacity = Link.Limit) %>%
+  select(-Combines, 
+         -Length,
+         -name,
+         -Voltage,
+         -weight)
+UK_vertices <- gbase %>% as_data_frame(., what = "vertices") %>%
+  rename(demand = Demand, generation = Generation, net_generation = BalencedPower ) %>%
+  mutate(Name = name) %>%
+  select(-Bus.Order,
+         -component,
+         -Voltage)
+
+UK_standard <- graph_from_data_frame(UK_edges, directed = FALSE, vertices = UK_vertices)
+
+saveRDS(UK_standard, file = file.path(power_grid_graphs_path , paste0("UK_high_voltage", ".rds")))
+
+```
+
+#Create a topological network
+This creates a small 4 cliq and 3 cliq network joined by a single edge. This network is for testing purposes
+```{r}
+test_g <- bind_rows(expand.grid(LETTERS[1:4],LETTERS[1:4]),
+expand.grid(LETTERS[5:7],LETTERS[5:7]),
+tibble(Var1 = "D", Var2 = "E")) %>%
+  filter(Var1 != Var2) %>%
+  mutate(power_flow = 1, #these are just to allow easy swap in and out with the IEEE graph. should be changed
+         edge_capacity = 2,
+         distance = 1,
+         k = 500,
+         edge_name = paste(Var1, Var2, sep ="_")) %>%
+  graph_from_data_frame(., directed = F) %>%
+set_vertex_attr(., name = "net_generation", value = (betweenness(.) -mean(betweenness(.))))
 
 
 
+test_g%>%
+  plot()
 ```
 

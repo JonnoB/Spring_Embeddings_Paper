@@ -14,10 +14,10 @@
 
 # The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-480
 # In the permutation attack script this will be 1-1200 (i.e 40*480)
-#$ -t 1-1
+#$ -t 1-288
 
 # 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
-#$ -l mem=4G
+#$ -l mem=12G
 
 #This is the name of the graph that is going to be tested.
 #It is exported as a global variable so that R can import it to the HPC script
@@ -34,7 +34,7 @@ Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_files_conc
 
 #The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
 
-#The file parts are tarred up separately so that the summaries and the collapse sets can be easily separated and the summaries sued without running any additional scripts
+#The file parts are tarred up separately so that the summaries and the collapse sets can be easily separated and the summaries used without running any additional scripts
 tar zcvf $HOME/Scratch/attack/$1/collapse_summaries_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_summaries 
 #These files are masssive and I haven't used them for a long time... not saving them is a guarenteed way to need them again!
 #tar zcvf $HOME/Scratch/attack/$1/collapse_sets_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_sets 

@@ -14,7 +14,7 @@
 
 # The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-3456
 # If the missing elements are being filled in this will be customised and need to be updated on the HPC
-#$ -t 1-2645
+#$ -t 1-3456
 
 # 2. Request 1 gigabyte of RAM. Change this to suit your requirements.
 #$ -l mem=1G

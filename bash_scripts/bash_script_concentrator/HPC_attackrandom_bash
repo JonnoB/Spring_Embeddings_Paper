@@ -12,11 +12,11 @@
 
 # R Version 3.6.1
 
-# The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-3456
-# If the missing elements are being filled in this will be customised and need to be updated on the HPC
-#$ -t 1-20
+# The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-480
+# In the permutation attack script this will be 1-1200 (i.e 40*480)
+#$ -t 1-10000
 
-# 2. Request 1 gigabyte of RAM. Change this to suit your requirements.
+# 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
 #$ -l mem=1G
 
 #This is the name of the graph that is going to be tested.
@@ -30,15 +30,18 @@ module unload compilers
 module unload mpi
 module load r/recommended
 
-Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_PL/HPC_pl_strain.R > HPC_pl_strain.R.out
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_attack_random.R > HPC_attack_random.R.out
 
 #The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
 
-#There is only 1 file produces every 30 minutes or so there is no point in tarring them up
-#The folder will contain the .o files the .e files as well as the .R.out files and the .rds files. These files are easily seperable and the whole folder can be tarred up
-cp -r $TMPDIR/embeddings/* $HOME/Scratch/strain/PL_${1}/
+mkdir -p $HOME/Scratch/attackrandom/$1/collapse_summaries
+
+#The file parts are tarred up separately so that the summaries and the collapse sets can be easily separated and the summaries sued without running any additional scripts
+cp -R $TMPDIR/collapse_summaries $HOME/Scratch/attackrandom/$1/
+#These files are masssive and I haven't used them for a long time... not saving them is a guarenteed way to need them again!
+#tar zcvf $HOME/Scratch/attack/$1/collapse_sets_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_sets 
 
 #The R output is moved not tarred as it is small and there is only 1 of it. It contains the job runtime so is useful for analysis
-cp $TMPDIR/HPC_pl_strain.R.out $HOME/Scratch/strain/PL_${1}/HPC_pl_strain.R.out_$JOB_ID.$SGE_TASK_ID
 
+cp $TMPDIR/HPC_attack_random.R.out $HOME/Scratch/attackrandom/$1/HPC_attack_random.R.out_$JOB_ID.$SGE_TASK_ID
 # Make sure you have given enough time for the copy to complete!

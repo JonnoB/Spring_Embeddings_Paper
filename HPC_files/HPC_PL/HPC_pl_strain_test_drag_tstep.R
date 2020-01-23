@@ -1,0 +1,212 @@
+
+#This script gets a more high def raster of the effect of drag and tstep for a given r and c. It is to try and
+#understand the convergence surface that is created.
+#The tolerance is set to 2e-3 to speed up the process as I will be plotting the iterations to convergence
+
+###########################
+###########################
+# # 
+# # MYRIAD RUN SCRIPT
+# # 
+# # This is an R script that runs a single attack to failure accroding to a set of input parameters. It is designed to be run on
+# # an HPC cluster, allowing each attack to run independtly when scheduled
+# # 
+# # A question is how much time is spent loading the necessary packages and data as this may mean that several attacks should be combined
+# # to reduce the overhead.
+# # 
+# # 
+###########################
+###########################
+start_time <- Sys.time()
+
+packages <- c("rlang", "dplyr", "tidyr", "purrr", "tibble", "forcats", "igraph", "devtools", "minpack.lm")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+sapply(packages, library, character.only = TRUE)
+
+
+
+#install_github("JonnoB/PowerGridNetworking")
+library(PowerGridNetworking)
+
+#Set up file system to read the correct folders this switches between aws and windows mode
+
+#creates the correct root depending on whether this is on the cloud or not
+if(dir.exists("/home/jonno")){
+  #This folder is for use on my machine
+  project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
+  basewd <- "/home/jonno"
+  load_data_files_path <- file.path(project_folder) #load the files
+  save_data_files_path <- file.path(project_folder) #save the files
+}else{
+  #This is for the folder that is on the cloud
+  project_folder <- getwd()
+  basewd <- "/home/ucabbou"
+  #on the home dir not in the project folder like when it is done on my own comp
+  load_data_files_path <- file.path(basewd) #load the files
+  save_data_files_path <- file.path(project_folder) #save the files
+  
+  
+  #If it is not on my computer then the variables need to be loaded from the system environment
+  #Get the task ID
+  task_id <- Sys.getenv("SGE_TASK_ID")
+  load_file <- Sys.getenv("GRAPH_NAME") #file name of the graph to load
+}
+
+
+#Load some other useful functions
+list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
+  walk(~source(.x))
+
+library(NetworkSpringEmbedding)
+# list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
+#   walk(~source(.x))
+
+#The compute group used for this calculation filters the parameter df down to groups which have equal
+#amounts of networks from each load level. This allows for stable blocks of time.
+#compute_group_value <- task_id
+print("Load the parameter sheet")
+parameter_df_temp <-  generate_pl_parameters(load_file) %>% #arrange(compute_group) %>% #temporary to get timings
+  filter(carrying_capacity == Inf, #this variable is inserted into the file
+         simulation_id ==1) #only 1 sim from each set needs the strain calculated as they are all the same.
+
+parameter_df_temp <-expand.grid(r = c(10000), 
+                                c = c(100),
+                                tstep = seq(0, 0.05, 0.05/20)[-1],
+                                coef_drag = seq(0, 5, 5/20)[-1]
+                                ) %>% as_tibble() %>%
+  mutate(simulation_id = 1) %>% left_join(parameter_df_temp) %>%
+  mutate(compute_group_strain = 1:n(),
+         embeddings_path = gsub(".rds","", embeddings_path) %>% paste0(., "_r_", r, "_c_", c, 
+                                                                       "_tstep_", tstep, "_coef_drag_", coef_drag, ".rds") %>%
+           str_replace("PL_IEEE_118_igraph", "PL_IEEE_118_igraph_tstep_drag")
+         ) # %>%
+  #filter(compute_group_strain == task_id)
+
+print(paste("pararmeters loaded. Task number", task_id))
+
+print("run sims")
+
+1:nrow(parameter_df_temp) %>%
+  walk(~{
+
+    iteration_time_start <- Sys.time()
+    ##
+    ##
+    ##This block below gets the variables necessary to perform the calculation
+    ##
+    ##
+    Iter <- parameter_df_temp %>%
+      slice(.x)
+    #The paths that will be used in this analysis
+    graph_path <- file.path(load_data_files_path, Iter$graph_path)
+    Iter_collapse_path <- file.path(save_data_files_path, "collapse_sets", Iter$collapse_base)
+    Iter_collapse_summary_path <- file.path(save_data_files_path, "collapse_summaries", Iter$collapse_base)
+    Iter_embedding_path <- file.path(save_data_files_path, Iter$embeddings_path)
+    
+    
+    ##
+    ##
+    ## Check to see if the file already exists if it does skip this iteration. This allows easier restarts
+    ##
+    ##
+    
+    if(!file.exists(Iter_embedding_path)){
+      
+      ##
+      ##
+      ##Once the variables have been taken from the parameter file the calculation can begin
+      ##
+      ##
+      
+      g <- readRDS(file = graph_path) #read the target graph
+      
+      
+      #Proportionally load the network
+      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity")
+      
+      common_time <- Iter$tstep
+      common_Iter <- 20000*6 #can be really long, but hopefully most will converge early.
+      common_tol <- 2e-3
+      common_mass <- 1
+      common_drag <- Iter$coef_drag
+      
+      #Sets up the graph so that all the embedding stuff can be calculated without problem
+      current_graph  <- g %>%
+        set.edge.attribute(. , "distance", value = 1) %>%
+        set.edge.attribute(., "Area", value = 1) %>%
+        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = Iter$c, stretch_range = Iter$r) %>%
+        calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+        normalise_dc_load(.,  
+                           generation = "generation", 
+                           demand  = "demand",
+                           net_generation = "net_generation", 
+                           capacity = "edge_capacity",
+                           edge_name = "edge_name", 
+                           node_name = "name",
+                           power_flow = "power_flow")
+      
+      #print("Full graph complete")
+
+      embeddings_data <- Find_network_balance(current_graph, 
+                                        force ="net_generation",
+                                        flow = "power_flow",
+                                        distance = "distance",
+                                    #    capacity = "edge_capacity",
+                                        edge_name = "edge_name",
+                                     #   k = "k",
+                                        tstep =  common_time,
+                                        tol = common_tol,
+                                        max_iter = common_Iter,
+                                        coef_drag = common_drag,
+                                        mass = common_mass,
+                                        sample = 100
+      )
+      
+      # embeddings_data <- SETS_embedding(current_graph, 
+      #                                   force ="net_generation",
+      #                                   flow = "power_flow",
+      #                                   distance = "distance",
+      #                                   capacity = "edge_capacity",
+      #                                   edge_name = "edge_name",
+      #                                   k = "k",
+      #                                   tstep =  common_time,
+      #                                   tol = common_tol,
+      #                                   max_iter = common_Iter,
+      #                                   coef_drag = common_drag,
+      #                                   mass = common_mass,
+      #                                   sample = 100
+      # )
+      
+      #The structure is generated as needed and so any new paths can just be created at this point.
+      #There is very little overhead in doing it this way
+      if(!file.exists(dirname(Iter_embedding_path))){ dir.create(dirname(Iter_embedding_path), recursive = T) }
+      #print("Saving file")
+      saveRDS(embeddings_data, file = Iter_embedding_path)
+      #After the simulation and its summary are saved to the drive the next in the compute group is calculated
+    } 
+    
+    iteration_time_stop <- Sys.time()
+    
+    print(paste("Time for iteration", .x, "to complete",iteration_time_stop-iteration_time_start))
+    return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 
+    #I don't know if it works
+  })
+
+stop_time <- Sys.time()
+
+print(stop_time-start_time)
+
+#Once all the simulations in the compute group have been saved the script is complete
+
+#######################
+#######################
+##
+##
+##END
+##
+##
+########################
+########################

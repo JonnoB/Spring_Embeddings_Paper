@@ -5,8 +5,11 @@
 # script to be used fall all graphs when the time required and the graph name are entered as arguments
 
 # Arguement 1 $1 the name of the graph file e.g. IEEE_118_igraph N.B. do not include ".rds"
-# Arguement 2 $2 the name of the type of calculation is either 'attack' or 'strain'
+# Arguement 2 $2 the name of the type of calculation is typically either 'attack' or 'strain', although there can be variants as long as the file has name matches the structure HPC_${2}_bash
 # Arguement 4 $3 the time value in format 00:00:00
+
+#An example of running the command from a different directory to that which the submit function is held is shown below
+#~/Spring_Embeddings_Paper/bash_scripts/bash_script_concentrator/qsub_custom IEEE_118_igraph strainrc 1:00:00
 
 # 1. Request wallclock time (format hours:minutes:seconds). This is an argument of the script when it is called
 # -l h_rt=$3 
