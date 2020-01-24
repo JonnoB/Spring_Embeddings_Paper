@@ -960,6 +960,459 @@ list.files("/home/jonno/HPC_jobs/attack/IEEE_300_igraph", pattern = ".tgz", full
 
 ```{r}
 
+common_time <- 0.01
+common_mass <- 1
+common_tol <- 2e-3
+common_Iter <- 2e4
+common_drag <- 3
 
+ #This block allows the drag coefficient to be changed. 
+      #It is a primitive and unreliable gradient descent but better than nothing.
+
+memory_df<-tibble(iteration = 1:100,
+                  change_ratio = NA,
+                  log_ratio = NA,
+                  common_drag_iter = NA,
+                  res_stat = NA)
+#set initial round data
+memory_df$log_ratio[1] <- 0
+memory_df$common_drag_iter[1] <- 0
+memory_df$change_ratio[1] <- 0
+memory_df$res_stat[1] <- Inf
+
+memory_df$log_ratio[2] <- -1
+memory_df$common_drag_iter[2] <- 10*(-log_ratio)*common_time
+memory_df$change_ratio[2] <- 1
+
+last_good <- memory_df[2,]
+
+drag_iter<- 1
+      res_stat <- 2 #The residual static force before the iteration process begins
+
+      while((drag_iter <= 100) & (memory_df$res_stat[drag_iter]>2e-4)){
+      drag_iter <- drag_iter+1      
+      print( memory_df$common_drag_iter[drag_iter])
+      embeddings_data <- SETS_embedding(current_graph, 
+                                        force ="net_generation",
+                                        flow = "power_flow",
+                                        distance = "distance",
+                                        capacity = "edge_capacity",
+                                        edge_name = "edge_name",
+                                        k = "k",
+                                        tstep =  common_time,
+                                        tol = common_tol,
+                                        max_iter = common_Iter,
+                                        coef_drag =  memory_df$common_drag_iter[drag_iter] ,
+                                        mass = common_mass,
+                                        sample = 100
+      )
+      
+      node_embeds <- embeddings_data$node_embeddings
+     
+      memory_df$res_stat[drag_iter] <- sum(abs(node_embeds$static_force))
+      
+      #Stops problems like 2e200 is smaller than 2e300 so the minimum must be there
+      memory_df$res_stat[drag_iter] <- ifelse(memory_df$res_stat[drag_iter]>2, Inf ,memory_df$res_stat[drag_iter])
+      
+    
+      if((memory_df$res_stat[drag_iter-1] >= memory_df$res_stat[drag_iter] )){
+      message_val <-  "increase drag"
+        #double the change ratio
+       memory_df$change_ratio[drag_iter + 1] <-  memory_df$change_ratio[drag_iter]+0.1
+        memory_df$log_ratio[drag_iter + 1] <- memory_df$log_ratio[drag_iter]*memory_df$change_ratio[drag_iter + 1]
+        memory_df$common_drag_iter[drag_iter + 1] <-  10^(-memory_df$log_ratio[drag_iter+1] )* common_time
+        
+        last_good <- memory_df[drag_iter,]
+        
+      } else if ( memory_df$res_stat[drag_iter-1] < memory_df$res_stat[drag_iter] ) {
+    message_val <- "dencrease drag"
+               memory_df$change_ratio[drag_iter + 1] <-  memory_df$change_ratio[drag_iter]-0.05
+        memory_df$log_ratio[drag_iter + 1] <- last_good$log_ratio[drag_iter]*memory_df$change_ratio[drag_iter + 1]
+        memory_df$common_drag_iter[drag_iter + 1] <-  10^(-memory_df$log_ratio[drag_iter + 1]) * common_time
+      }
+      
+       print(paste(message_val,  
+                   memory_df$common_drag_iter[drag_iter + 1], 
+                   "static force", memory_df$res_stat[drag_iter]))
+     res_stat <- res_stat_temp
+     }
+
+```
+
+
+#not log version
+
+```{r}
+
+common_time <- 0.01
+common_mass <- 1
+common_tol <- 2e-3
+common_Iter <- 3e4
+common_drag <- 3
+
+#This block allows the drag coefficient to be changed. 
+#It is a primitive and unreliable gradient descent but better than nothing.
+
+memory_df<-tibble(iteration = 1:100,
+                  change_ratio = NA,
+                  log_ratio = NA,
+                  common_drag_iter = NA,
+                  res_stat = NA)
+#set initial round data
+memory_df$log_ratio[1] <- 0
+memory_df$common_drag_iter[1] <- 0
+memory_df$change_ratio[1] <- 0
+memory_df$res_stat[1] <- Inf
+
+memory_df$log_ratio[2] <- -1
+memory_df$common_drag_iter[2] <- 10*(-log_ratio)*common_time
+memory_df$change_ratio[2] <- 0.1
+memory_df$res_stat[2] <- Inf
+
+last_good <- memory_df[2,]
+last_good2 <- memory_df[1,]
+
+drag_iter<- 1
+res_stat <- 2 #The residual static force before the iteration process begins
+
+while((drag_iter <= 100) & (memory_df$res_stat[drag_iter]>2e-4)){
+  drag_iter <- drag_iter+1      
+  print( memory_df$common_drag_iter[drag_iter])
+  embeddings_data <- Find_network_balance(current_graph, 
+                                    force ="net_generation",
+                                    flow = "power_flow",
+                                    distance = "distance",
+                                    #capacity = "edge_capacity",
+                                    edge_name = "edge_name",
+                                 #   k = "k",
+                                    tstep =  common_time,
+                                    tol = common_tol,
+                                    max_iter = common_Iter,
+                                    coef_drag =  memory_df$common_drag_iter[drag_iter] ,
+                                    mass = common_mass,
+                                    sample = 100
+  )
+  
+  node_embeds <- embeddings_data$node_status
+  
+  memory_df$res_stat[drag_iter] <- sum(abs(node_embeds$static_force))
+  
+  #Stops problems like 2e200 is smaller than 2e300 so the minimum must be there
+  memory_df$res_stat[drag_iter] <- ifelse(memory_df$res_stat[drag_iter]>2, Inf ,memory_df$res_stat[drag_iter])
+  
+  
+  if((last_good$res_stat >= memory_df$res_stat[drag_iter] )){
+    message_val <-  "increase drag"
+    #double the change ratio
+    memory_df$change_ratio[drag_iter + 1] <- memory_df$change_ratio[drag_iter]*2
+    
+    memory_df$common_drag_iter[drag_iter + 1] <-  memory_df$common_drag_iter[drag_iter] + memory_df$change_ratio[drag_iter + 1]
+    
+    memory_df$log_ratio[drag_iter + 1] <- log10(common_time/memory_df$common_drag_iter[drag_iter + 1])
+ 
+    last_good2 <- last_good
+    last_good <- memory_df[drag_iter,]
+    
+  } else if(last_good2$res_stat >= memory_df$res_stat[drag_iter]){
+    
+    message_val <-  "increase drag"
+    #double the change ratio
+    memory_df$change_ratio[drag_iter + 1] <- memory_df$change_ratio[drag_iter]*2
+    
+    memory_df$common_drag_iter[drag_iter + 1] <-  memory_df$common_drag_iter[drag_iter] + memory_df$change_ratio[drag_iter + 1]
+    
+    memory_df$log_ratio[drag_iter + 1] <- log10(common_time/memory_df$common_drag_iter[drag_iter + 1])
+ 
+    last_good2 <- memory_df[drag_iter,]
+     
+  }
+  else {
+    message_val <- "decrease drag"
+   #memory_df$change_ratio[drag_iter + 1] <- memory_df$common_drag_iter[drag_iter-1] 
+    # memory_df$log_ratio[drag_iter + 1] <- last_good$log_ratio[drag_iter]*memory_df$change_ratio[drag_iter + 1]
+    memory_df$change_ratio[drag_iter + 1] <- last_good2$change_ratio[drag_iter]/2
+    
+    memory_df$common_drag_iter[drag_iter + 1] <-  memory_df$common_drag_iter[drag_iter] + memory_df$change_ratio[drag_iter + 1]
+    
+    memory_df$log_ratio[drag_iter + 1] <- log10(common_time/memory_df$common_drag_iter[drag_iter + 1])
+  }
+  
+  print(paste("Iteration", drag_iter, message_val,  
+              memory_df$common_drag_iter[drag_iter + 1], 
+              "static force", memory_df$res_stat[drag_iter]))
+  res_stat <- res_stat_temp
+}
+
+
+memory_df %>%
+  filter(is.finite(res_stat)) %>%
+  ggplot(aes(x = log10(common_drag_iter), y = log10(res_stat))) + geom_point()
+
+memory_df %>%
+  filter(is.finite(res_stat),
+         log10(res_stat)<0) %>%
+  ggplot(aes(x = iteration, y = log10(res_stat))) + geom_point()
+
+memory_df %>%
+  filter(is.finite(res_stat)) %>%
+  ggplot(aes(x = iteration, y = log_ratio)) + geom_point()
+
+
+memory_df %>%
+  filter(is.finite(res_stat),
+            log10(res_stat)<0) %>%
+  ggplot(aes(x = log10(res_stat), y = log10(abs(error)))) + geom_point()
+
+
+```
+
+
+```{r}
+profvis({
+common_time <- 0.02
+common_mass <- 1
+common_tol <- 2e-3
+common_Iter <- 3e4
+common_drag <- 0
+learning_rate <- 1
+
+#This block allows the drag coefficient to be changed. 
+#It is a primitive and unreliable gradient descent but better than nothing.
+
+memory_df<-tibble(iteration = 1:100,
+                  error = NA,
+                  log_ratio = NA,
+                  common_drag_iter = NA,
+                  direction = 1,
+                  target_area = NA,
+                  res_stat = NA,
+                  upper = NA,
+                  lower = NA,
+                  best_log_ratio =NA)
+#set initial round data
+memory_df$log_ratio[1] <- 0
+memory_df$common_drag_iter[1] <- 0
+memory_df$error[1] <- 2-common_tol
+memory_df$direction[1] = 1 #increasing
+memory_df$target_area[1] <- FALSE
+memory_df$res_stat[1] <- Inf
+#These two are the limits of the log ratio. they are set to +/- infinity
+memory_df$upper[1] <- Inf
+memory_df$lower[1] <- -Inf
+
+drag_iter<- 1
+
+memory_df$log_ratio[drag_iter+1] <- memory_df$log_ratio[drag_iter] - (memory_df$error[drag_iter])* 1 *direction_change
+memory_df$common_drag_iter[drag_iter+1] <- 10^( -memory_df$log_ratio[drag_iter+1]) * common_time
+
+
+while((drag_iter <= 100) & (memory_df$res_stat[drag_iter]>common_tol)){
+  drag_iter <- drag_iter+1      
+# print( memory_df$common_drag_iter[drag_iter])
+  embeddings_data <- Find_network_balance(current_graph, 
+                                          force ="net_generation",
+                                          flow = "power_flow",
+                                          distance = "distance",
+                                          #capacity = "edge_capacity",
+                                          edge_name = "edge_name",
+                                          #   k = "k",
+                                          tstep =  common_time,
+                                          tol = common_tol,
+                                          max_iter = common_Iter,
+                                          coef_drag =  memory_df$common_drag_iter[drag_iter] ,
+                                          mass = common_mass,
+                                          sample = 100
+  )
+  
+  node_embeds <- embeddings_data$node_status
+  
+  memory_df$res_stat[drag_iter] <- sum(abs(node_embeds$static_force))
+  
+  #set the residual static force to 2 if it exceeds this value
+  memory_df$res_stat[drag_iter] <- ifelse(memory_df$res_stat[drag_iter]>2, 2 ,memory_df$res_stat[drag_iter])
+  
+  #Is the algo in the convex area?
+  memory_df$target_area[drag_iter] <- memory_df$res_stat[drag_iter] < 2
+  
+  #Log error is negative when small
+  memory_df$error[drag_iter] <- log10(memory_df$res_stat[drag_iter] - common_tol) 
+  
+  #if there has been an improvement in error, then the drag continues to change in the smae direction.
+  #Otherwise it reverses
+  # memory_df$direction[drag_iter] <- ifelse(
+  #   sign(
+  #     memory_df$res_stat[drag_iter-1]- memory_df$res_stat[drag_iter])==0,
+  #   memory_df$direction[drag_iter-1],
+  #   sign(memory_df$res_stat[drag_iter-1] - memory_df$res_stat[drag_iter])
+  # )
+  
+  #setting the limits
+  min_error <- which.min(memory_df$error)
+  lower_ratios  <- memory_df$log_ratio[memory_df$log_ratio[min_error] <= memory_df$log_ratio] %>% unique()
+  upper_ratios <-memory_df$log_ratio[memory_df$log_ratio[min_error] >= memory_df$log_ratio] %>% unique()
+  
+  memory_df$upper[drag_iter+1] <-   ifelse(sum(is.finite(upper_ratios))==0, 
+                                           -Inf, 
+                                           upper_ratios[rank(-upper_ratios, ties.method =  "first")==2])
+  
+  memory_df$lower[drag_iter+1] <- ifelse(!is.finite(lower_ratios[rank(lower_ratios, ties.method =  "first" )==2]), 
+                                         Inf, 
+                                         lower_ratios[rank(lower_ratios, ties.method =  "first")==2])
+  
+  memory_df$best_log_ratio[drag_iter] <- memory_df$log_ratio[min_error]
+  
+  #if you are in the target zone updates happpen adaptively if not using a fixed step size
+  if( is.finite(memory_df$upper[drag_iter]) ){
+    print("upper limit found")
+    memory_df$log_ratio[drag_iter+1] <- (memory_df$upper[drag_iter] + memory_df$lower[drag_iter] )/2
+    
+    
+  } else {
+    #Before the non trivial upper and lower bound are found simple search is performed to find the target zone
+    #fixed rate search across the plateau
+     memory_df$log_ratio[drag_iter+1] <- memory_df$log_ratio[drag_iter] - learning_rate*memory_df$direction[drag_iter]
+     
+  }
+  
+  
+  # memory_df$log_ratio[drag_iter+1] <- memory_df$log_ratio[drag_iter] - (memory_df$error[drag_iter])* learning_rate *memory_df$direction[drag_iter] 
+  # 
+  memory_df$common_drag_iter[drag_iter+1] <- 10^( -memory_df$log_ratio[drag_iter+1]) * common_time
+  
+  
+  
+  
+  
+  message_val <- ifelse(memory_df$direction[drag_iter] <1, "accuracy increasing",  "accuracy decreasing")
+  
+  print(paste("Iteration", drag_iter, message_val,  
+              memory_df$common_drag_iter[drag_iter + 1], 
+              "static force", memory_df$res_stat[drag_iter]))
+  
+}}
+
+)
+```
+
+#Find the target area then minimise
+
+The problem is that live is only convex in a single part. It is flat everywhere else.
+
+First the convex area needs to be identified.
+Once Identified it can be refined.
+```{r}
+profvis({
+common_time <- 0.02
+common_mass <- 1
+common_tol <- 2e-3
+common_Iter <- 2e4
+common_drag <- 0
+
+
+#This block allows the drag coefficient to be changed. 
+#It is a primitive and unreliable gradient descent but better than nothing.
+
+memory_df<-tibble(iteration = 1:100,
+                  error = NA,
+                  log_ratio = NA,
+                  common_drag_iter = NA,
+                  res_stat = NA)
+#set initial round data
+memory_df$log_ratio[1] <- 0
+memory_df$common_drag_iter[1] <- 0
+memory_df$error[1] <- 0
+memory_df$res_stat[1] <- Inf
+
+memory_df$log_ratio[2] <- 0
+memory_df$common_drag_iter[2] <- 10*(-log_ratio)*common_time
+memory_df$error[2] <- 0.1
+memory_df$res_stat[2] <- Inf
+
+last_good <- memory_df[2,]
+last_good2 <- memory_df[1,]
+
+drag_iter<- 1
+res_stat <- 2 #The residual static force before the iteration process begins
+direction_change <- 1
+
+while((drag_iter <= 100) & (memory_df$res_stat[drag_iter]>common_tol)){
+  drag_iter <- drag_iter+1      
+  print( memory_df$common_drag_iter[drag_iter])
+  embeddings_data <- Find_network_balance(current_graph, 
+                                          force ="net_generation",
+                                          flow = "power_flow",
+                                          distance = "distance",
+                                          #capacity = "edge_capacity",
+                                          edge_name = "edge_name",
+                                          #   k = "k",
+                                          tstep =  common_time,
+                                          tol = common_tol,
+                                          max_iter = common_Iter,
+                                          coef_drag =  memory_df$common_drag_iter[drag_iter] ,
+                                          mass = common_mass,
+                                          sample = 100
+  )
+  
+  node_embeds <- embeddings_data$node_status
+  
+  memory_df$res_stat[drag_iter] <- sum(abs(node_embeds$static_force))
+  
+  memory_df$res_stat[drag_iter] <- ifelse(memory_df$res_stat[drag_iter]>2, 2 ,memory_df$res_stat[drag_iter])
+  
+  #Log error is negative when small
+  memory_df$error[drag_iter] <- log10(memory_df$res_stat[drag_iter] - common_tol) 
+  
+  #if there has been an improvement in error then the update has less error than the previous
+  direction_change <- ifelse(sign(memory_df$res_stat[drag_iter-1]- memory_df$res_stat[drag_iter])==0,
+                             direction_change,
+                             sign(memory_df$res_stat[drag_iter-1]- memory_df$res_stat[drag_iter]))
+  
+  
+  memory_df$log_ratio[drag_iter+1] <- memory_df$log_ratio[drag_iter] - (memory_df$error[drag_iter])* 1 *direction_change
+  
+  memory_df$common_drag_iter[drag_iter+1] <- 10^( -memory_df$log_ratio[drag_iter+1]) * common_time
+  
+  message_val <- ifelse(direction_change<1, "accuracy increasing",  "accuracy decreasing")
+  
+  print(paste("Iteration", drag_iter, message_val,  
+              memory_df$common_drag_iter[drag_iter + 1], 
+              "static force", memory_df$res_stat[drag_iter]))
+  
+  
+}})
+
+```
+
+
+```{r}
+# set up a stepsize multiplier
+gamma = 0.003
+
+# set up a number of iterations
+iter = 500
+
+# define the objective function f(x) = x^4 - 3*x^3 + 2
+objFun = function(x) return(x^4 - 3*x^3 + 2)
+
+# define the gradient of f(x) = x^4 - 3*x^3 + 2
+gradient = function(x) return((4*x^3) - (9*x^2))
+
+# randomly initialize a value to x
+set.seed(100)
+x = floor(runif(1, 0, 10))
+
+# create a vector to contain all xs for all steps
+x.All = numeric(iter)
+
+# gradient descent method to find the minimum
+for(i in seq_len(iter)){
+        x = x - gamma*gradient(x)
+        x.All[i] = x
+        print(x)
+}
+
+# print result and plot all xs for every iteration
+print(paste("The minimum of f(x) is ", objFun(x), " at position x = ", x, sep = ""))
+plot(x.All, type = "l")
 ```
 
