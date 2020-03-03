@@ -36,6 +36,7 @@ if(dir.exists("/home/jonno")){
   basewd <- "/home/jonno"
   load_data_files_path <- file.path(project_folder) #load the files
   save_data_files_path <- file.path(project_folder) #save the files
+  library(NetworkSpringEmbedding)
 }else{
   #This is for the folder that is on the cloud
   project_folder <- getwd()
@@ -134,11 +135,8 @@ print("run sims")
                             robin_hood_mode = Iter$robin_hood_mode,
                             output_graph = TRUE)
       
-      
-      
-      
-      common_time <- 0.005
-      common_Iter <- 40000
+      common_time <- 0.01
+      common_Iter <- 200000
       common_tol <- 2e-3
       common_mass <- 1
       
@@ -146,7 +144,7 @@ print("run sims")
       current_graph  <- g %>%
         set.edge.attribute(. , "distance", value = 1) %>%
         set.edge.attribute(., "Area", value = 1) %>%
-        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 1100, stretch_range = 1000) %>%
+        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
         calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
         normalise_dc_load(.,  
                           generation = "generation", 
@@ -157,33 +155,35 @@ print("run sims")
                           node_name = "name",
                           power_flow = "power_flow")
       
-      print("Full graph complete")
+     # print("Full graph complete")
 
       #autosets finds the correct drag coefficient to 
-        embeddings_data <- auto_SETS(current_graph, 
-                  force ="net_generation", 
-                  flow = "power_flow", 
-                  distance = "distance", 
-                  edge_name = "edge_name",
-                  tstep = common_time, 
-                  mass = 1, 
-                  max_iter = common_Iter, 
-                  tol = common_tol,
-                  sparse = FALSE,
-                  restarts = 100,
-                  step_size = 0.1,
-                  sample = 100)
+      embeddings_data <- auto_SETSe(current_graph, 
+                                    force ="net_generation", 
+                                    flow = "power_flow", 
+                                    distance = "distance", 
+                                    capacity = "edge_capacity",
+                                    edge_name = "edge_name",
+                                    tstep = common_time, 
+                                    mass = common_mass, 
+                                    max_iter = common_Iter, 
+                                    tol = common_tol,
+                                    sparse = FALSE,
+                                    hyper_iters = 100,
+                                    hyper_tol = 0.01,
+                                    hyper_max = 30000,
+                                    sample = 100)
       
       #The structure is generated as needed and so any new paths can just be created at this point.
       #There is very little overhead in doing it this way
       if(!file.exists(dirname(Iter_embedding_path))){ dir.create(dirname(Iter_embedding_path), recursive = T) }
-      print("Saving file")
+   #   print("Saving file")
       saveRDS(embeddings_data, file = Iter_embedding_path)
       #After the simulation and its summary are saved to the drive the next in the compute group is calculated
       
       loop_stop <- Sys.time()
       
-      print(paste("Iteration", .x, "complete. Time taken", loop_start-loop_stop))
+      print(paste("Iteration", .x, "complete. Time taken", signif(difftime(loop_stop, loop_start, units = "secs"), 4), "seconds"))
     } 
     
     return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 

@@ -91,7 +91,7 @@ print(paste("pararmeters loaded. Task number", task_id))
 
 1:nrow(parameter_df_temp) %>%
   walk(~{
-    
+    #.x <- 1620
     ##
     ##
     ##This block below gets the variables necessary to perform the calculation
@@ -134,6 +134,10 @@ print(paste("pararmeters loaded. Task number", task_id))
                           robin_hood_mode = Iter$robin_hood_mode,
                           output_graph = TRUE)
     
+    #testing the output
+    #test <- as_data_frame(g)
+    #test <- as_data_frame(current_graph)
+    #ggplot(test, aes(x = ((power_flow)), y = k)) + geom_point()
     
     common_time <- 0.01
     common_Iter <- 200000
@@ -146,9 +150,14 @@ print(paste("pararmeters loaded. Task number", task_id))
     #Sets up the graph so that all the embedding stuff can be calculated without problem
     current_graph  <- g %>%
       set.edge.attribute(. , "distance", value = 1) %>%
-      set.edge.attribute(., "Area", value = 1) %>%
+      calc_spring_area(., "power_flow", minimum_value = sqrt(common_c), range = sqrt(common_r)) %>% #calculate a flexible Area
       calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
       calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+      #the other alternative where hypotenuse of the two values is taken not the area
+      # calc_spring_area(., "power_flow", minimum_value = common_c, range = common_r) %>% #calculate a flexible Area
+      # calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = common_c, stretch_range = common_r) %>%
+      # calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+      # set_edge_attr(., name = "k", value = sqrt(edge_attr(., name = "k"))) %>%
       normalise_dc_load(.,  
                         generation = "generation", 
                         demand  = "demand",

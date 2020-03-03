@@ -1,0 +1,262 @@
+---
+title: "Getting the data"
+author: "Jonathan Bourne"
+date: "26/01/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This script aggregates the simulated data for so that it can be easily manipulated in the code that is used in the paper.
+
+
+##Attack data
+
+This takes a very long time.
+Like half an hour each graph type
+```{r}
+
+######
+##
+##IEEE 118
+##
+######
+
+
+#compile the data into a single data frame from all attack files about 30 mins
+IEEE_118_results <- list.files(path = "/home/jonno/HPC_jobs/IEEE_118_igraph", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+#The previous loop takes a long time so an rds should be saved for speed. takes about 10 mins
+saveRDS(IEEE_118_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "IEEE_118_attack_results.rds") )
+
+######
+##
+##IEEE 14
+##
+######
+#compile the data into a single data frame from all attack files
+IEEE_results <- list.files(path = "/home/jonno/HPC_jobs/IEEE_14_igraph", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+#The previous loop takes a long time so an rds should be saved for speed
+saveRDS(IEEE_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "IEEE_14_attack_results.rds") )
+
+
+######
+##
+##IEEE 30
+##
+######
+#compile the data into a single data frame from all attack files
+IEEE_results <- list.files(path = "/home/jonno/HPC_jobs/IEEE_30_igraph", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+######
+##
+##IEEE 57
+##
+######
+#compile the data into a single data frame from all attack files
+IEEE_results <- list.files(path = "/home/jonno/HPC_jobs/IEEE_57_igraph", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+#The previous loop takes a long time so an rds should be saved for speed
+saveRDS(IEEE_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "IEEE_57_attack_results.rds") )
+
+
+######
+##
+##10k UK high voltage
+##
+######
+#compile the data into a single data frame from all attack files
+IEEE_results <- list.files(path = "/home/jonno/HPC_jobs/UK_high_voltage", 
+                                        full.names = TRUE, 
+                                        recursive = TRUE) %>%
+  map_df(~{read_rds(.x) %>%
+           mutate(file_path = dirname(.x)) %>%
+  arrange(-nodes) %>%
+  mutate_at(.vars = 5:8, .funs = first) %>%
+  mutate(has_gc = mean_degree_sqrd > 2*mean_degree) %>%
+  filter(!has_gc) %>%
+  slice(1)
+    })
+
+
+#The previous loop takes a long time so an rds should be saved for speed
+saveRDS(IEEE_results, file = file.path("/home/jonno/Dropbox/IEEE_Networks", "UK_high_voltage_10k_results.rds") )
+
+```
+
+
+
+Strain Data
+
+Get the elevation data
+extract the strain and tension data
+
+```{r}
+
+
+
+c(14, 30, 57, 118, 300) %>% walk(~{
+  print(.x)
+  folder_name <- paste0("/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_", .x,"_igraph")
+  
+  
+  file_name <- paste0("IEEE_", .x, "_igraph.rds")
+  
+ Out <- aggregate_strain_files(folder_name) 
+
+ 
+ saveRDS(Out, file.path( project_folder, "concentrator_aggregated_strain", file_name))
+
+ 
+})
+
+
+
+
+```
+
+
+
+```{r}
+
+#using the combined data frame aggregate the results by parameter group
+IEEE_agg_res <- readRDS(file = file.path(project_folder, "IEEE_30_attack_results.rds") ) %>%
+  group_by(file_path) %>%
+#  mutate(auc = sum(1-blackout_size)/179) %>% #the auc is the sum of all blackouts divided by the total edges aka attacks
+  summarise_all(mean) %>%
+  mutate(mean_alpha = 1/mean_alpha,
+         median_alpha = 1/median_alpha) %>%
+  select(-median_alpha) %>%
+  mutate(carrying_capacity = signif(carrying_capacity),
+         smallest = signif(smallest),
+         largest = signif(largest),
+         fract = signif(fract))
+
+
+ strain_df <- readRDS(file.path( project_folder, "concentrator_aggregated_strain",  "IEEE_30_igraph.rds"))
+
+ #convert to range values
+ strain_norm_df <- strain_df %>% filter(converged==1) %>%
+   mutate(#force strain to be relative
+     mean_strain = kappa(mean_strain),
+     median_strain = kappa(median_strain),
+     mean_tension = kappa(mean_tension),
+     median_tension = kappa(median_tension),
+     energy = kappa(energy)
+   )
+ 
+ 
+#bind the attack and strain data together
+all_metrics_df <- IEEE_agg_res %>%
+  left_join(strain_norm_df, by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
+  rename(harmonic_alpha = mean_loading) %>%
+  filter(!is.na(mean_strain)) %>%
+  pivot_longer(., cols = c("harmonic_alpha", 
+                           #"median_loading", 
+                           "mean_alpha", 
+                           "mean_tension", 
+                           "mean_strain", 
+                          # "median_strain",
+                           "mean_tension"#, 
+                          # "median_tension", 
+                           #"energy"
+                          ), 
+               names_to = "metric" ) %>%
+  mutate(embeddings = case_when(
+    grepl("tension|strain", metric) ~ "embeddings",
+    TRUE ~"alpha" 
+  ))  
+
+
+
+all_metrics_df %>%
+  ggplot(aes(x = value, y = attack_round, colour = factor(carrying_capacity), group = metric)) + 
+  geom_point() +
+  facet_wrap(~embeddings + metric) +
+  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
+  geom_smooth(method = "loess",se = FALSE) +
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+          y = "Number of rounds until loss of giant component")
+
+```
+
+```{r}
+ multi_metric <- metric_set(rmse, rsq, mae, smape)
+ 
+metric_combos <- expand_grid(metrics = unique(all_metrics_df$metric))
+ 
+  metric_performance <-1:nrow(metric_combos) %>%
+    map_df(~{
+      
+      temp <- all_metrics_df %>%
+        filter(
+          !is.na(value),
+          metric == metric_combos$metrics[.x])
+      
+      loess_mod <- loess(formula =attack_round~ value, 
+                         data = temp)
+      
+      model_comp <- temp  %>%
+        mutate(preds = predict(loess_mod)
+        )
+      
+      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
+        mutate(type = metric_combos$metrics[.x],
+               r = temp$r[1],
+               c = temp$c[1])
+      
+    })
+  
+  
+  metric_performance %>%
+  ggplot(aes(x = type, y = .estimate, fill = type)) + geom_col() + 
+  facet_wrap(~.metric, scales = "free_y") + theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+
+```
+

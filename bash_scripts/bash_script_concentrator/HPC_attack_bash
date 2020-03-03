@@ -17,7 +17,7 @@
 #$ -t 1-288
 
 # 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
-#$ -l mem=12G
+#$ -l mem=4G
 
 #This is the name of the graph that is going to be tested.
 #It is exported as a global variable so that R can import it to the HPC script

@@ -9,9 +9,17 @@ editor_options:
 
 This markdown contains the code that is used to feed the HPC as well as the post HPC processing
 
+#base code for running the hpc
+~/Spring_Embeddings_Paper/bash_scripts/bash_script_concentrator/qsub_custom IEEE_300_igraph bigautostrain2 20:00:00
+~/Spring_Embeddings_Paper/bash_scripts/bash_script_concentrator/qsub_custom UK_high_voltage bigautostrain2 00:10:00
+
+~/Spring_Embeddings_Paper/bash_scripts/bash_script_concentrator/qsub_custom UK_high_voltage attack 20:00:00
+##code for making the bash file runnable
+chmod +x /path/to/your/filename.extension
+
 #Set up
 ```{r}
-packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm", "ggraph", "yardstick")
+packages <- c("rlang", "tidyverse", "igraph", "devtools", "minpack.lm", "ggraph", "yardstick", "Matrix")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -20,7 +28,7 @@ sapply(packages, library, character.only = TRUE)
 
 #install_github("JonnoB/PowerGridNetworking")
 library(PowerGridNetworking)
-#library(NetworkSpringEmbedding)
+library(NetworkSpringEmbedding)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
 
@@ -59,10 +67,7 @@ list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.na
 # list.files(file.path(basewd, "NetworkSpringEmbedding/R"), pattern = ".R", full.names = T) %>%
 #   walk(~source(.x))
 
-
-library(NetworkSpringEmbedding)
 ```
-
 
 #test brain graphs
 http://braingraph.org/cms/download-pit-group-connectomes/
@@ -87,6 +92,28 @@ as_data_frame(test ) %>%
 ```
 
 
+
+#Load IEEE network
+This loads a network ready to be attacked or embedded
+```{r}
+
+g <- readRDS(file.path(power_grid_graphs_path,  paste0("IEEE_", 118, "_igraph.rds"))) %>%
+                Proportional_Load(., 5, PowerFlow = "power_flow", Link.Limit = "edge_capacity") %>%
+                set.edge.attribute(. , "distance", value = 1) %>%
+        set.edge.attribute(., "Area", value = 1) %>%
+        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 10000, stretch_range = 1000) %>%
+        calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+        normalise_dc_load(.,  
+                           generation = "generation", 
+                           demand  = "demand",
+                           net_generation = "net_generation", 
+                           capacity = "edge_capacity",
+                           edge_name = "edge_name", 
+                           node_name = "name",
+                           power_flow = "power_flow")
+```
+
+
 ##Run collapse script
 
 ```{r}
@@ -100,14 +127,54 @@ as_data_frame(test ) %>%
   
   task_id <- .x #this is the compute group to be used
   
-  load_file <- "IEEE_118_igraph"
+  load_file <- "IEEE_14_igraph"
 
-  source(file.path("/home/jonno/Spring_Embeddings_Paper", "HPC_attack_script.R"), local = TRUE)
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_files_concentrator", 
+                   "HPC_attack_concentrator_script.R"), local = TRUE)
   
   return(NULL)
   
 } )
 
+
+#untar the HPX files
+list.files("/home/jonno/HPC_jobs/attack", full.names = T) %>% walk(~{
+  
+  list.files(.x, pattern = ".tgz", full.names = T) %>% 
+    walk(~{
+      untar(tarfile = .x, 
+            exdir = "/home/jonno/Dropbox/IEEE_Networks/attacks",#, 
+            extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+      
+    })
+  
+})
+
+#Identify missing files, That for some reason did not end up on the HPC
+completed_collapses <- tibble(file_path = list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T),
+       file_name = basename(file_path),
+       graph = dirname(file_path)%>% basename(),
+       task_id = str_remove(file_name, "task_id_") %>% str_remove(., ".rds") %>% as.integer(.))
+
+missing_collapses <-expand_grid(graph = unique(completed_collapses$graph),
+                            task_id = 1:288) %>%
+  left_join(completed_collapses) %>%
+  filter(!complete.cases(.))
+
+#run the collapse analysis will all the missing elements
+ walk2(.x = missing_collapses$task_id, .y = missing_collapses$graph, ~{
+  
+  task_id <- .x #this is the compute group to be used
+  
+  load_file <- .y
+
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_files_concentrator", 
+                   "HPC_attack_concentrator_script.R"), local = TRUE)
+  
+  return(NULL)
+  
+} )
 
 ```
 
@@ -143,11 +210,7 @@ The results of this test allow me to set the simulation parameters  for the r c 
 question: if I do a 100 by 100 raster of r and c for single edge, and also do it for a real network, what do the differences mean or look like?
 
 ```{r}
-#If this is put in a loop or walk mapping then it will "arguably" calculate the data for all the maps and systems
-#Load the params file. 
 
-
-#This appears to be considerably faster than the parallel version
 1:1 %>% walk(~{
   
   task_id <- .x #this is the compute group to be used
@@ -576,6 +639,7 @@ unique(tstep_drag_dynamics_df$c)
 
 
 #Accuracy of converged state
+
 This chunk calculates the full movement of the nodes 
 
 ```{r}
@@ -852,35 +916,12 @@ metric_performance %>%
 
 In the case that some of the data was not calculated properly and has not been created. this code chunk can be used to find the missing files for recalculation
 ```{r}
-missing_df <- generate_concentrator_parameters("IEEE_118_igraph") 
-
-
-missing_attack <- missing_df %>%
-  left_join(IEEE_118_results %>% 
-              mutate(missing = FALSE) %>% 
-              rename(fraction = fract) %>% 
-              select(simulation_id:robin_hood_mode, missing)) %>%
-  filter(is.na(missing)) %>%
-  mutate(missing = TRUE)
-#only missing from two groups this is clearly a timing issue
-table(missing_attack$compute_group)
-
-missing_strain <- missing_df %>%
-  filter(simulation_id ==1) %>%
-  left_join(strain_df %>%  
-              mutate(missing = FALSE) %>% 
-              rename(fraction = fract) %>% 
-              select(fraction:robin_hood_mode, missing)) %>%
-  filter(is.na(missing)) %>%
-  mutate(compute_group_strain_2 = 1:n()) %>%
-  select(embeddings_path, 
-          #compute_group_strain,
-         compute_group_strain_2
-         )
-  
-saveRDS(missing_strain, file.path(project_folder, "missing_files", "strain_concentrator.rds"))
-
-
+folder <- "/home/jonno/HPC_jobs/UK_high_voltage"
+missing_df<-tibble(files = list.files(folder, pattern = ".tgz")) %>%
+  separate(col = files, into = c("drop1", "id", "drop2"), sep = "\\.", remove = F) %>%
+  select(files, id) %>%
+  full_join(tibble(id = as.character(1:288)), .) %>%
+  filter(!complete.cases(.))
 
 
 ```
@@ -904,6 +945,28 @@ test <- list.files("/home/jonno/test_strain/IEEE_118_igraph",
 
 test2 <- tibble(time = test)
 ggplot(test2, aes(x = time)) + geom_density()
+
+```
+
+
+#Attack networks
+test for attacking all the networks script
+```{r}
+1:288 %>% walk(~{
+  
+  task_id <- .x #this is the compute group to be used
+  
+  load_file <- "IEEE_118_igraph"
+
+  source(file.path("/home/jonno/setse_and_network_robustness", 
+                   "HPC_files", 
+                   "HPC_files_concentrator",
+                   "HPC_attack_concentrator_script.R"), 
+         local = TRUE)
+  
+  return(NULL)
+  
+} )
 
 ```
 
@@ -953,7 +1016,7 @@ test <- list.files("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage",
 
 #Other network data
 
-This chunk loads the data for the other networks
+Extracts all the tarred data from the HPC generated files
 ```{r}
 list.files("/home/jonno/HPC_jobs/attack/IEEE_14_igraph", pattern = ".tgz", full.names = F) %>% 
   walk(~{
@@ -995,286 +1058,398 @@ list.files("/home/jonno/HPC_jobs/attack/IEEE_300_igraph", pattern = ".tgz", full
   
 })
 
+
+#The 10k attack data
+
+list.files("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage", pattern = ".tgz", full.names = F) %>% 
+  walk(~{
+  untar(tarfile = file.path("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage", .x), 
+        exdir = "/home/jonno/HPC_jobs/UK_high_voltage",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
 ```
 
 
 
 #Find target and minimise
+
+The below chunk performs and auto setse convergence and plots the results. these should be incorporated at some point to show how performance differs when compared to the other methods
 ```{r}
 
-common_time <- 0.01
-common_mass <- 1
-common_tol <- 2e-3
-common_Iter <- 3e4
-common_drag <- 0
-learning_rate <- 0.1
-
-#This block allows the drag coefficient to be changed. 
-#It is a primitive and unreliable gradient descent but better than nothing.
-
-memory_df<-tibble(iteration = 1:100,
-                  error = NA,
-                  log_ratio = NA,
-                  common_drag_iter = NA,
-                  direction = 1,
-                  target_area = NA,
-                  res_stat = NA,
-                  upper = NA,
-                  lower = NA,
-                  best_log_ratio =NA)
-#set initial round data
-memory_df$log_ratio[1] <- 0
-memory_df$common_drag_iter[1] <- 0
-memory_df$error[1] <-Inf#log10( 2-common_tol)
-memory_df$best_log_ratio[1] <-0
-memory_df$direction[1] = 1 #increasing
-memory_df$target_area[1] <- FALSE
-memory_df$res_stat[1] <- 2
-#These two are the limits of the log ratio. they are set to +/- infinity
-memory_df$upper[1] <- Inf
-memory_df$lower[1] <- -Inf
-memory_df$upper[2] <- Inf
-memory_df$lower[2] <- -Inf
-
-
-drag_iter<- 1
-
-memory_df$log_ratio[drag_iter+1] <- 1#-memory_df$log_ratio[drag_iter] - (memory_df$error[drag_iter])* 1 *direction_change
-memory_df$common_drag_iter[drag_iter+1] <- 10^( -memory_df$log_ratio[drag_iter+1]) * common_time
-
-while((drag_iter <= 100) & (memory_df$res_stat[drag_iter]>common_tol)){
-  drag_iter <- drag_iter+1      
-# print( memory_df$common_drag_iter[drag_iter])
-  embeddings_data <- Find_network_balance(current_graph, 
-                                          force ="net_generation",
-                                          flow = "power_flow",
-                                          distance = "distance",
-                                          #capacity = "edge_capacity",
-                                          edge_name = "edge_name",
-                                          #   k = "k",
-                                          tstep =  common_time,
-                                          tol = common_tol,
-                                          max_iter = common_Iter,
-                                          coef_drag =  memory_df$common_drag_iter[drag_iter] ,
-                                          mass = common_mass,
-                                          sample = 100
-  )
-  
-  node_embeds <- embeddings_data$node_status
-  
-  memory_df$res_stat[drag_iter] <- sum(abs(node_embeds$static_force))
-  
-  #set the residual static force to 2 if it exceeds this value
-  memory_df$res_stat[drag_iter] <- ifelse(memory_df$res_stat[drag_iter]>2, 2 ,memory_df$res_stat[drag_iter])
-  
-  #Is the algo in the convex area?
-  memory_df$target_area[drag_iter] <- memory_df$res_stat[drag_iter] < 2
-  
-  #Log error is negative when small
-  memory_df$error[drag_iter] <- log10(memory_df$res_stat[drag_iter] - common_tol) 
-  
-  #setting the limits
-  if(min(memory_df$res_stat, na.rm = TRUE)<2){
-
-    
-    #ARE THESE EQUALITES THE RIGHT WAY ROUND?
-    #THere is an issue when there are two unique values and one of them is NA
-  min_error <- which.min(memory_df$error)
-  upper_ratios <- memory_df$log_ratio[memory_df$log_ratio[min_error] >= memory_df$log_ratio] %>% unique()
-  lower_ratios  <- memory_df$log_ratio[memory_df$log_ratio[min_error] <= memory_df$log_ratio] %>% unique()
-
-    memory_df$upper[drag_iter+1] <-   ifelse(!is.finite( upper_ratios[rank(-upper_ratios, ties.method =  "first")==2]), 
-                                           -Inf, 
-                                           upper_ratios[rank(-upper_ratios, ties.method =  "first")==2])  
-  # memory_df$upper[drag_iter+1] <-   ifelse(sum(is.finite(upper_ratios))==0, 
-  #                                          -Inf, 
-  #                                          upper_ratios[rank(-upper_ratios, ties.method =  "first")==2])
-  
-  memory_df$lower[drag_iter+1] <- ifelse(!is.finite(lower_ratios[rank(lower_ratios, ties.method =  "first" )==2]), 
-                                         Inf, 
-                                         lower_ratios[rank(lower_ratios, ties.method =  "first")==2])
-  
-  memory_df$best_log_ratio[drag_iter] <- memory_df$log_ratio[min_error]
-  } else {
-    memory_df$upper[drag_iter+1] <- memory_df$upper[drag_iter] 
-     memory_df$lower[drag_iter+1] <-  memory_df$lower[drag_iter]
-     memory_df$best_log_ratio[drag_iter] <- memory_df$best_log_ratio[drag_iter-1]
-    
-  }
-  
-  #if you are in the target zone updates happpen adaptively if not using a fixed step size
-  if( is.finite(memory_df$upper[drag_iter]) ){
-    print("upper limit found")
-    memory_df$log_ratio[drag_iter+1] <- (memory_df$upper[drag_iter] + memory_df$lower[drag_iter] )/2
-    
-    #if the logratios are the same break by choosing the lower limmit and the best value
-    memory_df$log_ratio[drag_iter+1] <- ifelse(isTRUE(all.equal( memory_df$log_ratio[drag_iter+1],
-                                                          memory_df$log_ratio[drag_iter])), 
-                                               (memory_df$lower[drag_iter]+ memory_df$best_log_ratio[drag_iter])/2,
-                                               memory_df$log_ratio[drag_iter+1] )
-
-  } else {
-    #Before the non trivial upper and lower bound are found simple search is performed to find the target zone
-    #fixed rate search across the plateau
-     memory_df$log_ratio[drag_iter+1] <- memory_df$log_ratio[drag_iter] - learning_rate*memory_df$direction[drag_iter]
-     
-  }
-
-  memory_df$common_drag_iter[drag_iter+1] <- 10^( -memory_df$log_ratio[drag_iter+1]) * common_time
-  
-  
-  
-  
-  
-  message_val <- ifelse(memory_df$direction[drag_iter] < 1, "accuracy increasing",  "accuracy decreasing")
-  
-  print(paste("Iteration", drag_iter, message_val,  
-              memory_df$common_drag_iter[drag_iter + 1], 
-              "static force", memory_df$res_stat[drag_iter]))
-  
-}
-
-
-test <- memory_df %>%
-  filter(complete.cases(.))
-
-
-```
-
-
-```{r}
-microbenchmark(test1 =auto_SETS(current_graph, 
+system.time(auto_sets_df <- auto_SETSe(g, 
            force ="net_generation", 
            flow = "power_flow", 
            distance = "distance", 
+           capacity = "edge_capacity",
            edge_name = "edge_name",
            tstep = 0.01, 
            mass = 1, 
-           max_iter = 30000, 
+           max_iter = 100000, 
            tol = 2e-3,
            sparse = FALSE,
-           restarts = 100,
-           sample = 1),
-
-test2 = auto_SETS2(current_graph, 
-           force ="net_generation", 
-           flow = "power_flow", 
-           distance = "distance", 
-           edge_name = "edge_name",
-           tstep = 0.01, 
-           mass = 1, 
-           max_iter = 30000, 
-           tol = 2e-3,
-           sparse = FALSE,
-           restarts = 100,
-           sample = 1),
-
-times = 30)
-
-profvis(auto_SETS(current_graph, 
-           force ="net_generation", 
-           flow = "power_flow", 
-           distance = "distance", 
-           edge_name = "edge_name",
-           tstep = 0.01, 
-           mass = 1, 
-           max_iter = 3000, 
-           tol = 2e-3,
-           sparse = FALSE,
-           restarts = 100,
-           sample = 1)
-        )
-
-
-Rprof(memory.profiling =TRUE)
-auto_SETS(current_graph, 
-           force ="net_generation", 
-           flow = "power_flow", 
-           distance = "distance", 
-           edge_name = "edge_name",
-           tstep = 0.01, 
-           mass = 1, 
-           max_iter = 30000, 
-           tol = 2e-3,
-           sparse = FALSE,
-           restarts = 100,
-           sample = 1)
-Rprof(NULL)
-
-
-
-
-profvis(auto_SETS(current_graph, 
-           force ="net_generation", 
-           flow = "power_flow", 
-           distance = "distance", 
-           edge_name = "edge_name",
-           tstep = 0.01, 
-           mass = 1, 
-           max_iter = 30000, 
-           tol = 2e-3,
-           sparse = TRUE,
-           restarts = 100,
-           sample = 1))
-
-
-profvis(auto_SETS(current_graph, 
-           force ="net_generation", 
-           flow = "power_flow", 
-           distance = "distance", 
-           edge_name = "edge_name",
-           tstep = 0.01, 
-           mass = 1, 
-           max_iter = 30000, 
-           tol = 2e-3,
-           sparse = FALSE,
-           restarts = 100,
+           hyper_iters = 100,
            sample = 100))
 
-
-
-
-```
-
-
-```{r}
-
-memory_df %>%
+auto_sets_df$memory_df %>%
   filter(is.finite(res_stat)) %>%
   ggplot(aes(x = log10(common_drag_iter), y = log10(res_stat))) + geom_point()
 
-memory_df %>%
-  filter(is.finite(res_stat),
-         log10(res_stat)<0) %>%
-  ggplot(aes(x = iteration, y = log10(res_stat))) + geom_point()
-
-memory_df %>%
+auto_sets_df$memory_df %>%
   filter(is.finite(res_stat)) %>%
   ggplot(aes(x = iteration, y = log_ratio)) + geom_point()
 
 
-memory_df %>%
+#This combined with a plot that marked out the full valley would be really good
+auto_sets_df$memory_df %>%
   filter(is.finite(res_stat),
          # log10(res_stat)<0
          ) %>%
-  ggplot(aes(y = log10(res_stat), x = (common_drag_iter))) + geom_line()
+  ggplot(aes(y = log10(res_stat), x = (common_drag_iter))) + geom_path()+
+geom_point(colour = "blue")
+
+test <-auto_sets_df$memory_df
+
+dynamics <- auto_sets_df$network_dynamics
 
 
+dynamics %>%
+  ggplot(aes(x = t, y = log10(static_force))) + geom_point()
+
+```
+
+#Get the auto convergences for the different networks
+IEEE-300 and uk high voltage is done on the HPC as they are significantly slower taking approx 90 seconds per network
+```{r}
+ 
+for(i in (c(paste0("IEEE_",c(14, 30, 57,118, 300) ,"_igraph"), "UK_high_voltage"))){
+  
+  task_id <-  1#this is the compute group to be used
+  
+  load_file <- i 
+  
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_files_concentrator", "HPC_strain_autoconverge_script.R"), 
+         local = TRUE)
+}
+  
+
+
+list.files("/home/jonno/test_strain/UK_high_voltage", pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/Dropbox/IEEE_Networks/embeddings/UK_high_voltage",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+
+test <- embeddings_data$memory_df %>%
+  mutate(diff = 1-res_stat/lag(res_stat),
+         diff2 = abs(diff)>0.01)
+
+
+  task_id <-1 #this is the compute group to be used
+  
+  load_file <- "UK_high_voltage"
+  
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_files_concentrator", "HPC_strain_big_autoconverge_script.R"), 
+         local = TRUE)
+
+```
+
+#PL strain
+calculate the strain for the proportionally loaded networks
+```{r}
+
+for(i in c(paste0("IEEE_",c(14, 30, 57,118, 300) ,"_igraph"), "UK_high_voltage")){
+  
+  task_id <-  1#this is the compute group to be used
+  
+  load_file <- i
+  
+  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_PL", 
+                   "HPC_pl_strain.R"), 
+         local = TRUE)
+}
+
+```
+
+```{r}
+list.files("/home/jonno/HPC_jobs", pattern = "PL", full.names = T) %>% walk(~{
+  
+  list.files(.x, pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/Dropbox/IEEE_Networks/PL_attacks",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+  
+})
+
+
+list.files("/home/jonno/HPC_jobs/UK_high_voltage", pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/Dropbox/IEEE_Networks/attacks",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )})
+
+```
+
+#Timing
+
+This chunk extracts timings, which can be used for various things
+```{r}
+
+folder <-"/home/jonno/HPC_jobs/UK_high_voltage"# "/home/jonno/test_strain/UK_high_voltage"
+
+test <-list.files(folder, pattern = ".out", full.names = T) %>%
+  map_df(~{
+    
+    test <-read_lines( .x )
+    
+    tibble(time = parse_number(test[length(test)], "[0-9]+")[[1]],
+           unit = str_extract(test[length(test)], '\\w+$'))
+    
+  }) %>%
+  mutate(total_mins = ifelse(unit == "hours", time*60, time),
+         total_hours = ifelse(unit == "hours", time, time/60))
+
+
+test %>%
+  ggplot(aes(x = total_hours)) + geom_density()
+
+```
+
+```{r}
+file_vect <-list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/UK_high_voltage", full.names = T)
+
+test2 <-file_vect %>%
+      map_df(~{
+        file_name = .x
+        temp <- readRDS(file_name)
+        temp_edge<- temp$edge_embeddings
+        
+        parts <- str_split(basename(file_name), pattern = "_", simplify = T)
+        
+        temp_edge %>%
+          summarise(mean_loading =mean(line_load, na.rm = T),
+                    median_loading = median(line_load, na.rm = T),
+                    mean_alpha = mean(1/line_load, na.rm = T),
+                    median_alpha = median(1/line_load, na.rm = T),
+                    mean_strain = mean(strain, na.rm = T),
+                    median_strain = median(strain, na.rm = T),
+                    mean_tension = mean(tension, na.rm = T),
+                    median_tension = median(tension, na.rm = T)
+          ) %>%
+          mutate(
+         #   static_force = sum(abs(temp$node_embeddings$static_force)),
+            fract = parts[2],
+            carrying_capacity = parts[4],
+            largest = parts[6],
+            smallest = parts[8],
+            robin_hood_mode = str_remove(parts[11], pattern = ".rds"))
+        
+      }) %>% mutate(graph = basename(.x))
+
+
+```
+
+
+#Alt Area & E
+```{r}
+new_k <-function(alpha_fract = 1, power_fract = 1, r = 100, c = 100){
+  
+  r^2*(alpha_fract+power_fract) + r*c*(alpha_fract+power_fract) + c^2
+  
+}
+
+test_combos <- expand.grid(r = 10^(1:5), c = 10^(1:5)) %>% 
+  as_tibble() %>%
+  mutate(k = new_k(r = r, c = c),
+         sqrtk =  new_k(r = sqrt(r), c = sqrt(c)),
+         log10k  = log10(k),
+         log10sqrtk = log10(sqrtk))
+
+
+
+test_combos <- expand.grid(alpha_fract = seq(0, 1, 0.01), power_fract = seq(0, 1, 0.01)) %>% 
+  as_tibble() %>%
+  mutate(k = new_k(alpha_fract, power_fract, r = 1000, c = 1000),
+    k_sqrt = sqrt(new_k(alpha_fract, power_fract, r = 1000, c = 1000)),
+         sqrt_k =  new_k(alpha_fract, power_fract, r = sqrt(1000), c = sqrt(1000)),
+        k_sqrt2 = kappa(k_sqrt),
+         sqrt_k2 = kappa(sqrt_k))
+
+
+test_combos %>%
+  pivot_longer(., cols = k_sqrt2:sqrt_k2) %>%
+  ggplot(aes(x = alpha_fract, y = power_fract, fill = value)) + 
+  geom_raster() +
+  scale_fill_viridis_c()+
+  facet_wrap(~name)
+##Squareing the result not the imput means that the most high flow edge is stiffer than if the input is squared. When the output is squared you get the hypotenuse which is greater than half when r=c
+test_combos %>%
+  pivot_longer(., cols = k_sqrt2:sqrt_k2) %>%
+  filter(power_fract==0) %>%
+ # filter(power_fract==alpha_fract) %>%
+  ggplot(aes(x = alpha_fract, y = value, colour = name)) + 
+  geom_line()
 
 ```
 
 
 ```{r}
-
-for(i in rev(c(30, 57))){
-  
-  task_id <-  1#this is the compute group to be used
-  
-  load_file <- paste0("IEEE_",i ,"_igraph")
-  
-  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files/HPC_files_concentrator", "HPC_strain_autoconverge_script.R"), local = TRUE)
-}
-  
+list.files("/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/IEEE_118_igraph_raw", 
+           pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )})
 
 ```
+
+
+```{r}
+"/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/IEEE_118_igraph/IEEE_118_igraph"
+
+test_rc_metrics <- list.files("/home/jonno/test_strain/IEEE_118_strainrc/IEEE_118_igraph", 
+                              full.names = T, 
+                              pattern = ".rds") %>% map_df(~{
+print(.x)
+ temp <- readRDS(.x) #aggreagte_strain_files(file_name)
+
+         parts <- str_split(basename(.x), pattern = "_", simplify = T)
+ 
+  #convert to range values
+strain_norm_df <-temp$edge_embeddings %>% 
+  summarise(mean_strain = mean(strain),
+            median_strain = median(strain),
+            mean_tension = mean(tension),
+            median_tension = median(tension),
+            energy = sum(0.5*k*strain^2)) %>%
+          mutate(
+            static_force = sum(abs(temp$node_embeddings$static_force)),
+            fract = parts[2],
+            carrying_capacity = parts[4],
+            largest = parts[6],
+            smallest = parts[8],
+            robin_hood_mode = parts[11],
+            r = parts[13],
+            c = str_remove(parts[15], pattern = ".rds"))
+})
+
+#saveRDS(test_rc_metrics, "/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
+#saveRDS(test_rc_metrics, "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/rc_alt_metrics_df.rds")
+
+test_rc_metrics <-read_rds("/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
+
+table(test_rc_metrics$static_force>0.002)
+
+test <- IEEE_118_agg_res %>%
+  #mutate(mean_alpha = 1/mean_alpha) %>%
+  select(-gc_present, -simulation_id) %>%
+  left_join(test_rc_metrics %>%  
+              mutate_at(., .vars = vars(fract:smallest), .funs = as.numeric) %>%
+              mutate(robin_hood_mode = robin_hood_mode =="TRUE"), 
+            by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
+  rename(mean_energy = energy) %>%
+  pivot_longer(cols = mean_loading:mean_energy, names_to = "metric") %>%
+  separate(., col = metric, into =c("average_type", "metric"),  sep="_" )
+
+
+
+test   %>% 
+  filter(
+    metric !="alpha",
+    #metric !="energy",
+    static_force<0.002,
+  average_type =="mean",
+       r ==10000,
+       c ==10000
+          ) %>%
+  mutate(metric = str_replace(metric, "_", " ")) %>%
+  ggplot(aes(x = value, y = attack_round, colour = as.factor(carrying_capacity), group = metric)) + 
+  geom_point() +
+  facet_wrap(~metric, scales = "free_x") +
+  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
+  geom_smooth(method = "loess",se = FALSE) +
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+          y = "Number of rounds until loss of giant component")
+
+```
+
+```{r}
+metric_combos <- test %>%
+  distinct(., average_type, metric, r,c) %>%
+  filter(metric !="alpha")
+
+  metric_performance <-1:nrow(metric_combos) %>%
+    map_df(~{
+      print(.x)
+      temp <- test %>%
+        filter(
+          static_force<0.002,
+          !is.na(value),
+          r == metric_combos$r[.x],
+          c == metric_combos$c[.x],
+          metric == metric_combos$metric[.x],
+          average_type == metric_combos$average_type[.x]
+          )
+      
+      loess_mod <- loess(formula =attack_round~ value, 
+                         data = temp)
+      
+      model_comp <- temp  %>%
+        mutate(preds = predict(loess_mod)
+        )
+      
+      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
+        mutate(metric = metric_combos$metric[.x],
+               average_type = metric_combos$average_type[.x],
+               r = temp$r[1],
+               c = temp$c[1])
+      
+    })
+  
+  
+  test <- metric_performance %>%
+  filter(average_type=="mean",
+         metric == "strain") %>%
+  group_by(.metric) %>%
+  mutate(perc = ifelse(.metric =="rsq",rank(signif(-.estimate, 3)), rank(signif(.estimate, 3))),
+         perc2 = .estimate/min(.estimate),
+         perc2 = ifelse(perc2>2, 2, perc2)-1
+         )
+  
+  
+  test %>% ggplot(aes(x = factor(r), y = factor(c, levels =rev(10^(1:5))), fill= perc2, )) + geom_raster() +
+  facet_wrap(~.metric) +
+  geom_text(aes(label = signif(.estimate, 3))) +
+    scale_fill_viridis_c(limits = c(-1, 1)) +
+    labs(title = "Model performance mean tension across multiple metrics by r and c", 
+       x = "range of k", 
+       y = "minimum k value",
+       fill = "relative Error")
+  
+  
+  metric_performance  %>%
+    filter(average_type == "mean",
+           metric != "energy",
+           r == 100,
+           c == 10000) %>%
+  group_by(.metric) %>%
+  mutate(perc = ifelse(.metric =="rsq",rank(signif(-.estimate, 3)), rank(signif(.estimate, 3))),
+         perc2 = 1-ifelse(.metric =="rsq", (.estimate-max(.estimate))/max(.estimate), (.estimate-max(.estimate))/max(.estimate))) %>%
+    ggplot(aes(x = metric, y = .estimate)) + geom_col()+
+    facet_wrap(~.metric, scales = "free")
+  
+```
+
 

@@ -17,8 +17,8 @@
 ######
 ######
 ##
-##This script allow large numbers of random attacks on a graph to be distributed across many cpus. The networks need to have
-## had the edge limits predefined on loading. 
+##This script allow large numbers of random attacks on a graph to be distributed across many cpus. 
+## The file out puts 4 files the failure mode df for nodes and edges the attack summary file and a file containing 4 co-failure matrices
 ##
 ######
 ######
@@ -45,19 +45,19 @@ if(dir.exists("/home/jonno")){
   project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
   load_data_files_path <- file.path(project_folder) #load the files
-  save_data_files_path <- file.path(project_folder) #save the files
+  save_data_files_path <- file.path(project_folder, "ten_k_attacks", load_file) #save the files
 }else{
   #This is for the folder that is on the cloud
   project_folder <- getwd()
   basewd <- "/home/ucabbou"
   load_data_files_path <- file.path(basewd) #load the files
   save_data_files_path <- file.path(project_folder) #save the files
-
+  
   #If it is not on my computer then the variables need to be loaded from the system environment
   #Get the task ID
   task_id <- Sys.getenv("SGE_TASK_ID")
   load_file <- Sys.getenv("GRAPH_NAME") #file name of the graph to load
-  }
+}
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
@@ -67,70 +67,127 @@ list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names =
   walk(~source(.x))
 
 
-    graph_path <- file.path(load_data_files_path, "power_grid_graphs", paste0(load_file , ".rds"))
+graph_path <- file.path(load_data_files_path, "power_grid_graphs", paste0(load_file , ".rds"))
 
-      #read the target graph
-      g <- readRDS(file = graph_path) 
-      
-      for(i in (1:10000)[rep(1:100, 100)==task_id]){
-      
-      #Set the seed for the random order and generate the edge deletion order
-      set.seed(i)
-      DeletionOrder <- RandomAttack(g, Target = "Edges", Number = ecount(g), Name = "edge_name")
-      #Construction the deletion order function.
-      FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder, "Edge", Name =  "edge_name"))
-     # print("attack grid")
-      AttackSeries <- suppressMessages(AttackTheGrid(NetworkList = list(list(g)),
-                                                     AttackStrategy = FixedNodes,
-                                                     referenceGrid = NULL,
-                                                     MinMaxComp = 0.0,
-                                                     TotalAttackRounds = 1000,
-                                                     CascadeMode = TRUE,
-                                                     CumulativeAttacks = NULL,
-                                                     Demand = "demand",
-                                                     Generation = "generation",
-                                                     EdgeName = "edge_name",
-                                                     VertexName = "name",
-                                                     Net_generation = "net_generation",
-                                                     power_flow = "power_flow",
-                                                     edge_limit = "edge_capacity"))
-      
-      #print("Extract summaries")
-      #This is because doing all the extraction at the end would take a very long time, so I break it up over all the jobs.
-      #This way I only need to combine the saved files but not operate on them.
-      AttackSeriesSummary <- AttackSeries %>%
-        ExtractNetworkStats(Generation = "generation", 
-                            EdgeName = "edge_name", 
-                            PowerFlow = "power_flow", 
-                            Link.Limit = "edge_capacity") %>%
-        #I add in the attack parameters for conveniance so I don't need to do it when I load the data.
-        #This is just as joining a very large table can be slow
-        mutate(
-          simulation_id = i,
-          graph = load_file
-        ) 
-      
-      
-      #Both the attack series and the summary are saved to store as much information as possible in one go.
-      
-      #The structure is generated as needed and so any new paths can just be created at this point.
-      #There is very little overhead in doing it this way
-      #print("save results")
-      
-      summary_save_path <- file.path(save_data_files_path, "collapse_summaries", paste0("simulation_id_", i, ".rds"))
-        if(!file.exists(dirname(summary_save_path))){ dir.create(dirname(summary_save_path), recursive = T)}
-      print(summary_save_path)
-      #This is not saved as it takes up so much space
-      #saveRDS(AttackSeries, file = Iter_collapse_path)
-      
-      saveRDS(AttackSeriesSummary, file = summary_save_path)
-      #After the simulation and its summary are saved to the drive the next in the compute group is calculated
-    }
+#read the target graph
+g <- readRDS(file = graph_path) 
+
+tot_nodes <- vcount(g)
+tot_edges <- ecount(g)
+
+#Make the co failure matrices as integer matrices of 0 for which the simulations are added on top
+node_co_failure <- matrix(0L, ncol = tot_nodes, nrow = tot_nodes)
+node_co_failure_no_target <-  matrix(0L, ncol = tot_nodes, nrow = tot_nodes)
+edge_co_failure <-  matrix(0L, ncol = tot_edges, nrow = tot_edges)
+edge_co_failure_no_target <- matrix(0L, ncol = tot_edges, nrow = tot_edges)
+
+AttackSeriesSummary_list <- list()
+edge_failure_mode <- list()
+node_failure_mode <- list()
+
+#only 10 to act as a test
+#for(i in 1:10){
+for(i in (1:10000)[rep(1:10, 1000)==task_id]){
+  print(i)
+  #Set the seed for the random order and generate the edge deletion order
+  set.seed(i)
+  DeletionOrder <- RandomAttack(g, Target = "Edges", Number = ecount(g), Name = "edge_name")
+  #Construction the deletion order function.
+  
+  if(!("edge_capacity" %in% edge_attr_names(g))){
+    #if the IEEE networks are loaded they are automatically given PL value of 2.
+    #The IEEE networks don't have an edge capacity value so that is why they can be identified
+    g <- Proportional_Load(g, alpha = 2, PowerFlow = "power_flow", Link.Limit = "edge_capacity")
+    
+  }
+  
+  FixedNodes <- quo(FixedStrategyAttack(g, DeletionOrder, "Edge", Name =  "edge_name"))
+  # print("attack grid")
+  AttackSeries <- attack_the_grid(g = g,
+                                  AttackStrategy = FixedNodes,
+                                  g0 = NULL,
+                                  TotalAttackRounds = 1000,
+                                  CascadeMode = TRUE,
+                                  Demand = "demand",
+                                  Generation = "generation",
+                                  EdgeName = "edge_name",
+                                  VertexName = "name",
+                                  Net_generation = "net_generation",
+                                  power_flow = "power_flow",
+                                  edge_limit = "edge_capacity",
+                                  target = "edges")
+  
+  #print("Extract summaries")
+  #This is because doing all the extraction at the end would take a very long time, so I break it up over all the jobs.
+  #This way I only need to combine the saved files but not operate on them.
+  AttackSeriesSummary <- AttackSeries %>% 
+    extract_network_stats(.) %>%
+    #I add in the attack parameters for conveniance so I don't need to do it when I load the data.
+    #This is just as joining a very large table can be slow
+    mutate(
+      simulation_id = i,
+      graph = load_file
+    ) 
+  
+  AttackSeriesSummary_list[[i]] <- AttackSeriesSummary
+  
+  #rowSums(edge_failure_round) %>% table
+  co_failure_list <- network_co_failure(AttackSeries)
+  
+  
+  #Stack the co-failure matrices
+  node_co_failure <- node_co_failure + co_failure_list$node_co_failure
+  node_co_failure_no_target <- node_co_failure_no_target + co_failure_list$node_co_failure_no_target
+  edge_co_failure <- edge_co_failure + co_failure_list$edge_co_failure
+  edge_co_failure_no_target <- edge_co_failure_no_target + co_failure_list$edge_co_failure_no_target
+  
+  #extend the list of the failure mode dataframes
+  edge_failure_mode[[i]] <- co_failure_list$edge_failure_mode  %>%
+    mutate(
+      simulation_id = i,
+      graph = load_file
+    ) 
+  
+  node_failure_mode[[i]] <- co_failure_list$node_failure_mode  %>%
+    mutate(
+      simulation_id = i,
+      graph = load_file
+    ) 
+  
+  
+}
+
+#The comined files are saved, this greatly reduces the amount of files saved an the subseuent processing time
+
+#The node co failure matrices recombined into lists
+co_failure_list_out <-list(node_co_failure = node_co_failure,
+     node_co_failure_no_target = node_co_failure_no_target,
+     edge_co_failure = edge_co_failure,
+     edge_co_failure_no_target = edge_co_failure_no_target)
+
+#collapse the lists to a single data frame
+AttackSeriesSummary_list <- bind_rows(AttackSeriesSummary_list)
+edge_failure_mode <- bind_rows(edge_failure_mode)
+node_failure_mode <- bind_rows(node_failure_mode)
+
+
+summary_save_path <- file.path(save_data_files_path, "collapse_summaries", paste0("task_id_", task_id, ".rds"))
+if(!file.exists(save_data_files_path)){ dir.create(save_data_files_path, recursive = T)}
+
+saveRDS(AttackSeriesSummary_list, 
+        file = file.path(save_data_files_path, paste0("collapse_summaries_task_id_", task_id, ".rds")))
+saveRDS(edge_failure_mode, 
+        file = file.path(save_data_files_path, paste0("edge_failure_mode_task_id_", task_id, ".rds")))
+saveRDS(node_failure_mode, 
+        file = file.path(save_data_files_path, paste0("node_failure_mode_task_id_", task_id, ".rds")))
+
+saveRDS(co_failure_list_out, 
+        file = file.path(save_data_files_path, paste0("co_failure_task_id_", task_id, ".rds")))
 
 stop_time <- Sys.time()
 
 print(stop_time-start_time)
-  
+
 #Once the attack has completed the script terminates
 
 #######################

@@ -98,10 +98,15 @@ c(14, 30, 57, 118, 300) %>% walk(~{
 
 ```{r}
 
-  IEEE_number <- 118
+  IEEE_number <- 300
 
-g <- read_rds(file.path(power_grid_graphs_path , paste0("IEEE_", IEEE_number, "_igraph.rds"))) %>%
-  PowerFlow(., SlackRef = "1", EdgeName ="edge_name", VertexName = "name", Net_generation = "net_generation", power_flow = "power_flow")
+g <- read_rds(file.path(power_grid_graphs_path , paste0("IEEE_", IEEE_number, "_igraph.rds")))
+
+AZero <- CreateTransmission(g,  EdgeName ="edge_name", VertexName = "name")
+LineProperties <- LinePropertiesMatrix(g = g,  Edgename ="edge_name", Weight = "Y")
+
+g<- g%>%
+  PowerFlow(., AZero = AZero, LineProperties = LineProperties, EdgeName ="edge_name", VertexName = "name", Net_generation = "net_generation", power_flow = "power_flow")
 
 
 
@@ -124,19 +129,18 @@ ggsave(file.path(Figures_path, "IEEE_118_fr_proj.pdf"))
 This chunk re-creates the UK high voltage network as a standardised network with the same properties and names as the IEEE network.
 This just makes the network more interchangeable with the other networks and so smoothes the coding.
 ```{r}
+#The base directory called by the sourced script
+basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
 source(file.path("/home/jonno/ProportionalLoading", "CreateGBase.R"))
 
-test <- as_data_frame(g)
+test <- as_data_frame(gbase)
 
 UK_edges <- gbase %>% as_data_frame() %>%
   rename(power_flow = PowerFlow, 
          edge_name = Link, 
          edge_capacity = Link.Limit) %>%
-  select(-Combines, 
-         -Length,
-         -name,
-         -Voltage,
-         -weight)
+  select(from, to, edge_name, Y, power_flow, edge_capacity)
+
 UK_vertices <- gbase %>% as_data_frame(., what = "vertices") %>%
   rename(demand = Demand, generation = Generation, net_generation = BalencedPower ) %>%
   mutate(Name = name) %>%

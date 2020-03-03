@@ -14,7 +14,7 @@
 
 # The number of array tasks. In the base attack scripts this will be 1-288 in the base strain script this will be 1-480
 # In the permutation attack script this will be 1-1200 (i.e 40*480)
-#$ -t 1-100
+#$ -t 1-1
 
 # 2. Request 4 gigabyte of RAM. Change this to suit your requirements.
 #$ -l mem=4G
@@ -40,6 +40,6 @@ tar zcvf $HOME/Scratch/attack/PL_${1}/collapse_summaries_$JOB_ID.$SGE_TASK_ID.tg
 #tar zcvf $HOME/Scratch/attack/PL_${1}/collapse_sets_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/collapse_sets 
 
 #The R output is moved not tarred as it is small and there is only 1 of it. It contains the job runtime so is useful for analysis
-cp $TMPDIR/HPC_attack_concentrator_script.R.out $HOME/Scratch/attack/PL_${1}/HPC_pl_attack.out_$JOB_ID.$SGE_TASK_ID
+cp $TMPDIR/HPC_pl_attack.R.out $HOME/Scratch/attack/PL_${1}/HPC_pl_attack.out_$JOB_ID.$SGE_TASK_ID
 
 # Make sure you have given enough time for the copy to complete!
