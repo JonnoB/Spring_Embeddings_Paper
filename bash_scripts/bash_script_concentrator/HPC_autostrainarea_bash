@@ -30,14 +30,14 @@ module unload compilers
 module unload mpi
 module load r/recommended
 
-Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_files_concentrator/HPC_strain_autoconverge_area_script.R > HPC_strain_autoconverge_area_script.R.out
+Rscript --vanilla /home/ucabbou/Spring_Embeddings_Paper/HPC_files/HPC_files_concentrator/HPC_strain_autostrainarea_area_script.R > script_printout.R.out
 
 #The $1 is the name of the graph that is going to be tested. this means all graphs are kept seperate and reduces confusion
 
-#The 288 embedding files are tarred up here
-tar zcvf $HOME/Scratch/bigautostrain2/$1/embeddings_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/embeddings 
+#The embedding files are tarred up here
+tar zcvf $HOME/Scratch/${2}/$1/embeddings_$JOB_ID.$SGE_TASK_ID.tgz $TMPDIR/embeddings 
 
 #The R output is moved not tarred as it is small and there is only 1 of it. It contains the job runtime so is useful for analysis
-cp $TMPDIR/HPC_strain_autoconverge_area_script.R.out $HOME/Scratch/bigautostrain2/$1/HPC_strain_autoconverge_area_script.R.out_$JOB_ID.$SGE_TASK_ID
+cp $TMPDIR/script_printout.R.out $HOME/Scratch/${2}/$1/script_printout.R.out_$JOB_ID.$SGE_TASK_ID
 
 # Make sure you have given enough time for the copy to complete!

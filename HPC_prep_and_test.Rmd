@@ -1192,12 +1192,26 @@ list.files("/home/jonno/HPC_jobs", pattern = "PL", full.names = T) %>% walk(~{
 })
 
 
-list.files("/home/jonno/HPC_jobs/UK_high_voltage", pattern = ".tgz", full.names = T) %>% 
+list.files("/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target2/IEEE_118_igraph_strain_rc_spike_target2_raw", pattern = ".tgz", full.names = T) %>% 
   walk(~{
   untar(tarfile =.x, 
-        exdir = "/home/jonno/Dropbox/IEEE_Networks/attacks",#, 
+        exdir = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target2",#, 
         extras = "--strip-components 4"  #take only the useful bits of the zip file
       )})
+
+list.files("/home/jonno/test_strain/strain_sqrt_k_raw", full.names = T) %>% walk(~{
+  print(.x)
+  graph_name <- basename(.x)
+  list.files(.x, pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = file.path("/home/jonno/test_strain/strain_sqrt_k", graph_name),#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+  
+})
 
 ```
 
@@ -1305,77 +1319,44 @@ test_combos %>%
 
 
 ```{r}
-list.files("/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/IEEE_118_igraph_raw", 
+list.files("/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target/IEEE_118_igraph_strain_rc_spike_target_raw", 
            pattern = ".tgz", full.names = T) %>% 
   walk(~{
   untar(tarfile =.x, 
-        exdir = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt",#, 
+        exdir = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target/IEEE_118_igraph_strain_rc_spike_target",#, 
         extras = "--strip-components 4"  #take only the useful bits of the zip file
       )})
 
 ```
 
-
+##load alt
 ```{r}
-"/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/IEEE_118_igraph/IEEE_118_igraph"
 
-test_rc_metrics <- list.files("/home/jonno/test_strain/IEEE_118_strainrc/IEEE_118_igraph", 
-                              full.names = T, 
-                              pattern = ".rds") %>% map_df(~{
-print(.x)
- temp <- readRDS(.x) #aggreagte_strain_files(file_name)
+test <- process_rc_comparisons(save_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/rc_alt_metrics_df.rds", 
+                                          load_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/IEEE_118_igraph/IEEE_118_igraph", 
+                                          aggregated_attack_df =  all_graph_agg %>% filter(graph == "IEEE_118_igraph") )
 
-         parts <- str_split(basename(.x), pattern = "_", simplify = T)
- 
-  #convert to range values
-strain_norm_df <-temp$edge_embeddings %>% 
-  summarise(mean_strain = mean(strain),
-            median_strain = median(strain),
-            mean_tension = mean(tension),
-            median_tension = median(tension),
-            energy = sum(0.5*k*strain^2)) %>%
-          mutate(
-            static_force = sum(abs(temp$node_embeddings$static_force)),
-            fract = parts[2],
-            carrying_capacity = parts[4],
-            largest = parts[6],
-            smallest = parts[8],
-            robin_hood_mode = parts[11],
-            r = parts[13],
-            c = str_remove(parts[15], pattern = ".rds"))
-})
-
-#saveRDS(test_rc_metrics, "/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
-#saveRDS(test_rc_metrics, "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_alt/rc_alt_metrics_df.rds")
-
-test_rc_metrics <-read_rds("/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
-
-table(test_rc_metrics$static_force>0.002)
-
-test <- IEEE_118_agg_res %>%
-  #mutate(mean_alpha = 1/mean_alpha) %>%
-  select(-gc_present, -simulation_id) %>%
-  left_join(test_rc_metrics %>%  
-              mutate_at(., .vars = vars(fract:smallest), .funs = as.numeric) %>%
-              mutate(robin_hood_mode = robin_hood_mode =="TRUE"), 
-            by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
-  rename(mean_energy = energy) %>%
-  pivot_longer(cols = mean_loading:mean_energy, names_to = "metric") %>%
-  separate(., col = metric, into =c("average_type", "metric"),  sep="_" )
+test <- process_rc_comparisons(save_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target/rc_alt_metrics_df.rds", 
+                                          load_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target/IEEE_118_igraph_strain_rc_spike_target/IEEE_118_igraph", 
+                                          aggregated_attack_df =  all_graph_agg %>% filter(graph == "IEEE_118_igraph") )
 
 
+
+test <- process_rc_comparisons(save_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target2/rc_alt_metrics_df.rds", 
+                                          load_file_path = "/home/jonno/test_strain/IEEE_118_igraph_strain_rc_spike_target2/IEEE_118_igraph", 
+                                          aggregated_attack_df =  all_graph_agg %>% filter(graph == "IEEE_118_igraph") )
 
 test   %>% 
   filter(
     metric !="alpha",
-    #metric !="energy",
+    metric !="loading",
     static_force<0.002,
   average_type =="mean",
-       r ==10000,
-       c ==10000
+       r ==100,
+       c ==1000
           ) %>%
   mutate(metric = str_replace(metric, "_", " ")) %>%
-  ggplot(aes(x = value, y = attack_round, colour = as.factor(carrying_capacity), group = metric)) + 
+  ggplot(aes(x = value, y = attack_round, colour = as.factor(robin_hood_mode), group = metric)) + 
   geom_point() +
   facet_wrap(~metric, scales = "free_x") +
   labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
@@ -1385,12 +1366,14 @@ test   %>%
 
 ```
 
+##model alt
 ```{r}
 metric_combos <- test %>%
+  filter(metric %in% c("strain", "tension")) %>%
   distinct(., average_type, metric, r,c) %>%
   filter(metric !="alpha")
 
-  metric_performance <-1:nrow(metric_combos) %>%
+  metric_performance_test <-1:nrow(metric_combos) %>%
     map_df(~{
       print(.x)
       temp <- test %>%
@@ -1419,7 +1402,7 @@ metric_combos <- test %>%
     })
   
   
-  test <- metric_performance %>%
+  test <- metric_performance_test %>%
   filter(average_type=="mean",
          metric == "strain") %>%
   group_by(.metric) %>%
@@ -1439,7 +1422,7 @@ metric_combos <- test %>%
        fill = "relative Error")
   
   
-  metric_performance  %>%
+  metric_performance_test  %>%
     filter(average_type == "mean",
            metric != "energy",
            r == 100,
@@ -1450,6 +1433,93 @@ metric_combos <- test %>%
     ggplot(aes(x = metric, y = .estimate)) + geom_col()+
     facet_wrap(~.metric, scales = "free")
   
+```
+
+##Alternative kappa
+measures strain and tension for each line then averages
+
+```{r}
+folder_name <-  "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph" 
+graph_name <- basename(folder_name)
+PL_1 <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL", graph_name, "ec_1.rds"))$edge_embeddings
+PL_inf <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL", graph_name, "ec_Inf.rds"))$edge_embeddings
+
+summ_mini <-function(x) {x %>%
+          summarise(
+            mean_loading =mean(line_load, na.rm = T),
+            median_loading = median(line_load, na.rm = T),
+            mean_alpha = mean(1/line_load, na.rm = T),
+            median_alpha = median(1/line_load, na.rm = T),
+            mean_strain = mean(strain, na.rm = T),
+            median_strain = median(strain, na.rm = T),
+            mean_tension = mean(tension, na.rm = T),
+            median_tension = median(tension, na.rm = T)
+          )}
+
+PL_1_summ <- PL_1 %>% summ_mini()
+PL_inf_summ <- PL_inf %>% summ_mini()
+
+range_df <- left_join(PL_1 %>% select(edge_name, pl_1_tension = tension, pl_1_strain = strain),PL_inf %>% select(edge_name, pl_inf_tension = tension, pl_inf_strain = strain), by = "edge_name")
+
+    Out <- list.files(folder_name, full.names = T) %>%
+      map_df(~{
+        file_name = .x
+        temp <- readRDS(file_name)
+        temp_edge <- temp$edge_embeddings
+        
+        parts <- str_split(basename(file_name), pattern = "_", simplify = T)
+        
+        spec <- temp_edge %>% left_join(range_df, by = "edge_name") %>%
+          mutate(tension2 = (tension- pl_1_tension)/(pl_inf_tension - pl_1_tension),
+                 strain2 = (strain- pl_1_strain)/(pl_inf_strain - pl_1_strain))
+        
+         temp_edge %>% summ_mini() %>%{ (.- PL_inf_summ)/(PL_1_summ-PL_inf_summ)} %>%
+          mutate(
+            mean_spectension = mean(spec$tension2),
+            median_spectension = median(spec$tension2),
+            mean_specstrain = mean(spec$strain2),
+            median_specstrain = median(spec$strain2),
+            static_force = sum(abs(temp$node_embeddings$static_force)),
+            fract = parts[2],
+            carrying_capacity = parts[4],
+            largest = parts[6],
+            smallest = parts[8],
+            robin_hood_mode = str_remove(parts[11], pattern = ".rds"))
+        
+      }) %>% mutate(graph = basename(graph_name))
+    
+    return(Out)
+
+  #  test <- temp_edge %>% summ_mini()
+    
+test <- temp_edge %>% mutate(mean_spectension = (tension -PL_inf$tension)/(PL_1$tension-PL_inf$tension))
+
+
+mean(test$tension2)
+median(test$strain2)
+
+test %>%
+  ggplot(aes(x = tension)) + geom_density()
+
+    .x <- "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph/fract_0.5_ec_1.025_largest_0.5_smallest_0.1_robin_hood_TRUE.rds"  
+    
+    
+all_SETSe_emebeddings <- left_join(all_graph_agg %>% 
+                    select(-mean_alpha, -mean_loading,-median_loading) %>%
+                    mutate(
+    carrying_capacity = as.character(carrying_capacity),
+    largest = as.character(largest),
+    smallest = as.character(smallest),
+    fract = as.character(fract),
+    robin_hood_mode = as.character(robin_hood_mode),
+
+  ),
+                  Out) %>%
+  mutate_at(1:4, list(as.numeric)) %>%
+  group_by(graph) %>%
+  pivot_longer(.,cols = mean_loading:median_specstrain, names_to = "metric") %>%
+  separate(., col ="metric", into = c("average_type", "metric"), sep ="_") %>%
+  ungroup
 ```
 
 

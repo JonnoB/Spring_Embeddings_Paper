@@ -39,8 +39,10 @@ if(dir.exists("/home/jonno")){
   analysis_parameter_file_path <- file.path(project_folder, "analysis_parameter_files")
   HPC_script_path <- file.path(project_folder, "HPC_parameter_files")
   load_data_files_path <- file.path(project_folder) #load the files
-  save_data_files_path <- file.path(project_folder) #save the files
+  save_data_files_path <- file.path(project_folder, "strainalt") #save the files
   library(NetworkSpringEmbedding) #to load the package on my comp. on the HPC the non-package version is used
+  #load_file <- "IEEE_118_igraph"
+  #task_id <- 12
   
 }else{
   #This is for the folder that is on the cloud
@@ -91,7 +93,7 @@ print(paste("pararmeters loaded. Task number", task_id))
 
 1:nrow(parameter_df_temp) %>%
   walk(~{
-    #.x <- 1620
+    #.x <- 1616
     ##
     ##
     ##This block below gets the variables necessary to perform the calculation
@@ -150,53 +152,62 @@ print(paste("pararmeters loaded. Task number", task_id))
     #Sets up the graph so that all the embedding stuff can be calculated without problem
     current_graph  <- g %>%
       set.edge.attribute(. , "distance", value = 1) %>%
-      calc_spring_area(., "power_flow", minimum_value = sqrt(common_c), range = sqrt(common_r)) %>% #calculate a flexible Area
-      calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
+      calc_spring_area3(., value = "power_flow", edge_capacity ="edge_capacity", 
+                        minimum_value = common_c, range = common_r,
+                        edge_capacity_thresh = 2, system_capacity_thresh = 2,
+                        power_thresh = 0.9) %>% #calculate a flexible Area
+      calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = common_c, stretch_range = common_r) %>%
       calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+      # calc_spring_area(., "power_flow", minimum_value = sqrt(common_c), range = sqrt(common_r)) %>% #calculate a flexible Area
+      #     calc_spring_area2(., value = "power_flow", edge_capacity ="edge_capacity", 
+      #                      minimum_value = sqrt(common_c), range = sqrt(common_r),
+      #                      edge_capacity_thresh =2, system_capacity_thresh = 2) %>% #calculate a flexible Area
+      # calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
+      # calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       #the other alternative where hypotenuse of the two values is taken not the area
       # calc_spring_area(., "power_flow", minimum_value = common_c, range = common_r) %>% #calculate a flexible Area
       # calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = common_c, stretch_range = common_r) %>%
       # calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       # set_edge_attr(., name = "k", value = sqrt(edge_attr(., name = "k"))) %>%
-      normalise_dc_load(.,  
-                        generation = "generation", 
-                        demand  = "demand",
-                        net_generation = "net_generation", 
-                        capacity = "edge_capacity",
-                        edge_name = "edge_name", 
-                        node_name = "name",
-                        power_flow = "power_flow")
-    
-    
-    embeddings_data <- auto_SETSe(current_graph, 
-                                  force ="net_generation", 
-                                  flow = "power_flow", 
-                                  distance = "distance", 
-                                  capacity = "edge_capacity",
-                                  edge_name = "edge_name",
-                                  tstep = common_time, 
-                                  mass = common_mass, 
-                                  max_iter = common_Iter, 
-                                  tol = common_tol,
-                                  sparse = FALSE,
-                                  hyper_iters = 200,
-                                  hyper_tol = 0.01,
-                                  hyper_max = 30000,
-                                  sample = 100,
-                                  verbose = F)
-    
-    #The structure is generated as needed and so any new paths can just be created at this point.
-    #There is very little overhead in doing it this way
-    if(!file.exists(dirname(Iter_embedding_path))){ dir.create(dirname(Iter_embedding_path), recursive = T) }
-    print("Saving file")
-    saveRDS(embeddings_data, file = Iter_embedding_path)
-    #After the simulation and its summary are saved to the drive the next in the compute group is calculated
-    #} 
-    
-    return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 
-    #I don't know if it works
+    normalise_dc_load(.,  
+                      generation = "generation", 
+                      demand  = "demand",
+                      net_generation = "net_generation", 
+                      capacity = "edge_capacity",
+                      edge_name = "edge_name", 
+                      node_name = "name",
+                    power_flow = "power_flow")
+
+
+embeddings_data <- auto_SETSe(current_graph, 
+                              force ="net_generation", 
+                              flow = "power_flow", 
+                              distance = "distance", 
+                              capacity = "edge_capacity",
+                              edge_name = "edge_name",
+                              tstep = common_time, 
+                              mass = common_mass, 
+                              max_iter = common_Iter, 
+                              tol = common_tol,
+                              sparse = FALSE,
+                              hyper_iters = 200,
+                              hyper_tol = 0.01,
+                              hyper_max = 30000,
+                              sample = 100,
+                              verbose = T)
+
+#The structure is generated as needed and so any new paths can just be created at this point.
+#There is very little overhead in doing it this way
+if(!file.exists(dirname(Iter_embedding_path))){ dir.create(dirname(Iter_embedding_path), recursive = T) }
+
+saveRDS(embeddings_data, file = Iter_embedding_path)
+#After the simulation and its summary are saved to the drive the next in the compute group is calculated
+#} 
+
+return(NULL) #dump everything when the loop finishes. This is an attempt to retain memory and speed up parallel processing... 
+#I don't know if it works
   }
-  )
+)
 
 stop_time <- Sys.time()
 

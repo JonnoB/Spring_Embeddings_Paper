@@ -36,6 +36,7 @@ library(NetworkSpringEmbedding)
 #Set up file system to read the correct folders this switches between aws and windows mode
 
 basewd <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder"
+CodeFolder <- "/home/jonno/setse_and_network_robustness"
 datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
 LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Sets Paper 2" 
 FiguresFolder <- file.path(LatexFolder, "Figures")
@@ -323,53 +324,15 @@ test %>%
 ```
 
 
-
 #Load all collapse data
 
 ```{r}
-concentrator_data <-list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
+all_graph_agg <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
   map_df(~{
     
     file_path <-.x
     read_rds(file_path) 
-  })
-
-PL_data <-list.files("/home/jonno/Dropbox/IEEE_Networks/PL_attacks", full.names = T, recursive = T) %>%
-  map_df(~{
-    
-    file_path <-.x
-    read_rds(file_path) 
-  })
-
-
-test <- concentrator_data %>%
-    group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
-  summarise(mean = mean(attack_round),
-            median = median(attack_round),
-            sd = sd(attack_round),
-            max = max(attack_round),
-            min = min(attack_round)) %>%
-  mutate(range = max-min,
-         mean_by_sd = mean/sd)
-
-
-test %>%
-  ggplot(aes(x = mean_by_sd)) + geom_density()+
-  facet_wrap(~graph, scales = "free")
-
-
-```
-
-
-#Aggregate and plot IEEE-118 r,c data
-
-The results of this plot show that SETS is less affect by the change in concentration than alpha of load
-```{r}
-#N.B.
-#The mean and median strain is the value at the loss of gc point This needs to be changed
-
-#using the combined data frame aggregate the results by parameter group
-IEEE_118_agg_res <-concentrator_data %>% filter(graph == "IEEE_118_igraph") %>% #readRDS(file = file.path("/home/jonno/Dropbox/IEEE_Networks", "IEEE_118_attack_results.rds") ) %>%
+  }) %>% 
   group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
   summarise_all(mean) %>%
   ungroup %>%
@@ -381,106 +344,101 @@ IEEE_118_agg_res <-concentrator_data %>% filter(graph == "IEEE_118_igraph") %>% 
          largest = signif(largest),
          fract = signif(fract))
 
+PL_SETSe_emebeddings <- process_all_pl_setse_emebeddings( strain_folders = file.path(embeddings_path, "PL"),
+                                                          attack_folders = "/home/jonno/Dropbox/IEEE_Networks/PL_attacks")
+
+
+
+test_raw <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
+  map_df(~{
+    
+    file_path <-.x
+    read_rds(file_path) 
+  }) 
+
+ test <- test_raw %>% filter(graph == "IEEE_118_igraph")
+
+test2 <- test %>%
+  select(attack_round, blackout_size, edges, carrying_capacity:graph) %>%
+   group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
+  summarise_all(list(mean = mean, sd = sd))
+
+
+combos <-test %>%
+ select(carrying_capacity, smallest, largest, fract, robin_hood_mode) %>%
+distinct() %>%
+  mutate(seed = 1:n())
+
+
+
+test_res <- (1:nrow(combos)) %>%
+  map_df(~{
+    
+    print(.x)
+    test_118 <- test %>%
+  filter( carrying_capacity ==combos$carrying_capacity[.x],
+         smallest == combos$smallest[.x],
+         largest == combos$largest[.x],
+         fract == combos$fract[.x],
+         robin_hood_mode == combos$robin_hood_mode[.x]) %>%
+      {.[,1:4]}
+
+  set.seed(.x)
+    sample_rows <-sample(1:100, 100*1000 ,replace = TRUE)
+  Out <- data.frame(attack_round = (test_118$attack_round[sample_rows]),
+           generation = (test_118$generation[sample_rows]),
+           blackout_size = (test_118$blackout_size[sample_rows]),
+           nodes = (test_118$nodes[sample_rows])) %>%
+  mutate(id = rep(1:100, length.out = 100*1000)) %>%
+    group_by(id) %>%
+      summarise_all(mean) %>%
+    mutate(graph = "IEEE_118_igraph",
+         carrying_capacity =combos$carrying_capacity[.x],
+         smallest = combos$smallest[.x],
+         largest = combos$largest[.x],
+         fract = combos$fract[.x],
+         robin_hood_mode = combos$robin_hood_mode[.x]) 
+
+return(Out)
+}) %>%
+  mutate(combo = paste(carrying_capacity, smallest, largest, fract, robin_hood_mode))
+
+test_res %>%
+  ggplot(aes(x = attack_round, colour = combo)) + geom_density()
+
+test_out <-test_res %>%
+  select(combo, attack_round:nodes) %>%
+    group_by(combo) %>%
+  summarise_all(list(mean = mean, sd = sd)) %>%
+  mutate(attack_round_ratio = attack_round_sd/attack_round_mean)
+
+test_out %>%
+  ggplot(aes(x = attack_round_ratio, y = attack_round_mean)) + geom_point()
+
+mean(test_out$attack_round_ratio)
+
 ```
 
-##test the r,c combinations
-gets all the metrics into long format.
-Allows the metrics to be plotted against the number of attacks needed before network collapse
 
 ```{r}
 
-if(file.exists()){
-  
-  test_rc_metrics <-read_rds("/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
-  
-} else {
-  
-  test_rc_metrics <- list.files("/home/jonno/test_strain/IEEE_118_strainrc/IEEE_118_igraph", 
-                              full.names = T, 
-                              pattern = ".rds") %>% map_df(~{
-print(.x)
- temp <- readRDS(.x) #aggreagte_strain_files(file_name)
-
-         parts <- str_split(basename(.x), pattern = "_", simplify = T)
- 
-  #convert to range values
-strain_norm_df <-temp$edge_embeddings %>% 
-  summarise(mean_strain = mean(strain),
-            median_strain = median(strain),
-            mean_tension = mean(tension),
-            median_tension = median(tension),
-            energy = sum(0.5*k*strain^2)) %>%
-          mutate(
-            static_force = sum(abs(temp$node_embeddings$static_force)),
-            fract = parts[2],
-            carrying_capacity = parts[4],
-            largest = parts[6],
-            smallest = parts[8],
-            robin_hood_mode = parts[11],
-            r = parts[13],
-            c = str_remove(parts[15], pattern = ".rds"))
-})
-  saveRDS(test_rc_metrics, "/home/jonno/test_strain/IEEE_118_strainrc/rc_metrics_df.rds")
-}
-
-test_rc_metrics <- IEEE_118_agg_res %>%
-  #mutate(mean_alpha = 1/mean_alpha) %>%
-  select(-gc_present, -simulation_id) %>%
-  left_join(test_rc_metrics %>%  
-              mutate_at(., .vars = vars(fract:smallest), .funs = as.numeric) %>%
-              mutate(robin_hood_mode = robin_hood_mode =="TRUE"), 
-            by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
-  rename(mean_energy = energy) %>%
-  pivot_longer(cols = mean_loading:mean_energy, names_to = "metric") %>%
-  separate(., col = metric, into =c("average_type", "metric"),  sep="_" )
-
-```
-
-##Model performance relative to RC
-
-This chunk creates a boxplot that shows that there is no real impact on the tension version when it comes to performance.
-It also shows that the relative performance of the metrics does not change.
-The mean tension out performs all other metrics on all the evaluation metrics.
-
-It may also be useful to know if tension is the best performer across all concentrations
-```{r}
-
+#these are the evaluation metrics of the system
 multi_metric <- metric_set(rmse, rsq, mae, smape)
 
-metric_combos <- test_rc_metrics %>%
-  filter(metric %in% c("strain", "tension")) %>%
-  distinct(., average_type, metric, r,c) %>%
-  filter(metric !="alpha")
+```
 
-  metric_performance <-1:nrow(metric_combos) %>%
-    map_df(~{
-      print(.x)
-      temp <- test_rc_metrics %>%
-        filter(
-          static_force<0.002,
-          !is.na(value),
-          r == metric_combos$r[.x],
-          c == metric_combos$c[.x],
-          metric == metric_combos$metric[.x],
-          average_type == metric_combos$average_type[.x]
-          )
-      
-      loess_mod <- loess(formula =attack_round~ value, 
-                         data = temp)
-      
-      model_comp <- temp  %>%
-        mutate(preds = predict(loess_mod)
-        )
-      
-      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
-        mutate(metric = metric_combos$metric[.x],
-               average_type = metric_combos$average_type[.x],
-               r = temp$r[1],
-               c = temp$c[1])
-      
-    })
-  
-  
+
+#Aggregate and plot IEEE-118 r,c data
+
+The results of this plot show that SETS is less affected by the change in concentration than alpha of load
+```{r}
+#N.B.
+#The mean and median strain is the value at the loss of gc point. The correct value comes in when the strain data is added
+
+#using the combined data frame aggregate the results by parameter group
+source(file.path(CodeFolder, "sub_scripts", "process_rc_comparisons_subscript.r"))
+
+#Raster plot that shows how r and c affect model performance
 metric_performance %>%
   filter(average_type=="mean",
          metric == "strain") %>%
@@ -497,152 +455,7 @@ metric_performance %>%
        y = "minimum k value",
        fill = "relative Error")
 ggsave(filename = file.path(FiguresFolder, "randc_performance_mean_tension.pdf"))
-```
 
-
-```{r}
-
-all_metrics_df <- list.files(file.path( project_folder, "testing_strain_r_c _118"), full.names = T) %>% map_df(~{
-
- test <- readRDS(.x) #aggreagte_strain_files(file_name)
-
-  #convert to range values
-strain_norm_df <-test %>% filter(converged==1) %>%#readRDS(file = file.path("/home/jonno/Dropbox/IEEE_Networks", "strain_df.rds") )%>%
-  mutate(#force strain to be relative
-    mean_strain = kappa(mean_strain),
-    median_strain = kappa(median_strain),
-    mean_tension = kappa(mean_tension),
-    median_tension = kappa(median_tension),
-    energy = kappa(energy)
-  )
-  
-
-#bind the attack and strain data together
-all_metrics_df <- IEEE_118_agg_res %>%
-  left_join(strain_norm_df, by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode")) %>%
-  rename(harmonic_alpha = mean_loading) %>%
-  filter(!is.na(mean_strain)) %>%
-  pivot_longer(., cols = c("harmonic_alpha", 
-                           "median_loading", 
-                           "mean_alpha", 
-                           "mean_tension", 
-                           "mean_strain", 
-                           "median_strain",
-                           "mean_tension", 
-                           "median_tension", 
-                           #"energy"
-                          ), 
-               names_to = "metric" ) %>%
-  mutate(embeddings = case_when(
-    grepl("tension|strain", metric) ~ "embeddings",
-    TRUE ~"alpha" 
-  ))  
-
-})
-
-
-
-all_metrics_df  %>% 
-  filter(
-   #   grepl("mean|harmonic", metric),
-       r ==10000,
-       c ==10000
-          ) %>%
-  mutate(metric = str_replace(metric, "_", " ")) %>%
-  ggplot(aes(x = value, y = attack_round, colour = as.factor(carrying_capacity), group = metric)) + 
-  geom_point() +
-  facet_wrap(~metric) +
-  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
-  geom_smooth(method = "loess",se = FALSE) +
-  labs(title = "The relationship between robustness metrics and number of attacks until failure",
-          y = "Number of rounds until loss of giant component")
-
-all_metrics_df  %>% 
-  filter(
-   #   grepl("mean|harmonic", metric),
-       r ==10000,
-       c ==10000
-          ) %>% nrow()
-
-
-```
-
-
-
-```{r}
-#Plot the performance of the metric across different r c values
- multi_metric <- metric_set(rmse, rsq, mae, smape)
- 
-metric_combos <- expand_grid(metrics = unique(all_metrics_df$metric),
-             r = 10^(2:4),
-             c = 10^(2:4))
- 
-  metric_performance <-1:nrow(metric_combos) %>%
-    map_df(~{
-      
-      temp <- all_metrics_df %>%
-        filter(
-          !is.na(value),
-          r == metric_combos$r[.x],
-          c == metric_combos$c[.x],
-          metric == metric_combos$metrics[.x])
-      
-      loess_mod <- loess(formula =attack_round~ value, 
-                         data = temp)
-      
-      model_comp <- temp  %>%
-        mutate(preds = predict(loess_mod)
-        )
-      
-      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
-        mutate(type = metric_combos$metrics[.x],
-               r = temp$r[1],
-               c = temp$c[1])
-      
-    }) %>%
-    #This filter removes all loading based metrics
-    filter(type !="harmonic_alpha",
-           type != "mean_alpha",
-           !grepl("loading", type)) %>%
-     separate(col = "type", into =c("average", "type"), sep = "_")
-
-
-metric_performance %>%
-  filter(average=="mean") %>%
-  ggplot(aes(x = type, y = .estimate, fill = type)) + geom_boxplot() + 
-  facet_wrap(~.metric, scales = "free_y") + theme(axis.text.x = element_text(angle = 30, hjust = 1))
-
-metric_performance %>%
-  filter(average=="median") %>%
-  ggplot(aes(x = type, y = .estimate, fill = type)) + geom_boxplot() + 
-  facet_wrap(~.metric, scales = "free_y") + theme(axis.text.x = element_text(angle = 30, hjust = 1))
-
-metric_performance %>%
-  filter(average=="mean",
-         type == "tension") %>%
-  group_by(.metric) %>%
-  mutate(perc = ifelse(.metric =="rsq",rank(signif(-.estimate, 3)), rank(signif(.estimate, 3))),
-         perc2 = 1-ifelse(.metric =="rsq", (.estimate-max(.estimate))/max(.estimate), (.estimate-max(.estimate))/max(.estimate))) %>%
-  ggplot(aes(x = factor(r), y = factor(c, levels =rev(unique(c))), fill= perc, )) + geom_raster() +
-  facet_wrap(~.metric) +
-  geom_text(aes(label = signif(.estimate, 3))) +
-  scale_fill_viridis_c(breaks=c(1,9),labels=c("Min","Max")) +
-  labs(title = "Model performance mean tension across multiple metrics by r and c", 
-       x = "range of k", 
-       y = "minimum k value",
-       fill = "Error")
-ggsave(filename = file.path(FiguresFolder, "randc_performance_mean_tension.pdf"))
-
-
-test <-metric_performance %>%
-  mutate(combo = paste0(average, " ", type, " r = ", r, ", c =", c)) %>%
-  group_by(.metric) %>%
-  mutate(rank = rank(-.estimate)) %>%
-  ungroup %>%
-  pivot_wider(., id_cols = c(combo), names_from = .metric, values_from = .estimate)
-
-#delete to clean up after as these are not used again
-#rm(metric_combos); rm(metric_performance); rm(multi_metric); rm(all_metrics_df); rm(IEEE_118_agg_res)
 ```
 
 The results of the r c analysis show that the mean value of tension and strain is much more accurate than the median. What's more the matrices produced by the mean and median values are symmetric (given small variances due to convergence differences) about the minor diagonal. All the model values are equal on the Major diagonal where r = c.
@@ -656,257 +469,41 @@ This means that a good choice for r and c would r 1000 c = 100 or r = 10k c = 10
 
 After demonstrating the effectiveness on a single graph this chunk loads the data from all graphs used in the analysis, creates the resulting scatter plots and measures the effeectiveness at modelling giant component collapse.
 
-
 ```{r}
-all_graph_agg <- concentrator_data %>% 
-  group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
-  summarise_all(mean) %>%
-  ungroup %>%
-  mutate(mean_alpha = 1/mean_alpha,
-         median_alpha = 1/median_alpha) %>%
-  select(-median_alpha) %>%
-  mutate(carrying_capacity = signif(carrying_capacity),
-         smallest = signif(smallest),
-         largest = signif(largest),
-         fract = signif(fract))
 
-PL_graph_agg <-PL_data %>% 
-  group_by(carrying_capacity, graph) %>%
-  summarise_all(mean) %>%
-  ungroup %>%
-  mutate(mean_alpha = 1/mean_alpha,
-         median_alpha = 1/median_alpha) %>%
-  select(-median_alpha) %>%
-  mutate(carrying_capacity = signif(carrying_capacity))
+non_PL_folders <- list.files(embeddings_path, full.names = T)[!grepl("PL", list.files(embeddings_path))]
 
-#exclude the PL strain
-all_SETSe_emebeddings <- list.files(embeddings_path, full.names = T)[!grepl("PL", list.files(embeddings_path))] %>%
-  map_df(~{
-    print(basename(.x))
+all_SETSe_emebeddings <- process_all_setse_emebeddings(
+  processed_path =  file.path(project_folder, "all_setse_embeddings_standard.rds"), 
+  folder_paths = non_PL_folders, 
+  graph_agg= all_graph_agg)
 
-    Out <- list.files(.x, full.names = T) %>%
-      map_df(~{
-        file_name = .x
-        temp <- readRDS(file_name)
-        temp_edge <- temp$edge_embeddings
-        
-        parts <- str_split(basename(file_name), pattern = "_", simplify = T)
-        
-        temp_edge %>%
-          summarise(
-            mean_ratiostrain = mean(strain, na.rm = T)/median(strain, na.rm = T),
-            mean_ratiotension =  mean(tension, na.rm = T)/median(tension, na.rm = T),
-            mean_loading =mean(line_load, na.rm = T),
-            median_loading = median(line_load, na.rm = T),
-            mean_alpha = mean(1/line_load, na.rm = T),
-            median_alpha = median(1/line_load, na.rm = T),
-            mean_strain = mean(strain, na.rm = T),
-            median_strain = median(strain, na.rm = T),
-            mean_tension = mean(tension, na.rm = T),
-            median_tension = median(tension, na.rm = T)
-          ) %>%
-          mutate(
-            static_force = sum(abs(temp$node_embeddings$static_force)),
-            fract = parts[2],
-            carrying_capacity = parts[4],
-            largest = parts[6],
-            smallest = parts[8],
-            robin_hood_mode = str_remove(parts[11], pattern = ".rds"))
-        
-      }) %>% mutate(graph = basename(.x))
-    
-    return(Out)
-    
-  })
- .x <- "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph/fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_TRUE.rds" 
-#This just checks to see if everything has converged and it more or less has
-# test <- all_SETSe_emebeddings %>%
-#   mutate(converged = static_force<=2e-3) %>%
-#   group_by(graph) %>%
-#   summarise(converged = sum(converged),
-#             counts = n())
+# all_SETSe_emebeddings <- process_all_setse_emebeddings(
+#   processed_path =  file.path(project_folder, "all_setse_embeddings_sqrt_k.rds"),
+#   folder_paths = list.files("/home/jonno/test_strain/strain_sqrt_k", full.names = T),
+#   graph_agg= all_graph_agg)
 
-test <- all_SETSe_emebeddings %>%
-  filter(graph =="UK_high_voltage")
 
-all_SETSe_emebeddings2 <- left_join(all_graph_agg %>% 
-#The loading and alpha values in all_graph_agg are at the point of collapse not at initialiation. That is why they are removed and replaced with the values from the strain calc
-                    select(-mean_alpha, -mean_loading,-median_loading) %>% #
-                    mutate(
-    carrying_capacity = as.character(carrying_capacity),
-    largest = as.character(largest),
-    smallest = as.character(smallest),
-    fract = as.character(fract),
-    robin_hood_mode = as.character(robin_hood_mode),
-
-  ),
-                  all_SETSe_emebeddings) %>%
-  mutate(mean_alpha = 1/mean_alpha) %>%
-  mutate_at(1:4, list(as.numeric)) %>%
-  group_by(graph) %>%
-  mutate_at(vars(mean_loading:median_tension), kappa) %>%
-  pivot_longer(.,cols = mean_loading:median_tension, names_to = "metric") %>%
-  separate(., col ="metric", into = c("average_type", "metric"), sep ="_")
-
-table(all_SETSe_emebeddings$graph)
 
 ```
 
-##PL embeddings prep
-```{r}
-PL_SETSe_emebeddings <- list.files(file.path(embeddings_path, "PL"), full.names = T) %>%
-  map_df(~{
-    print(basename(.x))
-    test <- list.files(.x, full.names = T) %>%
-      map_df(~{
-        file_name = .x
-        temp <- readRDS(file_name)
-        temp_edge<- temp$edge_embeddings
-        
-        parts <- str_split(basename(file_name), pattern = "_", simplify = T)
-       
-        temp_edge %>%
-          summarise(mean_loading =mean(line_load, na.rm = T),
-                    median_loading = median(line_load, na.rm = T),
-                    mean_alpha = mean(1/line_load, na.rm = T),
-                    median_alpha = median(1/line_load, na.rm = T),
-                    mean_strain = mean(strain, na.rm = T),
-                    median_strain = median(strain, na.rm = T),
-                    mean_tension = mean(tension, na.rm = T),
-                    median_tension = median(tension, na.rm = T)
-          ) %>%
-          mutate(
-            static_force = sum(abs(temp$node_embeddings$static_force)),
-            carrying_capacity =str_remove(parts[2], pattern = ".rds"))
-        
-      }) %>% mutate(graph = basename(.x))
-    
-  })
-
-
-PL_SETSe_emebeddings <- left_join(PL_graph_agg %>% 
-                    select(-mean_alpha, -mean_loading,-median_loading) %>%
-                    mutate(
-    carrying_capacity = as.character(carrying_capacity)
-  ),
-                  PL_SETSe_emebeddings) %>%
-  mutate(mean_alpha = 1/mean_alpha,
-         carrying_capacity = as.numeric(carrying_capacity)) %>%
-  group_by(graph) %>%
-  mutate_at(10:17, kappa) %>%
-  pivot_longer(.,cols = 10:17, names_to = "metric") %>%
-  separate(., col ="metric", into = c("average_type", "metric"), sep ="_")
-```
-##Alternative kappa
-measures strain and tension for each line then averages
-
-```{r}
-folder_name <-  "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph" 
-graph_name <- basename(folder_name)
-PL_1 <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL", graph_name, "ec_1.rds"))$edge_embeddings
-PL_inf <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL", graph_name, "ec_Inf.rds"))$edge_embeddings
-
-summ_mini <-function(x) {x %>%
-          summarise(
-            mean_loading =mean(line_load, na.rm = T),
-            median_loading = median(line_load, na.rm = T),
-            mean_alpha = mean(1/line_load, na.rm = T),
-            median_alpha = median(1/line_load, na.rm = T),
-            mean_strain = mean(strain, na.rm = T),
-            median_strain = median(strain, na.rm = T),
-            mean_tension = mean(tension, na.rm = T),
-            median_tension = median(tension, na.rm = T)
-          )}
-
-PL_1_summ <- PL_1 %>% summ_mini()
-PL_inf_summ <- PL_inf %>% summ_mini()
-
-range_df <- left_join(PL_1 %>% select(edge_name, pl_1_tension = tension, pl_1_strain = strain),PL_inf %>% select(edge_name, pl_inf_tension = tension, pl_inf_strain = strain), by = "edge_name")
-
-    Out <- list.files(folder_name, full.names = T) %>%
-      map_df(~{
-        file_name = .x
-        temp <- readRDS(file_name)
-        temp_edge <- temp$edge_embeddings
-        
-        parts <- str_split(basename(file_name), pattern = "_", simplify = T)
-        
-        spec <- temp_edge %>% left_join(range_df, by = "edge_name") %>%
-          mutate(tension2 = (tension- pl_1_tension)/(pl_inf_tension - pl_1_tension),
-                 strain2 = (strain- pl_1_strain)/(pl_inf_strain - pl_1_strain))
-        
-         temp_edge %>% summ_mini() %>%{ (.- PL_inf_summ)/(PL_1_summ-PL_inf_summ)} %>%
-          mutate(
-            mean_spectension = mean(spec$tension2),
-            median_spectension = median(spec$tension2),
-            mean_specstrain = mean(spec$strain2),
-            median_specstrain = median(spec$strain2),
-            static_force = sum(abs(temp$node_embeddings$static_force)),
-            fract = parts[2],
-            carrying_capacity = parts[4],
-            largest = parts[6],
-            smallest = parts[8],
-            robin_hood_mode = str_remove(parts[11], pattern = ".rds"))
-        
-      }) %>% mutate(graph = basename(graph_name))
-    
-    return(Out)
-
-  #  test <- temp_edge %>% summ_mini()
-    
-test <- temp_edge %>% mutate(mean_spectension = (tension -PL_inf$tension)/(PL_1$tension-PL_inf$tension))
-
-
-mean(test$tension2)
-median(test$strain2)
-
-test %>%
-  ggplot(aes(x = tension)) + geom_density()
-
-    .x <- "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph/fract_0.5_ec_1.025_largest_0.5_smallest_0.1_robin_hood_TRUE.rds"  
-    
-    
-all_SETSe_emebeddings2 <- left_join(all_graph_agg %>% 
-                    select(-mean_alpha, -mean_loading,-median_loading) %>%
-                    mutate(
-    carrying_capacity = as.character(carrying_capacity),
-    largest = as.character(largest),
-    smallest = as.character(smallest),
-    fract = as.character(fract),
-    robin_hood_mode = as.character(robin_hood_mode),
-
-  ),
-                  Out) %>%
-  mutate_at(1:4, list(as.numeric)) %>%
-  group_by(graph) %>%
-  pivot_longer(.,cols = mean_loading:median_specstrain, names_to = "metric") %>%
-  separate(., col ="metric", into = c("average_type", "metric"), sep ="_")
-```
 
 
 ##plot results
 ```{r}
-unique(all_SETSe_emebeddings2$metric)
-use_graph <- "IEEE_118_igraph"#"UK_high_voltage"#"IEEE_300_igraph"
+unique(all_SETSe_emebeddings$metric)
+use_graph <- "IEEE_118_igraph" #"UK_high_voltage"#"IEEE_300_igraph"
 average_type2 <-"mean"
 
-# test <- all_SETSe_emebeddings %>%
-#    filter(
-#      graph == use_graph,
-#      average_type == average_type2,
-#      fract == 1
-#           ) 
-
-all_SETSe_emebeddings2 %>%
+all_SETSe_emebeddings %>%
    filter(
      graph == use_graph,
-      #fract == 1,
-  #robin_hood_mode == F,
      average_type == average_type2
           ) %>%
-  mutate(metric = str_replace(metric, "_", " ")) %>%
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>1.5 & !as.logical(robin_hood_mode) & fract == 1) %>%
   ggplot(aes(x = value, y = attack_round, group = metric)) + 
-  geom_point(aes( colour = as.factor(carrying_capacity))) +
+  geom_point(aes( colour = as.factor(error_spike))) +
   geom_line(data = PL_SETSe_emebeddings %>%
               filter(graph == use_graph,
                      average_type == average_type2), size = 1) +
@@ -919,91 +516,25 @@ all_SETSe_emebeddings2 %>%
 ggsave(file.path(FiguresFolder, "robustness_and_attacks_118.pdf"))
 
 
-p<-all_SETSe_emebeddings %>%
-   filter(
-     graph == use_graph,
-      fract == 1,
-     average_type == average_type2
-          ) %>%
-  mutate(metric = str_replace(metric, "_", " "),
-         name = paste("carrying_capacity", carrying_capacity, "smallest", smallest, "largest", largest, "fract", fract,
-                      "robin_hood", robin_hood_mode)) %>%
-  ggplot(aes(x = value, y = attack_round, group = metric,
-             text =name)) + 
-  geom_point(aes( colour = as.factor(carrying_capacity))) +
-  geom_line(data = PL_SETSe_emebeddings %>%
-              filter(graph == use_graph,
-                     average_type == average_type2), size = 1) +
-    geom_smooth(method = "loess",se = FALSE)+
-  facet_wrap(~metric) +
-  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
-  labs(title = "The relationship between robustness metrics and number of attacks until failure",
-          y = "Number of rounds until loss of giant component") 
+#The error spikes are responsible for only 6% of the total number of cases
+all_SETSe_emebeddings %>%
+  mutate( error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  group_by(error_spike) %>%
+  summarise(count = n()) %>%
+  mutate(perc = count/sum(count))
 
-
-ggplotly(p)
 ```
 
 
 #get performance across all networks
 
 ```{r}
-multi_metric <- metric_set(rmse, rsq, mae, smape)
-metric_combos <- expand_grid(
-  metrics = unique(all_SETSe_emebeddings2$metric),
-  average_type =unique(all_SETSe_emebeddings2$average_type),
-  graph = unique(all_SETSe_emebeddings2$graph)) 
- 
-  metric_performance_all <-1:nrow(metric_combos) %>%
-    map_df(~{
-      print(.x)
-      temp <- all_SETSe_emebeddings2 %>%
-        filter(
-         # !is.na(value),
-          #fract == 1,
-         # robin_hood_mode ==TRUE,
-         average_type == metric_combos$average_type[.x],
-          metric == metric_combos$metrics[.x],
-          graph == metric_combos$graph[.x])
-      
-      loess_mod <- loess(formula =attack_round~ value, 
-                         data = temp)
-      
-      model_comp <- temp  %>%
-        mutate(preds = predict(loess_mod)
-        )
-      
-      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
-        mutate(metric = metric_combos$metrics[.x],
-              average_type = metric_combos$average_type[.x],
-               graph = metric_combos$graph[.x])
-      
-    }) %>%
-    mutate(combo = paste(average_type, metric)) 
-
-  
-  #Generally SETSE performs better using mean vlaues and worse using median, whilst loading is the opposite. However, overall SETSE produces better results when using mean, than the loading methods do when using median.
-  #The reason for this may be that whilst the extreme values cause skewed results in the loading because setse inherently contains information from across the network, extreme value contain valuable information in a way that the loading does not. Thus when the median is used this information is lost.
-    metric_performance_all %>%
-    filter(average_type == "mean") %>%
-    ggplot(aes(x = combo, y = .estimate,fill = graph)) + geom_col(position = "dodge") +
-    facet_wrap(~.metric, scales = "free_y") +
-    theme(axis.text.x = element_text(angle = 25, hjust = 1))  
-  metric_performance_all %>%
-    filter(average_type == "median") %>%
-    ggplot(aes(x = combo, y = .estimate,fill = graph)) + geom_col(position = "dodge") +
-    facet_wrap(~.metric, scales = "free_y") +
-    theme(axis.text.x = element_text(angle = 25, hjust = 1))
 
 
-metric_performance_plot_df  <- metric_performance_all  %>%
-  rename(eval_metric = .metric) %>%
-    group_by(eval_metric, graph) %>%
-    mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
-           graph_order  = factor(gsub("_igraph", "", graph), 
-                                 levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage")))
+source(file.path(CodeFolder, "sub_scripts", "calc_model_perf_subscript.R"))
 
 metric_performance_plot_df %>%
+  filter(error_type =="standard") %>%
     #filter(combo !="mean alpha", combo != "median tension") %>%
   ggplot(aes(x = graph_order, y = rank, colour = combo, group = combo)) + geom_line() +
   facet_wrap(~eval_metric) +
@@ -1012,12 +543,14 @@ metric_performance_plot_df %>%
   labs(title = "Rank of performance of robustness metrics across 4 different evaluation methods",
        y = "Rank of  robustness method",
        x = "Networks in order of complexity",
-       colour = "robustness metric")
+       colour = "robustness metric") +
+  scale_color_brewer(palette = "Set1")
 ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
   
 
 metric_performance_plot_df %>%
- # filter(combo !="mean alpha", combo != "median tension") %>%
+  filter(error_type =="standard") %>%
+  filter(combo !="mean alpha", combo != "median tension", combo !="median strain") %>%
   group_by(eval_metric) %>%
   mutate(relative_estimate = ifelse(eval_metric=="rsq", .estimate/max(.estimate), .estimate/min(.estimate))) %>%
   ggplot(aes(x = graph_order, y = relative_estimate, colour = combo, group = combo)) + geom_line() +
@@ -1026,18 +559,131 @@ metric_performance_plot_df %>%
   labs(title = "Performance of robustness metrics across 4 different evaluation methods",
        y = "Rank of  robustness method",
        x = "Networks in order of complexity",
-       colour = "robustness metric")
+       colour = "robustness metric") +
+  scale_color_brewer(palette = "Set1")
+
+
+test <-metric_performance_plot_df %>% 
+  select(-rank,-.estimator) %>%
+  pivot_wider(names_from = error_type, values_from = .estimate) %>%
+  mutate(change = no_spikes-standard,
+         change_perc = change/standard) %>%
+  filter(metric %in% c("tension","strain"))
+
+test  %>%
+ # filter(combo !="mean alpha", combo != "median tension", combo !="median strain") %>%
+  group_by(eval_metric) %>%
+  ggplot(aes(x = graph_order, y = change, colour = combo, group = combo)) + geom_line() +
+  facet_wrap(~eval_metric, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  labs(title = "Performance of robustness metrics across 4 different evaluation methods",
+       y = "Change in error",
+       x = "Networks in order of complexity",
+       colour = "robustness metric") +
+  scale_color_brewer(palette = "Set1")
+  
+
+#metric_performance_plot_df2<- metric_performance_plot_df
+```
+
+
+```{r}
+
+metric_combos <- expand_grid(
+  metrics = unique(all_SETSe_emebeddings$metric),
+  average_type =unique(all_SETSe_emebeddings$average_type))
+
+metric_performance_all3 <-1:nrow(metric_combos) %>%
+    map_df(~{
+      print(.x)
+      temp <- all_SETSe_emebeddings %>%
+        filter(
+         # !is.na(value),
+          #fract == 1,
+         # robin_hood_mode ==TRUE,
+         average_type == metric_combos$average_type[.x],
+          metric == metric_combos$metrics[.x]
+         )  %>%
+  filter(graph!="UK_high_voltage") %>%
+        mutate(graph2 = as.factor(graph) %>% as.numeric())
+      
+      loess_mod <- loess(formula =attack_round~ value +graph2, 
+                         data = temp)
+      
+      model_comp <- temp  %>%
+        mutate(preds = predict(loess_mod)
+        )
+      
+      multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>% 
+        mutate(metric = metric_combos$metrics[.x],
+              average_type = metric_combos$average_type[.x])
+      
+    }) %>%
+    mutate(combo = paste(average_type, metric)) 
+
+
+metric_performance_all4 <-1:nrow(metric_combos) %>%
+    map_df(~{
+      print(.x)
+      temp <- all_SETSe_emebeddings %>%
+        filter(
+      #    graph == metric_combos$graph[.x],
+          average_type == metric_combos$average_type[.x],
+          metric == metric_combos$metrics[.x]
+        )  %>%
+        filter(graph!="UK_high_voltage") %>%
+        mutate(graph2 = as.factor(graph) %>% as.numeric())
+      
+      loess_mod <- loess(formula =attack_round~ value*graph2, 
+                         data = temp)
+      
+      model_comp <- temp  %>%
+        mutate(preds = predict(loess_mod)
+        ) %>% 
+        mutate(
+        #     graph == metric_combos$graph[.x],
+          metric = metric_combos$metrics[.x],
+              average_type = metric_combos$average_type[.x])
+
+    }) 
+
+
+metric_performance_all4 %>%
+  mutate(combo = paste(average_type, metric),
+         error = attack_round - preds) %>%
+  filter(combo %in% c("mean tension", "mean loading"))  %>%
+  ggplot(aes(x = combo, y = abs(error), fill = combo)) + geom_violin() +
+  facet_wrap(~graph, scales = "free")
+
+
+metric_performance_all4 %>%
+  mutate(combo = paste(average_type, metric),
+         error = attack_round - preds) %>%
+  filter(combo %in% c("mean strain", "mean loading"))  %>%
+  ggplot(aes(x = error, y = attack_round, colour = as.factor(largest))) + geom_point() +
+  facet_wrap(~combo, scales = "free")
+
+test <- metric_performance_all4 %>%
+  mutate(combo = paste(average_type, metric),
+         error = attack_round - preds) %>%
+  filter(combo %in% c("mean tension", "mean loading")) %>%
+  pivot_wider(id_cols = carrying_capacity:graph, names_from = combo, values_from = error) %>%
+  mutate(tension_better = abs(`mean loading`)> abs(`mean tension`))
+
+
+
 
 ```
 
-The plot shows the rank performance of each robustness metric relative to the evaluaation metric. Mean strain and tension are consistantly better that the other metrics with median loading outperforming mean tension only on IEEE-30. There are appears to be a link between model performance and the complexity of the network, as the networks get larger and more complex the robustness metrics consistantly change position. 
+
+The plot shows the rank performance of each robustness metric relative to the evaluation metric. Mean strain and tension are consistantly better that the other metrics with median loading outperforming mean tension only on IEEE-30. There are appears to be a link between model performance and the complexity of the network, as the networks get larger and more complex the robustness metrics consistantly change position. 
 
 #check extremes
 ```{r}
  test_error <-(1:nrow(metric_combos)) %>%
     map_df(~{
 #print(.x)
-      temp <- all_SETSe_emebeddings2 %>%
+      temp <- all_SETSe_emebeddings %>%
         filter(
           !is.na(value),
           #fract == 1,
@@ -1064,9 +710,10 @@ The plot shows the rank performance of each robustness metric relative to the ev
   #  largest ==0.1,
      average_type == average_type2,
           ) %>%
-  mutate(metric = str_replace(metric, "_", " ")) %>%
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = (carrying_capacity>1.5  & (fract == 1) & robin_hood_mode==TRUE)) %>%
   ggplot(aes(x = value, y = error, group = metric)) + 
-  geom_point(aes( colour = as.factor(robin_hood_mode))) +
+  geom_point(aes( colour = as.factor(error_spike))) +
     geom_smooth(method = "loess",se = FALSE)+
   facet_wrap(~metric) +
   labs(colour = "Fraction", y = "Attack round error", x = "Fraction of total range")+
@@ -1076,7 +723,9 @@ The plot shows the rank performance of each robustness metric relative to the ev
  ggsave(filename = file.path(FiguresFolder, "error_plot.pdf"))
  
  test2 <- test_error %>% 
-   mutate(metric = str_replace(metric, "_", " ")) %>%
+   mutate(metric = str_replace(metric, "_", " "),
+           error_spike = (carrying_capacity>1.5 & (fract == 1) & robin_hood_mode=="TRUE"),
+          test = as.logical(largest) ) %>%
    filter(metric == "strain",
           average_type =="mean",
           graph == use_graph)
@@ -1085,8 +734,10 @@ The plot shows the rank performance of each robustness metric relative to the ev
    filter(
      #fract ==1,
  #    carrying_capacity==20
+    # value<0.25#,
+   #  !error_spike
           ) %>%
-   ggplot(aes(x = value, y = (error), group = metric, colour = as.factor(largest)))+ geom_point()
+   ggplot(aes(x = value, y = error, group = metric, colour = as.factor(fract)))+ geom_point()
 
  
  .x <- "/home/jonno/Dropbox/IEEE_Networks/embeddings/UK_high_voltage/fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_TRUE.rds"  
@@ -1116,15 +767,15 @@ test_error %>%
 ```{r}
 library(ggraph)
 graph_name <- "UK_high_voltage"
-graph_name <- paste0("IEEE_", 300, "_igraph")
+graph_name <- paste0("IEEE_", 118, "_igraph")
 {
 g <- read_rds(file.path(power_grid_graphs_path , paste0(graph_name, ".rds")))
  
 g_df <- as_data_frame(g, what = "both")
 
-embeddings_data <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings", graph_name,  "fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_TRUE.rds") )
+embeddings_data <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings", graph_name,  "fract_1_ec_20_largest_0.1_smallest_0.5_robin_hood_TRUE.rds") )
 
-embeddings_data_FALSE <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings", graph_name,  "fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_FALSE.rds") )
+embeddings_data_FALSE <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings", graph_name,  "fract_1_ec_20_largest_0.1_smallest_0.5_robin_hood_FALSE.rds") )
 
 pl_embeddings_data <- read_rds(file.path("/home/jonno/Dropbox/IEEE_Networks/embeddings/PL", graph_name,  "ec_20.rds") )
  
@@ -1151,25 +802,35 @@ g_new_df <- left_join(g_new_df, pl_g_new_df %>% select(edge_name,
   mutate(strain_diff = strain-pl_strain,
          strain_ratio = strain/pl_strain,
          tension_diff= tension*pl_tension,
-         perc_test = percent_rank(strain_diff))
+         perc_test = log10(strain_perc)) %>%
+  left_join(., embeddings_data_A3$edge_embeddings %>% select(edge_name, k_A3 = k, tension_A3 = tension, 
+                                                             strain_A3 = strain)) %>%
+    mutate(strain_diff3 = strain_A3-pl_strain,
+         strain_ratio3 = strain_A3/pl_strain,
+         tension_diff3 = tension_A3*pl_tension)
+
+
 
 g <- g_new_df %>%
   graph_from_data_frame(., directed = F, vertices = g_df$vertices)
 
 set.seed(158)
 ggraph(g, layout = layout_with_fr(g)) +
-   geom_edge_link2(aes(colour = (strain_diff)), width = 0.7) +
-  scale_edge_colour_viridis() +
-  # geom_node_point( aes(shape =  case_when(net_generation ==0 ~"Transmission",
-  #                                       net_generation > 0 ~"Generation",
-  #                                       TRUE ~"Demand")),
-  #                  size = 2.5) +
+   geom_edge_link2(aes(colour = percent_rank(strain_diff3)), width = 0.7) +
+ scale_edge_colour_viridis() +
+ # geom_node_point( aes(shape =  case_when(net_generation ==0 ~"Transmission",
+ #                                       net_generation > 0 ~"Generation",
+ #                                       TRUE ~"Demand")),
+ #                  size = 2.5) +
   ggtitle("IEEE 118 power grid with Fruchtman Reingold projection")
 
 }
+
 g_new_df %>%
-  ggplot(aes(x = abs(power_flow), y = edge_capacity, colour = strain>median(strain))) + geom_point() + 
+  ggplot(aes(x = (abs(k_A3)), y = abs(k), colour =strain_diff>0)) + geom_point() + 
   labs(colour = "ratio")
+
+g_new_df %>% ggplot(aes(x = (abs(strain_diff)))) + geom_density()
 
 bind_rows(g_new_df, pl_g_new_df, g_new_df_FALSE) %>%
   ggplot(aes(x = abs(power_flow), y =log10(tension*abs(power_flow)), colour = edge_capacity)) + geom_point() +
@@ -1189,7 +850,9 @@ bind_rows(g_new_df, pl_g_new_df, g_new_df_FALSE) %>%
   summarise(mean_tension = mean(tension),
             median_tension = median(tension),
             mean_strain = mean(strain),
-            median_strain = median(strain))
+            median_strain = median(strain),
+            mean_strain3 = mean(strain_A3),
+            mean_tension3 = mean(tension_A3))
 
 
 test <-left_join(g_new_df, pl_g_new_df %>% select(edge_name, 
@@ -1201,7 +864,7 @@ test <-left_join(g_new_df, pl_g_new_df %>% select(edge_name,
   
 
 test %>%
-  ggplot(aes(x = pl_strain, y = strain, colour = strain_ratio)) + geom_point()
+  ggplot(aes(x = pl_strain, y = strain_A3, colour = strain_ratio)) + geom_point()
 
 g_new_df %>%
   ggplot(aes(x = strain_diff)) + geom_density()

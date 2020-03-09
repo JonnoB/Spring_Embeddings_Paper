@@ -99,7 +99,7 @@ for(i in (1:nrow(parameter_df_temp))[rep(1:12, length.out = nrow(parameter_df_te
   ##This block below gets the variables necessary to perform the calculation
   ##
   ##
-  #Iter <- parameter_df_temp %>% filter(parameter_summary =="fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_TRUE")
+  #Iter <- parameter_df_temp %>% filter(parameter_summary =="fract_1_ec_20_largest_0.5_smallest_0.5_robin_hood_FALSE")
   Iter <- parameter_df_temp %>%  slice(i)
   #The paths that will be used in this analysis
   graph_path <- file.path(load_data_files_path, Iter$graph_path)
@@ -144,7 +144,10 @@ for(i in (1:nrow(parameter_df_temp))[rep(1:12, length.out = nrow(parameter_df_te
     #Sets up the graph so that all the embedding stuff can be calculated without problem
     current_graph  <- g %>%
       set.edge.attribute(. , "distance", value = 1) %>%
-      calc_spring_area(., "power_flow", minimum_value = sqrt(1000), range = sqrt(100)) %>% #calculate a flexible Area
+      calc_spring_area2(., value = "power_flow", edge_capacity ="edge_capacity", 
+                        minimum_value = sqrt(1000), range = sqrt(100),
+                        edge_capacity_thresh =2, system_capacity_thresh = 2) %>% #calculate a flexible Area
+      #calc_spring_area(., "power_flow", minimum_value = sqrt(1000), range = sqrt(100)) %>% #calculate a flexible Area
       calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(1000), stretch_range = sqrt(100)) %>%
       calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       normalise_dc_load(.,  
@@ -157,10 +160,6 @@ for(i in (1:nrow(parameter_df_temp))[rep(1:12, length.out = nrow(parameter_df_te
                         power_flow = "power_flow")
     
     # print("Full graph complete")
-    #testing the output
-    # test <- as_data_frame(g)
-    # test <- as_data_frame(current_graph)
-    # ggplot(test, aes(x = ((power_flow)), y = k)) + geom_point()
     
     #autosets finds the correct drag coefficient to 
     embeddings_data <- auto_SETSe(current_graph, 
