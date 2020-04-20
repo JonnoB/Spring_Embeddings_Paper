@@ -85,7 +85,7 @@ ggraph(test, layout = layout_with_fr(test)) +
 
 edge_attr(test)
 
-as_data_frame(test ) %>%
+as_data_frame(test ) %>% tibble %>%
   ggplot(aes(x = number_of_fibers)) +geom_density()
 
 
@@ -111,6 +111,7 @@ g <- readRDS(file.path(power_grid_graphs_path,  paste0("IEEE_", 118, "_igraph.rd
                            edge_name = "edge_name", 
                            node_name = "name",
                            power_flow = "power_flow")
+
 ```
 
 
@@ -1438,6 +1439,8 @@ metric_combos <- test %>%
 ##Alternative kappa
 measures strain and tension for each line then averages
 
+rather surprisingly the strain/tension on an individual line can exceed the ma/minima of 1 and Inf values. This shows that force is concentrated on different parts of the network
+
 ```{r}
 folder_name <-  "/home/jonno/Dropbox/IEEE_Networks/embeddings/IEEE_118_igraph" 
 graph_name <- basename(folder_name)
@@ -1522,4 +1525,72 @@ all_SETSe_emebeddings <- left_join(all_graph_agg %>%
   ungroup
 ```
 
+
+#excess generation
+
+This checks the amount of excess generation each network has.
+It may be interesting to controll the amount of excess generation and see what this does to error spikes
+
+
+```{r}
+list.files("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs", pattern = ".rds", full.names = T) %>%
+  map_df(~{
+    read_rds(.x) %>%
+      as_data_frame(., what = "vertices") %>%
+      summarise(demand = sum(demand),
+                 generation = sum(generation)) %>%
+    mutate(ratio = generation/demand,
+           name = basename(.x) %>% str_remove(., ".rds"))
+    
+  })
+
+
+g_path <- "/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/IEEE_118_igraph.rds"
+
+temp_g <- read_rds(g_path)
+
+tension_weighted_edge <- function(temp_g){
+
+#get the total power generated in each component
+temp_sum <- as_data_frame(temp_g, what = "vertices")  %>% 
+      summarise(demand_fract = sum(demand),
+                generation_fract = sum(generation),
+                net_generation_fract = sum(ifelse(net_generation>0, net_generation, 0)))
+
+#create balanced blocks for each component
+test <- temp_g %>% #as_data_frame(., what = "vertices")
+    create_balanced_blocks(., 
+                         force = "net_generation", 
+                         flow = "power_flow")
+
+
+#the fraction of each metric by edge.
+Out <- 1:length(test) %>%
+  map_df(~{
+    temp <- as_data_frame(test[[.x]], what = "both") 
+    
+    node_stats <- temp$vertices %>% 
+      summarise(demand_fract = sum(demand),
+                generation_fract = sum(generation),
+                net_generation_fract = sum(ifelse(net_generation>0, net_generation, 0))) %>%
+      mutate(block = .x)
+    temp$edges%>%
+      mutate(block = .x) %>%
+      left_join(node_stats, by  = "block")
+    }) %>%
+  mutate(demand_fract = demand_fract/temp_sum$demand_fract,
+         generation_fract = generation_fract/temp_sum$generation_fract,
+         net_generation_fract = net_generation_fract/temp_sum$net_generation_fract) %>%
+  select(edge_name, block:net_generation_fract)
+
+return(Out)
+
+}
+
+
+
+temp_g <- read_rds(file.path(power_grid_graphs_path, paste0(basename(dirname(.x)), ".rds")))
+test <- tension_weighted_edge(temp_g)
+
+```
 

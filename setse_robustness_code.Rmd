@@ -21,7 +21,7 @@ https://ggforce.data-imaginist.com/reference/geom_mark_rect.html
 #Set up
 ```{r Setup}
 
-packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp", "yardstick", "minpack.lm", "gganimate", "tmaptools", "rgeos", "raster", "tigris")
+packages <- c("tidyverse", "igraph","readr","readxl", "broom", "stringr", "xtable", "rlang", "animation", "caret", "sf", "rgdal", "sf", "gstat", "automap", "rayshader", "latex2exp", "yardstick", "minpack.lm", "gganimate", "tmaptools", "rgeos", "raster", "tigris", "ggraph", "rsample")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -272,6 +272,19 @@ test <- toy_height_data %>%
 rm(entropy_data)
 ```
 
+#Permuted PL
+
+This chunk shows that the SETSe embedding can distinguish networks of the same topology with the same proportional loading but permuted demand and generation
+
+It is essentially a flow version of Peels Quintet
+
+```{r}
+
+source(file.path(CodeFolder, "sub_scripts", "permuted_pl.R"))
+
+```
+
+
 
 #get network statistics
 
@@ -403,8 +416,6 @@ return(Out)
 }) %>%
   mutate(combo = paste(carrying_capacity, smallest, largest, fract, robin_hood_mode))
 
-test_res %>%
-  ggplot(aes(x = attack_round, colour = combo)) + geom_density()
 
 test_out <-test_res %>%
   select(combo, attack_round:nodes) %>%
@@ -497,13 +508,16 @@ average_type2 <-"mean"
 
 all_SETSe_emebeddings %>%
    filter(
+   #  metric == "strain",
      graph == use_graph,
-     average_type == average_type2
+     grepl("mean", average_type),
+     metric !="elev"
+    #average_type == average_type2
           ) %>%
   mutate(metric = str_replace(metric, "_", " "),
-         error_spike = carrying_capacity>1.5 & !as.logical(robin_hood_mode) & fract == 1) %>%
+         error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
   ggplot(aes(x = value, y = attack_round, group = metric)) + 
-  geom_point(aes( colour = as.factor(error_spike))) +
+  geom_point(aes( colour = as.factor(carrying_capacity))) +
   geom_line(data = PL_SETSe_emebeddings %>%
               filter(graph == use_graph,
                      average_type == average_type2), size = 1) +
@@ -523,18 +537,90 @@ all_SETSe_emebeddings %>%
   summarise(count = n()) %>%
   mutate(perc = count/sum(count))
 
+test <-all_SETSe_emebeddings %>%
+  filter( graph == use_graph,
+     grepl("mean", average_type)) %>%
+  pivot_wider(., names_from = metric, values_from = value)
+
+test %>%
+  filter(mean_ratiostrain<2) %>%
+  ggplot(aes(x = tension, y = strain, colour = mean_ratiostrain)) + geom_point() +
+  scale_color_viridis()
+
+
+#the correlaation between the aggregated SETSe elements is very strong
+cor(test$elev, test$tension);cor(test$elev, test$strain) ;cor(test$strain, test$tension)
+#removing all networks where the mean strain is more than twice the median strain improves the corellation
+#and removes the error spikes
+test %>%
+  group_by(mean_ratiostrain>2) %>%
+  summarise(elev_tension = cor(elev, tension),
+            elev_strain = cor(elev, strain),
+            strain_tension = cor(strain, tension),
+            counts = n())
+
+
+#filtering graphs with large differences in mean and median SETSe metric removes the error spikes
+all_SETSe_emebeddings %>%
+   filter( graph == use_graph,
+     grepl("mean", average_type)  ) %>%
+ # filter(mean_ratiostrain<2) %>%
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = value, y = attack_round, group = metric)) + 
+  geom_point(aes( colour = mean_ratiotension)) +
+  facet_wrap(~metric)  +
+  scale_color_viridis()
+
 ```
 
 
 #get performance across all networks
 
 ```{r}
+loess_holdout_results <- function(splits, model_dat, metrics_out = TRUE ,...) {
+  
+  train_df = analysis(splits)
+  
+  # Save the 10%
+  holdout <- assessment(splits)
+  # Fit the model to the 90%
+  loess_mod <- loess(formula = model_dat,
+                       data = train_df)
+  
+  # `augment` will save the predictions with the holdout data set
+      model_comp <- holdout %>%
+    mutate(preds =  predict(loess_mod, holdout))
+  
+  #Output the accuracy of the model
+  metric_summary <- multi_metric(data = model_comp, truth = attack_round, estimate = preds) 
+  
+  if(metrics_out){
+    Out <- metric_summary
+  } else {
+    
+    Out <- model_comp
+    
+  }
+  
+  return(Out)
+  
+}
 
+#This looks at the metrics as a raw proxy for robustness
 
-source(file.path(CodeFolder, "sub_scripts", "calc_model_perf_subscript.R"))
+source(file.path(CodeFolder, "sub_scripts", "calc_model_perf_subscript_cross_val.R"))
 
 metric_performance_plot_df %>%
-  filter(error_type =="standard") %>%
+  group_by(eval_metric, metric, average_type, graph, combo, graph_order, error_type) %>%
+  summarise(.estimate = mean(.estimate)) %>%
+  group_by(eval_metric, graph) %>%
+  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
+         graph_order  = factor(gsub("_igraph", "", graph), 
+                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
+  filter(error_type =="standard",
+        metric != "elev"
+         ) %>%
     #filter(combo !="mean alpha", combo != "median tension") %>%
   ggplot(aes(x = graph_order, y = rank, colour = combo, group = combo)) + geom_line() +
   facet_wrap(~eval_metric) +
@@ -549,7 +635,8 @@ ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
   
 
 metric_performance_plot_df %>%
-  filter(error_type =="standard") %>%
+  filter(error_type =="standard",
+          metric != "elev") %>%
   filter(combo !="mean alpha", combo != "median tension", combo !="median strain") %>%
   group_by(eval_metric) %>%
   mutate(relative_estimate = ifelse(eval_metric=="rsq", .estimate/max(.estimate), .estimate/min(.estimate))) %>%
@@ -583,7 +670,30 @@ test  %>%
   scale_color_brewer(palette = "Set1")
   
 
-#metric_performance_plot_df2<- metric_performance_plot_df
+
+```
+
+The plot shows the rank performance of each robustness metric relative to the evaluation metric. Mean strain and tension are consistantly better that the other metrics with median loading outperforming mean tension only on IEEE-30. There are appears to be a link between model performance and the complexity of the network, as the networks get larger and more complex the robustness metrics consistantly change position. 
+
+##tension loading model
+
+```{r}
+source(file.path(CodeFolder, "sub_scripts", "tension_loading_model_subscript.R"))
+
+model_xval_res %>%
+  #filter(graph == "IEEE_118_igraph") %>%
+  ggplot(aes(x = graph, y = .estimate, fill = paste(metric_a, metric_b), colour = paste(metric_a, metric_b))) + geom_boxplot()+
+  facet_wrap(~.metric, scales = "free") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+#the combination of tension AND loading gives the overall best model, it is usually the best and never the worst
+#the other two are mostly speculative and can be mentioned only in passing
+table(paste(mean_model_xval_res$metric_a, mean_model_xval_res$metric_b), mean_model_xval_res$rank)
+
+
+#the bivariate model is significantly better then the best metric 22 out of 24 times
+model_comparison_signif <-model_comparison  %>%
+  filter(metric_a =="tension", metric_b =="loading")
 ```
 
 
@@ -676,10 +786,21 @@ test <- metric_performance_all4 %>%
 ```
 
 
-The plot shows the rank performance of each robustness metric relative to the evaluation metric. Mean strain and tension are consistantly better that the other metrics with median loading outperforming mean tension only on IEEE-30. There are appears to be a link between model performance and the complexity of the network, as the networks get larger and more complex the robustness metrics consistantly change position. 
 
-#check extremes
+#error plot
+
+This plots the error after having modelled the data.
+It thus shows the error spikes
+
 ```{r}
+
+metric_combos <- expand_grid(
+  average_type = unique(all_SETSe_emebeddings$average_type),
+  metrics = unique(all_SETSe_emebeddings$metric),
+  graph = unique(all_SETSe_emebeddings$graph)
+  
+)
+
  test_error <-(1:nrow(metric_combos)) %>%
     map_df(~{
 #print(.x)
@@ -715,7 +836,7 @@ The plot shows the rank performance of each robustness metric relative to the ev
   ggplot(aes(x = value, y = error, group = metric)) + 
   geom_point(aes( colour = as.factor(error_spike))) +
     geom_smooth(method = "loess",se = FALSE)+
-  facet_wrap(~metric) +
+  facet_wrap(~metric, scales = "free_y") +
   labs(colour = "Fraction", y = "Attack round error", x = "Fraction of total range")+
   labs(title = "Error in predicting collapse of giant component coloured by fraction of most 
        high capacity edges affected",
@@ -760,6 +881,75 @@ test_error %>%
           average_type =="mean",
           graph == use_graph) %>%
   ggplot(aes(x  = mean_ratiostrain, y = abs(error), colour =factor(largest)))+ geom_point()
+ 
+ 
+test <-1:length(unique(all_SETSe_emebeddings$graph)) %>%
+   map_df(~{
+     
+    temp <- all_SETSe_emebeddings %>%
+      filter(
+        graph == unique(all_SETSe_emebeddings$graph)[.x],
+        average_type == "mean") %>%
+      pivot_wider(., names_from = metric, values_from = value)
+    
+    model_dat <- reformulate(c( "tension", "loading"), 
+                             response = "attack_round") #attack round can be changed to blackout or generation
+    
+    
+    set.seed(4622)
+    rs_obj <- vfold_cv(temp, v = 10, repeats = 10)
+    
+    Out <- 1:length(rs_obj$splits) %>%
+      map_df(~{
+        
+        loess_holdout_results(rs_obj$splits[[.x]], model_dat,  metrics_out = FALSE) %>%
+          mutate(Repeat = rs_obj$id[.x],
+                 Fold = rs_obj$id2[.x])
+        
+      })%>% 
+      mutate(
+        graph = unique(all_SETSe_emebeddings$graph)[.x])
+    
+   }) %>%
+  mutate(error = attack_round- preds,
+         error_perc = (error-attack_round)/attack_round)
+ 
+test %>%
+  filter(graph =="IEEE_118_igraph",
+         Repeat=="Repeat05") %>%
+  mutate(error_perc = (error-attack_round)/attack_round,
+         preds = ifelse(is.na(preds), 0, preds),
+         k_preds = kappa(preds)) %>%
+  ggplot(aes(x = k_preds, y = error, colour = mean_ratiostrain>2)) + geom_point() +
+  facet_wrap(~graph, scale = "free_x")
+
+
+#This is the error of both the normal metrics and the tension loading model. This is a nice plot will 6 facets.
+#The code to get here should be cleaned up though.
+test %>%
+  filter(Repeat=="Repeat05") %>%
+  group_by(graph)  %>%
+  mutate(metric = "tension loading",
+         preds = ifelse(is.na(preds), 0, preds),
+         value = kappa(preds)) %>%
+  bind_rows(test_error)  %>%
+   filter(
+     graph == "IEEE_118_igraph",
+     average_type == "mean",
+          ) %>%
+  ungroup  %>%
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = (carrying_capacity>1.5  & (fract == 1) & robin_hood_mode==TRUE)) %>%
+  ggplot(aes(x = value, y = error, group = metric)) + 
+  geom_point(aes( colour = as.factor(error_spike))) +
+  facet_wrap(~metric) +
+  labs(colour = "Fraction", y = "Attack round error", x = "Fraction of total range")+
+  labs(title = "Error in predicting collapse of giant component coloured by fraction of most 
+       high capacity edges affected",
+          y = "Error in number of rounds until loss of giant component") 
+  
+
+
 
 ```
 
@@ -876,16 +1066,6 @@ mean(g_new_df$strain_diff)/mean(g_new_df$pl_strain)
 
 ```
 
-
-
-
-##Optional
-
-Include the tube map as a strain graph where routes are decided based on shortest path after each attack.
-
-```{r}
-
-```
 
 #UK map 
 

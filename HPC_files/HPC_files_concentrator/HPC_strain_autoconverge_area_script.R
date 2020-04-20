@@ -52,7 +52,7 @@ if(dir.exists("/home/jonno")){
   load_file <- Sys.getenv("GRAPH_NAME") #file name of the graph to load
 }
 #task_id <- 3
-#load_file <- "UK_high_voltage"
+#load_file <-"IEEE_118_igraph" #"UK_high_voltage"
 
 #Load some other useful functions
 list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%

@@ -147,8 +147,9 @@ print(paste("pararmeters loaded. Task number", task_id))
     current_graph  <- g %>%
       set.edge.attribute(. , "distance", value = 1) %>%
       set.edge.attribute(., "Area", value = 1) %>%
-      calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
-      calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+      set.edge.attribute(., "k", value = common_c + (edge_attr(g, "edge_capacity")/abs(edge_attr(g, "power_flow"))-1)*common_r ) %>%
+      # calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
+      # calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       normalise_dc_load(.,  
                         generation = "generation", 
                         demand  = "demand",
