@@ -137,8 +137,8 @@ print(paste("pararmeters loaded. Task number", task_id))
     
     common_time <- 0.01
     common_Iter <- 200000
-    common_tol <- 2e-3 #the residual staticforce that the system will terminate, it is effectively converged
-    common_mass <- 1
+    common_tol <- 2e-4 #the residual staticforce that the system will terminate, it is effectively converged
+    #common_mass <- 1 #no longer used. Having mass as a fraction of the system force divided by the total number of nodes is better
     common_r <- Iter$r
     common_c <- Iter$c
     
@@ -147,9 +147,11 @@ print(paste("pararmeters loaded. Task number", task_id))
     current_graph  <- g %>%
       set.edge.attribute(. , "distance", value = 1) %>%
       set.edge.attribute(., "Area", value = 1) %>%
-      set.edge.attribute(., "k", value = common_c + (edge_attr(g, "edge_capacity")/abs(edge_attr(g, "power_flow"))-1)*common_r ) %>%
-      # calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
-      # calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+      #if the below is ative then it allows unlimited spring resistance
+      #set.edge.attribute(., "k", value = common_c + (edge_attr(g, "edge_capacity")/abs(edge_attr(g, "power_flow"))-1)*common_r ) %>%
+      #the below code is the normal approach to spring resistance... that doesn't mean it is right though
+       calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
+       calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       normalise_dc_load(.,  
                         generation = "generation", 
                         demand  = "demand",
@@ -157,26 +159,29 @@ print(paste("pararmeters loaded. Task number", task_id))
                         capacity = "edge_capacity",
                         edge_name = "edge_name", 
                         node_name = "name",
-                        power_flow = "power_flow")
+                        power_flow = "power_flow") #%>%
+    #  set_vertex_attr(., "force", value = vertex_attr(., "net_generation"))
     
+    test<- as_data_frame(current_graph, what = "vertices")
     
-    embeddings_data <- auto_SETSe(current_graph, 
-                                  force ="net_generation", 
-                                  flow = "power_flow", 
-                                  distance = "distance", 
-                                  capacity = "edge_capacity",
-                                  edge_name = "edge_name",
-                                  tstep = common_time, 
-                                  mass = common_mass, 
-                                  max_iter = common_Iter, 
-                                  tol = common_tol,
-                                  sparse = FALSE,
-                                  hyper_iters = 200,
-                                  hyper_tol = 0.01,
-                                  hyper_max = 30000,
-                                  sample = 100,
-                                  verbose = F)
-    
+    embeddings_data <- SETSe_bicomp(current_graph, 
+                  force ="net_generation", 
+                  distance = "distance", 
+                  edge_name = "edge_name",
+                  tstep = common_time, 
+                  mass = sum(abs(vertex_attr(current_graph, "net_generation")))/vcount(current_graph), #mass is a function of systemic force
+                  max_iter = common_Iter, 
+                  tol = common_tol,
+                  static_limit = sum(abs(vertex_attr(current_graph, "net_generation"))),
+                  sparse = FALSE,
+                  hyper_iters = 200,
+                  hyper_tol = 0.01,
+                  step_size = 0.1,
+                  hyper_max = 30000,
+                  sample = 100,
+                  verbose = T)
+
+   
     #The structure is generated as needed and so any new paths can just be created at this point.
     #There is very little overhead in doing it this way
     if(!file.exists(dirname(Iter_embedding_path))){ dir.create(dirname(Iter_embedding_path), recursive = T) }

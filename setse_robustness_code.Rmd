@@ -452,7 +452,7 @@ source(file.path(CodeFolder, "sub_scripts", "process_rc_comparisons_subscript.r"
 #Raster plot that shows how r and c affect model performance
 metric_performance %>%
   filter(average_type=="mean",
-         metric == "strain") %>%
+         metric == "node_mean_tension") %>%
   group_by(.metric) %>%
   mutate(perc = ifelse(.metric =="rsq",rank(signif(-.estimate, 3)), rank(signif(.estimate, 3))),
          perc2 = .estimate/min(.estimate),
@@ -466,6 +466,21 @@ metric_performance %>%
        y = "minimum k value",
        fill = "relative Error")
 ggsave(filename = file.path(FiguresFolder, "randc_performance_mean_tension.pdf"))
+
+
+test <- test_rc_metrics %>%
+  filter(r == 1000, c == 100) %>%  
+              mutate_at(., .vars = vars(fract:smallest), .funs = as.numeric)%>%
+              mutate(robin_hood_mode = robin_hood_mode =="TRUE") %>%
+  left_join( IEEE_118_agg_res, 
+            by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode") )
+
+test %>%
+  filter(abs(static_force)<1e-2) %>%
+  mutate(
+    error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = mean_node_mean_tension, y = attack_round)) + 
+  geom_point(aes( colour = as.factor(carrying_capacity)))
 
 ```
 

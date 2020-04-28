@@ -126,7 +126,7 @@ print("run sims")
       
       common_time <- Iter$tstep
       common_Iter <- 20000*3
-      common_tol <- 0#2/1e6 #stop if force down to 1 millionth
+      common_tol <- 2e-4#2/1e6 #stop if force down to 1 millionth
       common_mass <- 1
       common_drag <- Iter$coef_drag
       
@@ -147,35 +147,22 @@ print("run sims")
       
       #print("Full graph complete")
 
-      embeddings_data <- Find_network_balance(current_graph, 
-                                              force ="net_generation",
-                                              flow = "power_flow",
-                                              distance = "distance",
-                                              #    capacity = "edge_capacity",
-                                              edge_name = "edge_name",
-                                              #   k = "k",
-                                              tstep =  common_time,
-                                              tol = common_tol,
-                                              max_iter = common_Iter,
-                                              coef_drag = common_drag,
-                                              mass = common_mass,
-                                              sample = 100
-      )
-      
-      # embeddings_data <- SETS_embedding(current_graph, 
-      #                                   force ="net_generation",
-      #                                   flow = "power_flow",
-      #                                   distance = "distance",
-      #                                   capacity = "edge_capacity",
-      #                                   edge_name = "edge_name",
-      #                                   k = "k",
-      #                                   tstep =  common_time,
-      #                                   tol = common_tol,
-      #                                   max_iter = common_Iter,
-      #                                   coef_drag = common_drag,
-      #                                   mass = common_mass,
-      #                                   sample = 100
-      # )
+      embeddings_data <- SETSe_bicomp(current_graph, 
+                                      force ="net_generation", 
+                                      distance = "distance", 
+                                      edge_name = "edge_name",
+                                      tstep = common_time, 
+                                      mass = sum(abs(vertex_attr(current_graph, "net_generation")))/vcount(current_graph), #mass is a function of systemic force
+                                      max_iter = common_Iter, 
+                                      tol = common_tol,
+                                      static_limit = sum(abs(vertex_attr(current_graph, "net_generation"))),
+                                      sparse = FALSE,
+                                      hyper_iters = 200,
+                                      hyper_tol = 0.01,
+                                      step_size = 0.1,
+                                      hyper_max = 30000,
+                                      sample = 100,
+                                      verbose = T)
       
       #The structure is generated as needed and so any new paths can just be created at this point.
       #There is very little overhead in doing it this way

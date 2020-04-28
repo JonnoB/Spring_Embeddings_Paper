@@ -138,7 +138,7 @@ for(i in (1:nrow(parameter_df_temp))[rep(1:12, length.out = nrow(parameter_df_te
     
     common_time <- 0.01
     common_Iter <- 200000
-    common_tol <- 2e-3
+    common_tol <- 2e-4
     common_mass <- 1
     
     #Sets up the graph so that all the embedding stuff can be calculated without problem
@@ -162,22 +162,22 @@ for(i in (1:nrow(parameter_df_temp))[rep(1:12, length.out = nrow(parameter_df_te
     # print("Full graph complete")
     
     #autosets finds the correct drag coefficient to 
-    embeddings_data <- auto_SETSe(current_graph, 
-                                  force ="net_generation", 
-                                  flow = "power_flow", 
-                                  distance = "distance", 
-                                  capacity = "edge_capacity",
-                                  edge_name = "edge_name",
-                                  tstep = common_time, 
-                                  mass = common_mass, 
-                                  max_iter = common_Iter, 
-                                  tol = common_tol,
-                                  sparse = FALSE,
-                                  hyper_iters = 200,
-                                  hyper_tol = 0.01,
-                                  hyper_max = 30000,
-                               #   verbose = TRUE,  #turn off before running!
-                                  sample = 100)
+    embeddings_data <- SETSe_bicomp(current_graph, 
+                                    force ="net_generation", 
+                                    distance = "distance", 
+                                    edge_name = "edge_name",
+                                    tstep = common_time, 
+                                    mass = sum(abs(vertex_attr(current_graph, "net_generation")))/vcount(current_graph), #mass is a function of systemic force
+                                    max_iter = common_Iter, 
+                                    tol = common_tol,
+                                    static_limit = sum(abs(vertex_attr(current_graph, "net_generation"))),
+                                    sparse = FALSE,
+                                    hyper_iters = 200,
+                                    hyper_tol = 0.01,
+                                    step_size = 0.1,
+                                    hyper_max = 30000,
+                                    sample = 100,
+                                    verbose = T)
     
     #The structure is generated as needed and so any new paths can just be created at this point.
     #There is very little overhead in doing it this way
