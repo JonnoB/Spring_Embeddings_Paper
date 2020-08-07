@@ -89,6 +89,10 @@ for(i in (1:nrow(parameter_df_temp))){
   Iter_collapse_path <- file.path(save_data_files_path, "collapse_sets", Iter$collapse_base)
   Iter_collapse_summary_path <- file.path(save_data_files_path, "collapse_summaries", Iter$collapse_base)
   
+  #There is a bug where for some reason The UK high voltage crashes when the line limits are infinite
+  #This can easily be solved by setting cascade mode to false.
+  #Which will also speed up the calculation as load flow is not necessary as much
+ 
   #read the target graph
   g <- readRDS(file = graph_path) 
   
@@ -106,7 +110,7 @@ for(i in (1:nrow(parameter_df_temp))){
                                       AttackStrategy = FixedNodes,
                                       g0 = NULL,
                                       TotalAttackRounds = 1000,
-                                      CascadeMode = TRUE,
+                                      CascadeMode = is.finite(Iter$carrying_capacity), #Turns off cascade mode when edges are infinite
                                       Demand = "demand",
                                       Generation = "generation",
                                       EdgeName = "edge_name",
@@ -132,7 +136,10 @@ for(i in (1:nrow(parameter_df_temp))){
       
       stop_iter_time <- Sys.time()
       #iteration time
-      print( stop_iter_time-start_iter_time )
+      print( paste("iteration", i,
+                   "capacity", Iter$carrying_capacity,
+                   ". time taken", 
+                   round(difftime(stop_iter_time, start_iter_time, units = "secs"), 2), "secs") )
 } 
 
 
@@ -148,7 +155,7 @@ saveRDS(AttackSeriesSummary_list, file = file.path(save_data_files_path, paste0(
 
 stop_time <- Sys.time()
 
-print(stop_time-start_time)
+print((stop_time-start_time))
 
 #Once all the simulations in the compute group have been saved the script is complete
 

@@ -58,7 +58,7 @@ if(dir.exists("/home/jonno")){
   
   #If it is not on my computer then the variables need to be loaded from the system environment
   #Get the task ID
-  task_id <- Sys.getenv("SGE_TASK_ID")
+  task_id <- as.integer(Sys.getenv("SGE_TASK_ID"))
   load_file <- Sys.getenv("GRAPH_NAME") #file name of the graph to load
 }
 
@@ -69,6 +69,14 @@ list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.na
 list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
   walk(~source(.x))
 
+
+parameter_df_temp <-  generate_concentrator_parameters(load_file)  %>%
+  filter(simulation_id == 1)
+
+simulation_params <- expand.grid(attack_slices =1:10, seed = 1:30)
+
+seed <- simulation_params$seed[task_id]
+attack_slices <- simulation_params$attack_slices[task_id]
 
 graph_path <- file.path(load_data_files_path, "power_grid_graphs", paste0(load_file , ".rds"))
 
@@ -91,7 +99,7 @@ node_failure_mode <- list()
 start_time <- Sys.time()
 #only 10 to act as a test
 #for(i in 1:10){
-for(i in (1:10000)[rep(1:10, 1000)==task_id]){
+for(i in (1:10000)[rep(1:10, 1000)==attack_slices]){
   #print(i)
   #Set the seed for the random order and generate the edge deletion order
   set.seed(i)

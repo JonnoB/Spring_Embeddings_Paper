@@ -7,24 +7,54 @@ multi_metric <- metric_set(rmse, rsq, mae, smape)
 metric_combos <- expand_grid(
   metrics = unique(all_SETSe_emebeddings$metric),
   average_type =unique(all_SETSe_emebeddings$average_type),
-  graph = unique(all_SETSe_emebeddings$graph)) #%>%
-# filter(graph!="UK_high_voltage")
+  graph = unique(all_SETSe_emebeddings$graph)) %>%
+  filter(average_type =="mean",
+         metrics != "elev",
+        # metrics != "strain"
+         )
+
+
+pl_metric_combos <- expand_grid(
+  metrics = unique(PL_SETSe_emebeddings$metric),
+  average_type =unique(PL_SETSe_emebeddings$average_type),
+  graph = unique(PL_SETSe_emebeddings$graph)) %>%
+  filter(average_type =="mean",
+         metrics != "elev",
+         # metrics != "strain"
+  )
+
+#This is to check that the UK high voltage is included
+#test <- left_join(metric_combos, pl_metric_combos %>% mutate(not = 1))
+
+#The formula used to create the model
+model_dat <- formula(attack_round ~ value)
 
 metric_performance_all <-1:nrow(metric_combos) %>%
   map_df(~{
     print(.x)
+    
     temp <- all_SETSe_emebeddings %>%
       filter(
         average_type == metric_combos$average_type[.x],
         metric == metric_combos$metrics[.x],
         graph == metric_combos$graph[.x])
     
-    model_dat <- formula(attack_round ~ value)
+    
+    pl_temp <- PL_SETSe_emebeddings %>%
+      filter(
+        average_type == metric_combos$average_type[.x],
+        metric == metric_combos$metrics[.x],
+        graph == metric_combos$graph[.x])
+    
+    
+    pl_loess_mod <- loess(formula = model_dat,
+                       data =  pl_temp)
     
     
     set.seed(4622)
     rs_obj <- vfold_cv(temp, v = 10, repeats = 10)
 
+    #distribution version
     Out <- 1:length(rs_obj$splits) %>%
       map_df(~{
         
@@ -32,10 +62,34 @@ metric_performance_all <-1:nrow(metric_combos) %>%
           mutate(Repeat = rs_obj$id[.x],
                  Fold = rs_obj$id2[.x])
         
-      }) %>% 
+      }) 
+    
+    #proportional_loading version
+    pl_Out <- 1:length(rs_obj$splits) %>%
+      map_df(~{
+        
+        holdout <- assessment(rs_obj$splits[[.x]])
+        # Fit the model to the 90%
+        #model is pre-fitted to the PL data and so doesn't need to be built
+        
+        # `augment` will save the predictions with the holdout data set
+        model_comp <- holdout %>%
+          mutate(preds =  predict(pl_loess_mod, holdout))
+        
+        #Output the accuracy of the model
+        multi_metric(data = model_comp, truth = attack_round, estimate = preds) %>%
+          mutate(Repeat = rs_obj$id[.x],
+                 Fold = rs_obj$id2[.x]) 
+        
+      }) %>%
+      rename(.pl_estimate = .estimate)
+    
+    #combine the two dataframes and return the result
+   Out <- left_join(Out, pl_Out) %>% 
       mutate(metric = metric_combos$metrics[.x],
              average_type = metric_combos$average_type[.x],
              graph = metric_combos$graph[.x])
+    
     
     return(Out)
     
@@ -45,15 +99,4 @@ metric_performance_all <-1:nrow(metric_combos) %>%
   ungroup
 
 
-metric_performance_plot_df  <- metric_performance_all   %>%
-  group_by(eval_metric, metric, average_type, graph, combo, graph_order, error_type) %>%
-  summarise(.estimate = mean(.estimate)) %>%
-  group_by(eval_metric, graph) %>%
-  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
-         graph_order  = factor(gsub("_igraph", "", graph), 
-                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
-  ungroup
-
-
-metric_performance_plot_df <- metric_performance_plot_df %>% mutate(error_type ="standard")
 

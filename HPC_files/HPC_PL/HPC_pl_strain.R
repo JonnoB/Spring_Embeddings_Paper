@@ -32,10 +32,15 @@ sapply(packages, library, character.only = TRUE)
 #creates the correct root depending on whether this is on the cloud or not
 if(dir.exists("/home/jonno")){
   #This folder is for use on my machine
+  
+  #load_file <- "IEEE_14_igraph"
+  
   project_folder <- "/home/jonno/Dropbox/IEEE_Networks"
   basewd <- "/home/jonno"
   load_data_files_path <- file.path(project_folder) #load the files
   save_data_files_path <- file.path(project_folder, "embeddings", "PL",load_file) #save the files
+  
+  library(PowerGridNetworking)
 }else{
   #If it is not on my computer then the variables need to be loaded from the system environment
   #Get the task ID
@@ -49,19 +54,19 @@ if(dir.exists("/home/jonno")){
   save_data_files_path <- file.path(project_folder, load_file)#save the files
   
   #  install(file.path("~/PowerGridNetworking"))
+  
+  #Load some other useful functions
+  list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
+    walk(~source(.x))
+  
+  list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
+    walk(~source(.x))
 }
-
-library(PowerGridNetworking)
 
 #the list all the attacks are stored in before being combined into a single dataframe
 AttackSeriesSummary_list <- list()
 
-#Load some other useful functions
-list.files(file.path(basewd, "Useful_PhD__R_Functions"), pattern = ".R", full.names = T) %>%
-  walk(~source(.x))
 
-list.files(file.path(basewd, "Flow_Spring_System"), pattern = ".R", full.names = T) %>%
-  walk(~source(.x))
 
 #The compute group used for this calculation filters the parameter df down to groups which have equal
 #amounts of networks from each load level. This allows for stable blocks of time.
@@ -118,6 +123,10 @@ for(i in (1:nrow(parameter_df_temp))){
                       node_name = "name",
                       power_flow = "power_flow")
   
+  
+  line_load_df  <-   as_data_frame(current_graph) %>%
+    mutate(line_load =abs(power_flow)/edge_capacity)
+  
   # print("Full graph complete")
   
   #autosets finds the correct drag coefficient to 
@@ -131,12 +140,14 @@ for(i in (1:nrow(parameter_df_temp))){
                                   tol = common_tol,
                                   static_limit = sum(abs(vertex_attr(current_graph, "net_generation"))),
                                   sparse = FALSE,
-                                  hyper_iters = 200,
-                                  hyper_tol = 0.01,
-                                  step_size = 0.1,
+                                  hyper_iters = 50,
+                                  hyper_tol = 0.0,
                                   hyper_max = 30000,
                                   sample = 100,
                                   verbose = T)
+  
+  embeddings_data$edge_embeddings <- embeddings_data$edge_embeddings %>%
+    left_join(line_load_df %>% select(edge_name, line_load))
   
   #The structure is generated as needed and so any new paths can just be created at this point.
   #There is very little overhead in doing it this way
@@ -148,7 +159,7 @@ for(i in (1:nrow(parameter_df_temp))){
   
   stop_iter_time <- Sys.time()
   
-  print(paste("Iteration", .x, "complete. Time taken", signif(difftime(stop_iter_time, start_iter_time , units = "secs"), 4), "seconds"))
+  print(paste("Iteration", i, "complete. Time taken", signif(difftime(stop_iter_time, start_iter_time , units = "secs"), 4), "seconds"))
 } 
 
 

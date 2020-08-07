@@ -31,7 +31,7 @@ arrange <- dplyr::arrange
 sapply(packages, library, character.only = TRUE)
 
 library(PowerGridNetworking)
-library(NetworkSpringEmbedding)
+library(rSETSe)
 
 #Set up file system to read the correct folders this switches between aws and windows mode
 
@@ -286,16 +286,16 @@ source(file.path(CodeFolder, "sub_scripts", "permuted_pl.R"))
 
 
 
-#get network statistics
+#Get network statistics
 
 IEEE-118 and IEEE-300 have substantially more negative assortativity than the other networks, however the assortativity is still quite close to 0. Also we see that IEEE-118, IEEE-300 and the UK high voltage network have much larger mean distances between nodes than the other networks, htey also have the smallesting clustering coefficient.
 
-The question is do the spikes that appear on 118 and 300 also appear on the UK high voltage grid? If they do then the spikes may be associated with the clustering or the distance, if not then the spikes may associated with the assortivity.
+As the error spikes appear on all the large network then they may be associated with the clustering or the distance.
 
 This could then be tested by creating networks on an assortivity/clustering distance scale and trying to re-create the spikes. This would then help understand which metric would be most appropriate as a proxy for robustness
 ```{r}
 
-test <- list.files("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs", pattern = ".rds", full.names = T) %>%
+network_summary_stats <- list.files("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs", pattern = ".rds", full.names = T) %>%
   map_df(~{
     readRDS(.x) %>%
     NetworkStats() %>%
@@ -314,26 +314,6 @@ test <- list.files("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs", patter
          Assortativity = round(Assortativity, 2),
          Clustering = round(Clustering, 2),
          Distance = round(Distance, 2))
-
-test <- list.files("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs", pattern = ".rds", full.names = T) %>%
-  map_df(~{
-    readRDS(.x) %>%  degree() %>% tibble(degree =.) %>%
-      group_by(degree) %>%
-      summarise(counts = n()) %>%
-      mutate(graph = basename(.x)%>% gsub(".rds", "", .),
-             perc = counts/sum(counts))
-    
-    
-  }) 
-
-
-test %>%
-  ggplot(aes(x = degree, y = perc, fill = graph)) + geom_col() +
-  facet_wrap(~graph)
-
-test %>%
-  ggplot(aes(x = Assortativity, y = Clustering, colour = graph)) + geom_point()
-
 ```
 
 
@@ -360,88 +340,90 @@ all_graph_agg <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.na
 PL_SETSe_emebeddings <- process_all_pl_setse_emebeddings( strain_folders = file.path(embeddings_path, "PL"),
                                                           attack_folders = "/home/jonno/Dropbox/IEEE_Networks/PL_attacks")
 
+```
 
+##Experimental stuff
+I can't really remember what I was doing here but I am leaving it here for a while until I delete it.
+It takes a while to load the data so It is commented out
+```{r}
 
-test_raw <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
-  map_df(~{
-    
-    file_path <-.x
-    read_rds(file_path) 
-  }) 
-
- test <- test_raw %>% filter(graph == "IEEE_118_igraph")
-
-test2 <- test %>%
-  select(attack_round, blackout_size, edges, carrying_capacity:graph) %>%
-   group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
-  summarise_all(list(mean = mean, sd = sd))
-
-
-combos <-test %>%
- select(carrying_capacity, smallest, largest, fract, robin_hood_mode) %>%
-distinct() %>%
-  mutate(seed = 1:n())
-
-
-
-test_res <- (1:nrow(combos)) %>%
-  map_df(~{
-    
-    print(.x)
-    test_118 <- test %>%
-  filter( carrying_capacity ==combos$carrying_capacity[.x],
-         smallest == combos$smallest[.x],
-         largest == combos$largest[.x],
-         fract == combos$fract[.x],
-         robin_hood_mode == combos$robin_hood_mode[.x]) %>%
-      {.[,1:4]}
-
-  set.seed(.x)
-    sample_rows <-sample(1:100, 100*1000 ,replace = TRUE)
-  Out <- data.frame(attack_round = (test_118$attack_round[sample_rows]),
-           generation = (test_118$generation[sample_rows]),
-           blackout_size = (test_118$blackout_size[sample_rows]),
-           nodes = (test_118$nodes[sample_rows])) %>%
-  mutate(id = rep(1:100, length.out = 100*1000)) %>%
-    group_by(id) %>%
-      summarise_all(mean) %>%
-    mutate(graph = "IEEE_118_igraph",
-         carrying_capacity =combos$carrying_capacity[.x],
-         smallest = combos$smallest[.x],
-         largest = combos$largest[.x],
-         fract = combos$fract[.x],
-         robin_hood_mode = combos$robin_hood_mode[.x]) 
-
-return(Out)
-}) %>%
-  mutate(combo = paste(carrying_capacity, smallest, largest, fract, robin_hood_mode))
-
-
-test_out <-test_res %>%
-  select(combo, attack_round:nodes) %>%
-    group_by(combo) %>%
-  summarise_all(list(mean = mean, sd = sd)) %>%
-  mutate(attack_round_ratio = attack_round_sd/attack_round_mean)
-
-test_out %>%
-  ggplot(aes(x = attack_round_ratio, y = attack_round_mean)) + geom_point()
-
-mean(test_out$attack_round_ratio)
-
+# test_raw <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
+#   map_df(~{
+#     
+#     file_path <-.x
+#     read_rds(file_path) 
+#   }) 
+# 
+#  test <- test_raw %>% filter(graph == "IEEE_118_igraph")
+# 
+# test2 <- test %>%
+#   select(attack_round, blackout_size, edges, carrying_capacity:graph) %>%
+#    group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
+#   summarise_all(list(mean = mean, sd = sd))
+# 
+# 
+# combos <-test %>%
+#  select(carrying_capacity, smallest, largest, fract, robin_hood_mode) %>%
+# distinct() %>%
+#   mutate(seed = 1:n())
+# 
+# 
+# 
+# test_res <- (1:nrow(combos)) %>%
+#   map_df(~{
+#     
+#     print(.x)
+#     test_118 <- test %>%
+#   filter( carrying_capacity ==combos$carrying_capacity[.x],
+#          smallest == combos$smallest[.x],
+#          largest == combos$largest[.x],
+#          fract == combos$fract[.x],
+#          robin_hood_mode == combos$robin_hood_mode[.x]) %>%
+#       {.[,1:4]}
+# 
+#   set.seed(.x)
+#     sample_rows <-sample(1:100, 100*1000 ,replace = TRUE)
+#   Out <- data.frame(attack_round = (test_118$attack_round[sample_rows]),
+#            generation = (test_118$generation[sample_rows]),
+#            blackout_size = (test_118$blackout_size[sample_rows]),
+#            nodes = (test_118$nodes[sample_rows])) %>%
+#   mutate(id = rep(1:100, length.out = 100*1000)) %>%
+#     group_by(id) %>%
+#       summarise_all(mean) %>%
+#     mutate(graph = "IEEE_118_igraph",
+#          carrying_capacity =combos$carrying_capacity[.x],
+#          smallest = combos$smallest[.x],
+#          largest = combos$largest[.x],
+#          fract = combos$fract[.x],
+#          robin_hood_mode = combos$robin_hood_mode[.x]) 
+# 
+# return(Out)
+# }) %>%
+#   mutate(combo = paste(carrying_capacity, smallest, largest, fract, robin_hood_mode))
+# 
+# 
+# test_out <-test_res %>%
+#   select(combo, attack_round:nodes) %>%
+#     group_by(combo) %>%
+#   summarise_all(list(mean = mean, sd = sd)) %>%
+#   mutate(attack_round_ratio = attack_round_sd/attack_round_mean)
+# 
+# test_out %>%
+#   ggplot(aes(x = attack_round_mean, y = blackout_size_mean)) + geom_point()
+# 
+# mean(test_out$attack_round_ratio)
 ```
 
 
 ```{r}
-
 #these are the evaluation metrics of the system
 multi_metric <- metric_set(rmse, rsq, mae, smape)
-
 ```
 
 
 #Aggregate and plot IEEE-118 r,c data
-
-The results of this plot show that SETS is less affected by the change in concentration than alpha of load
+This plot shows how setse reacts to different starting parameters.
+Answer not a lot and also it is symmetrical
 ```{r}
 #N.B.
 #The mean and median strain is the value at the loss of gc point. The correct value comes in when the strain data is added
@@ -466,22 +448,6 @@ metric_performance %>%
        y = "minimum k value",
        fill = "relative Error")
 ggsave(filename = file.path(FiguresFolder, "randc_performance_mean_tension.pdf"))
-
-
-test <- test_rc_metrics %>%
-  filter(r == 1000, c == 100) %>%  
-              mutate_at(., .vars = vars(fract:smallest), .funs = as.numeric)%>%
-              mutate(robin_hood_mode = robin_hood_mode =="TRUE") %>%
-  left_join( IEEE_118_agg_res, 
-            by = c("carrying_capacity", "smallest", "largest", "fract", "robin_hood_mode") )
-
-test %>%
-  filter(abs(static_force)<1e-2) %>%
-  mutate(
-    error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
-  ggplot(aes(x = mean_node_mean_tension, y = attack_round)) + 
-  geom_point(aes( colour = as.factor(carrying_capacity)))
-
 ```
 
 The results of the r c analysis show that the mean value of tension and strain is much more accurate than the median. What's more the matrices produced by the mean and median values are symmetric (given small variances due to convergence differences) about the minor diagonal. All the model values are equal on the Major diagonal where r = c.
@@ -493,7 +459,7 @@ This means that a good choice for r and c would r 1000 c = 100 or r = 10k c = 10
 
 #Model across all graphs
 
-After demonstrating the effectiveness on a single graph this chunk loads the data from all graphs used in the analysis, creates the resulting scatter plots and measures the effeectiveness at modelling giant component collapse.
+After demonstrating the effectiveness on a single graph this chunk loads the data from all graphs used in the analysis.
 
 ```{r}
 
@@ -509,21 +475,20 @@ all_SETSe_emebeddings <- process_all_setse_emebeddings(
 #   folder_paths = list.files("/home/jonno/test_strain/strain_sqrt_k", full.names = T),
 #   graph_agg= all_graph_agg)
 
-
-
 ```
 
 
 
 ##plot results
+
+The results of this plot show that SETS is less affected by the change in concentration than alpha of load
 ```{r}
 unique(all_SETSe_emebeddings$metric)
-use_graph <- "IEEE_118_igraph" #"UK_high_voltage"#"IEEE_300_igraph"
+use_graph <- "IEEE_118_igraph"#"UK_high_voltage"#"IEEE_300_igraph"
 average_type2 <-"mean"
 
 all_SETSe_emebeddings %>%
    filter(
-   #  metric == "strain",
      graph == use_graph,
      grepl("mean", average_type),
      metric !="elev"
@@ -532,9 +497,10 @@ all_SETSe_emebeddings %>%
   mutate(metric = str_replace(metric, "_", " "),
          error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
   ggplot(aes(x = value, y = attack_round, group = metric)) + 
-  geom_point(aes( colour = as.factor(carrying_capacity))) +
+  geom_point(aes( colour =  as.factor(carrying_capacity))) +
   geom_line(data = PL_SETSe_emebeddings %>%
               filter(graph == use_graph,
+                     carrying_capacity !=1.010,
                      average_type == average_type2), size = 1) +
     geom_smooth(method = "loess",se = FALSE)+
   facet_wrap(~metric) +
@@ -552,34 +518,12 @@ all_SETSe_emebeddings %>%
   summarise(count = n()) %>%
   mutate(perc = count/sum(count))
 
-test <-all_SETSe_emebeddings %>%
-  filter( graph == use_graph,
-     grepl("mean", average_type)) %>%
-  pivot_wider(., names_from = metric, values_from = value)
-
-test %>%
-  filter(mean_ratiostrain<2) %>%
-  ggplot(aes(x = tension, y = strain, colour = mean_ratiostrain)) + geom_point() +
-  scale_color_viridis()
-
-
-#the correlaation between the aggregated SETSe elements is very strong
-cor(test$elev, test$tension);cor(test$elev, test$strain) ;cor(test$strain, test$tension)
-#removing all networks where the mean strain is more than twice the median strain improves the corellation
-#and removes the error spikes
-test %>%
-  group_by(mean_ratiostrain>2) %>%
-  summarise(elev_tension = cor(elev, tension),
-            elev_strain = cor(elev, strain),
-            strain_tension = cor(strain, tension),
-            counts = n())
-
 
 #filtering graphs with large differences in mean and median SETSe metric removes the error spikes
 all_SETSe_emebeddings %>%
    filter( graph == use_graph,
      grepl("mean", average_type)  ) %>%
- # filter(mean_ratiostrain<2) %>%
+  filter(mean_ratiostrain<2) %>%
   mutate(metric = str_replace(metric, "_", " "),
          error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
   ggplot(aes(x = value, y = attack_round, group = metric)) + 
@@ -590,7 +534,7 @@ all_SETSe_emebeddings %>%
 ```
 
 
-#get performance across all networks
+#Get performance across all networks
 
 ```{r}
 loess_holdout_results <- function(splits, model_dat, metrics_out = TRUE ,...) {
@@ -623,17 +567,38 @@ loess_holdout_results <- function(splits, model_dat, metrics_out = TRUE ,...) {
 }
 
 #This looks at the metrics as a raw proxy for robustness
+#It takes a while so is loaded when possible
+if(!file.exists(file.path(project_folder, "metric_performance_all.rds"))){
+  
+  source(file.path(CodeFolder, "sub_scripts", "calc_model_perf_subscript_cross_val.R"))
+  
+  saveRDS(metric_performance_all, file = file.path(project_folder, "metric_performance_all.rds")) 
+  
+} else{
+  
+ metric_performance_all <- readRDS(file.path(project_folder, "metric_performance_all.rds"))
+  
+}
 
-source(file.path(CodeFolder, "sub_scripts", "calc_model_perf_subscript_cross_val.R"))
 
-metric_performance_plot_df %>%
-  group_by(eval_metric, metric, average_type, graph, combo, graph_order, error_type) %>%
+metric_performance_plot_df  <- metric_performance_all   %>%
+  group_by(eval_metric, metric, average_type, graph, combo) %>%
   summarise(.estimate = mean(.estimate)) %>%
   group_by(eval_metric, graph) %>%
   mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
          graph_order  = factor(gsub("_igraph", "", graph), 
                                levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
-  filter(error_type =="standard",
+  ungroup %>% mutate(error_type ="standard")
+
+
+metric_performance_plot_df %>%
+  group_by(eval_metric, metric, average_type, graph, combo, graph_order) %>%
+  summarise(.estimate = mean(.estimate)) %>%
+  group_by(eval_metric, graph) %>%
+  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
+         graph_order  = factor(gsub("_igraph", "", graph), 
+                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
+  filter(#error_type =="standard",
         metric != "elev"
          ) %>%
     #filter(combo !="mean alpha", combo != "median tension") %>%
@@ -647,44 +612,41 @@ metric_performance_plot_df %>%
        colour = "robustness metric") +
   scale_color_brewer(palette = "Set1")
 ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
-  
 
-metric_performance_plot_df %>%
-  filter(error_type =="standard",
-          metric != "elev") %>%
-  filter(combo !="mean alpha", combo != "median tension", combo !="median strain") %>%
-  group_by(eval_metric) %>%
-  mutate(relative_estimate = ifelse(eval_metric=="rsq", .estimate/max(.estimate), .estimate/min(.estimate))) %>%
-  ggplot(aes(x = graph_order, y = relative_estimate, colour = combo, group = combo)) + geom_line() +
+
+
+
+#boxplot of resampled results
+error_df <- metric_performance_all %>%
+  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
+         graph_order  = factor(gsub("_igraph", "", graph), 
+                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
+  filter(#error_type =="standard",
+        metric != "strain"
+         ) %>%
+  filter(metric !="alpha")
+
+error_df  %>%
+  filter(eval_metric %in% c("rsq", "smape")) %>%
+  ggplot(aes(x = graph_order, y = .pl_estimate, fill = combo)) + geom_boxplot() +
   facet_wrap(~eval_metric, scales = "free_y") +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
-  labs(title = "Performance of robustness metrics across 4 different evaluation methods",
-       y = "Rank of  robustness method",
-       x = "Networks in order of complexity",
-       colour = "robustness metric") +
-  scale_color_brewer(palette = "Set1")
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
 
 
-test <-metric_performance_plot_df %>% 
-  select(-rank,-.estimator) %>%
-  pivot_wider(names_from = error_type, values_from = .estimate) %>%
-  mutate(change = no_spikes-standard,
-         change_perc = change/standard) %>%
-  filter(metric %in% c("tension","strain"))
+error_aov_prep <- error_df %>%
+  filter(eval_metric %in% c("rsq", "smape")) %>%
+#  group_by(eval_metric, graph_order) %>%
+    mutate(.estimate = ifelse(eval_metric =="rsq", 1/.pl_estimate, .pl_estimate) #%>% {(.-mean(.))/sd(.)}
+           ) %>%
+  rename(estimate = .pl_estimate)
 
-test  %>%
- # filter(combo !="mean alpha", combo != "median tension", combo !="median strain") %>%
-  group_by(eval_metric) %>%
-  ggplot(aes(x = graph_order, y = change, colour = combo, group = combo)) + geom_line() +
-  facet_wrap(~eval_metric, scales = "free_y") +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
-  labs(title = "Performance of robustness metrics across 4 different evaluation methods",
-       y = "Change in error",
-       x = "Networks in order of complexity",
-       colour = "robustness metric") +
-  scale_color_brewer(palette = "Set1")
-  
+aov_res <-aov(estimate ~  metric + graph_order+ eval_metric, data = error_aov_prep )
+summary(aov_res)
 
+tukey_test <-TukeyHSD(aov_res, which = "metric")
+tukey_test
+
+plot(tukey_test)
 
 ```
 
@@ -773,7 +735,7 @@ metric_performance_all4 <-1:nrow(metric_combos) %>%
     }) 
 
 
-metric_performance_all4 %>%
+metric_performance_all3%>%
   mutate(combo = paste(average_type, metric),
          error = attack_round - preds) %>%
   filter(combo %in% c("mean tension", "mean loading"))  %>%
@@ -880,7 +842,9 @@ metric_combos <- expand_grid(
 #the below results are most clear for strain but are also visible for tension
 #The biggest spikes are when the distribution fraction is 1 and robin hood mode is true.
  #each individual spike is made up of one of the "largest" fractions the highest spike is 0.1 the smallest is 0.5. This is becuase the more extreme the value the more concentrated the result.
- #SETSe is a poor proxy for failure when the nodes with the most flow have the least excess capacity and the nodes with the least flow have the most excess capacity at the same time that the network overall has a low likelihood of cascades in general. In this situation the SETSe algorithm predicts cascading failures where there are unlikely to be any underestimating the robustness of the network. However this only occurs when the network has a relatively large number of edges that are not part of a cycle
+ #SETSe is a poor proxy for failure when the edges with the most flow have the least excess capacity and the edges with the least flow have the most excess capacity at the same time that the network overall has a low likelihood of cascades in general. In this situation the SETSe algorithm predicts cascading failures where there are unlikely to be any underestimating the robustness of the network. However this only occurs when the network has a relatively large number of edges that are not part of a cycle
+ 
+#What's more these situations are unlikey to occur as the excess capacity tends to be larger on edges with lots of flow. see that guy I cited previously.
  
  
 test_error %>% 
@@ -1093,7 +1057,8 @@ UKg <- readRDS(file.path(power_grid_graphs_path,  paste0("UK_high_voltage.rds"))
             #    Proportional_Load(., 1, PowerFlow = "power_flow", Link.Limit = "edge_capacity") %>%
                 set.edge.attribute(. , "distance", value = 1) %>%
         set.edge.attribute(., "Area", value = 1) %>%
-        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 10000, stretch_range = 1000) %>%
+        calc_spring_youngs_modulus(., "power_flow", "edge_capacity", 
+                                   minimum_value = 10000, stretch_range = 1000) %>%
         calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
         normalise_dc_load(.,  
                            generation = "generation", 
@@ -1114,9 +1079,7 @@ sim_names <- paste0("No_", energy_types)
 #takes about 60 secs
 UK_SETSe_data <- auto_SETSe(UKg, 
            force ="net_generation", 
-           flow = "power_flow", 
            distance = "distance", 
-           capacity = "edge_capacity",
            edge_name = "edge_name",
            tstep = 0.01, 
            mass = 1, 
@@ -1124,7 +1087,8 @@ UK_SETSe_data <- auto_SETSe(UKg,
            tol = 2e-3,
            sparse = FALSE,
            hyper_iters = 100,
-           sample = 100)
+           sample = 100,
+           verbose = T)
 
 ```
 
@@ -1199,13 +1163,26 @@ for(i in 1:nrow(graph_task_combos)){
 
 ##Load the failure groups
 This chunk loads the co failures by graph into fully stacked o_failure matrices
+
+
+When attacking edges, nodes that have both generation AND demand always survive
 ```{r}
+target <-  "UK_high_voltage"#"IEEE_118_igraph"
+graph_path <- file.path("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs",paste0(target, ".rds"))
+
+#read the target graph
+g <- readRDS(file = graph_path) 
+
+
 #create cluster matrix
 full_mat_list <- return_full_co_failure_list(
-  folder = file.path("/home/jonno/Dropbox/IEEE_Networks/ten_k_attacks", "IEEE_118_igraph"), pattern = "co_failure")
+  folder = file.path("/home/jonno/Dropbox/IEEE_Networks/ten_k_attacks", target), pattern = "co_failure")
 
 clust_data <- full_mat_list$node_co_failure
+
+clust_data <- clust_data*as_adjacency_matrix(g, sparse = FALSE)
 #self links are meaningless and so are set to 0
+mat_size <- vcount(g)
 diag(clust_data) <- 0
 
 #the fraction of times the co-failure DID NOT occure, this is equivalent to the distance
@@ -1213,10 +1190,29 @@ diag(clust_data) <- 0
 clust_data <- (10000-clust_data)/10000
 #clust_data <- clust_data*as_adjacency_matrix(g)
 
-clust_data <- (clust_data)
-clust_data <- as.dist(clust_data, diag = FALSE)
+clust_data_dist <- as.dist(clust_data, diag = FALSE)
 
-clust_tree <- hclust(clust_data, method = "single")
+clust_tree <- hclust(clust_data_dist, method = "single")
+
+
+#I cannot get the clusters to plot properly in ggplot
+tree_order <- tibble(node1 = clust_tree$labels, order = clust_tree$order)
+
+#this produces the right clustering but how?
+test <-heatmap(clust_data)
+tstree_order <- tibble(node1 = as.character(test$rowInd), order = 1:mat_size)
+
+test <-as_tibble(clust_data) %>%
+  mutate(node1 =as.character(1:n()),
+         node1 = names(.)) %>%
+  pivot_longer(cols = -node1, names_to = "node2") %>%
+  left_join(tree_order %>% rename(order1 = order)) %>%
+  left_join(tree_order %>% rename(node2 = node1, order2 = order))
+
+test %>%
+  ggplot(aes(x = order1, y = order2, fill = 1-value)) + geom_raster() +
+  scale_fill_viridis() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
 plot(clust_tree)
@@ -1225,7 +1221,7 @@ cutree(clust_tree, k = 30)
 current_graph <- Proportional_Load(g, alpha = 2, PowerFlow = "power_flow", Link.Limit = "edge_capacity") %>%
   set.edge.attribute(. , "distance", value = 1) %>%
   set.edge.attribute(., "Area", value = 1) %>%
-  calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 1100, stretch_range = 1000) %>%
+  calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
   calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
   normalise_dc_load(.,  
                     generation = "generation", 
@@ -1236,51 +1232,104 @@ current_graph <- Proportional_Load(g, alpha = 2, PowerFlow = "power_flow", Link.
                     node_name = "name",
                     power_flow = "power_flow")
 
-embeddings_data <- auto_SETSe(current_graph, 
+v_df <- as_data_frame(current_graph, what = "vertices")
+
+
+embeddings_data <- SETSe_bicomp(current_graph, 
                               force ="net_generation", 
-                              flow = "power_flow", 
                               distance = "distance", 
-                              capacity = "edge_capacity",
                               edge_name = "edge_name",
                               tstep = 0.01, 
                               mass = 1, 
-                              max_iter = 30000, 
-                              tol = 2e-3,
+                              max_iter = 60000, 
+                              tol = 2e-4,
                               sparse = FALSE,
                               hyper_iters = 100,
-                              sample = 100)
+                              sample = 100,
+                            verbose = T)
   
 
 
 g_edge_df_temp  <- as_data_frame(g) %>%
-  left_join(embeddings_data$edge_embeddings %>% select(-power_flow, -edge_capacity))
+  left_join(embeddings_data$edge_embeddings)
 
+{
 test <- graph_from_data_frame(g_edge_df_temp, directed = FALSE) %>%
-  as_adjacency_matrix(., attr = "tension" ) %>% as.matrix()
-clust_data <- test
+  as_adjacency_matrix(., attr = "de" ) %>% as.matrix()
+clust_data2 <- rank(test, ties = "min")/length(test) %>% #{-. +1} %>%
+  matrix(., nrow =mat_size , ncol = mat_size ) 
+
+colnames(clust_data2) <- as.character(1:mat_size )
+rownames(clust_data2) <- as.character(1:mat_size )
+
+clust_data2 <- dist(1-clust_data2)
+}
+clust_tree2 <- hclust(clust_data2, method = "single")
+
+
+#make adjacency matrix
+adj_mat <- graph_from_data_frame(g_edge_df_temp, directed = FALSE) %>%
+  as_adjacency_matrix(. )  %>% as.matrix()
+ size_val <- nrow(adj_mat)
+adj_mat <- 1-adj_mat
+colnames(adj_mat) <- as.character(1:size_val)
+rownames(adj_mat) <- as.character(1:size_val)
+
+adj_mat <- dist(adj_mat)
+clust_tree3 <- hclust(adj_mat, method = "single")
 
 library(dendextend)
 
 entanglement(clust_tree, clust_tree2)
-tanglegram(clust_tree, clust_tree2)
+
+#Difference in entabglement between adjacency and Setse
+entanglement(clust_tree, clust_tree2) - entanglement(clust_tree, clust_tree3)
+
+test1 <- cutree(clust_tree, k = 5)
+test2 <- cutree(clust_tree2, k = 5)
+
+clusters_df <- tibble(cofailure =  factor(cutree(clust_tree, k = 2)),  
+       tension = factor(cutree(clust_tree2, k = 2)),
+       adjacency =  factor(cutree(clust_tree3, k = 2)))
+
+metrics(clusters_df, truth = cofailure, estimate = tension)
+metrics(clusters_df, truth = cofailure, estimate = adjacency)
+
+adjustedRandIndex(cutree(clust_tree, k = 10), cutree(clust_tree2, k = 5))
+adjustedRandIndex(cutree(clust_tree, k = 5), cutree(clust_tree3, k = 5))
+
+
+tree_list <- dendlist(co_failure = as.dendrogram(clust_tree) , 
+                      SETSe = as.dendrogram(clust_tree2),
+                      adj = as.dendrogram(clust_tree3))
+
+cor.dendlist(tree_list)
+
+test<- cor_bakers_gamma(tree_list[[2]], tree_list[[3]])
+test
+
+
+cor_cophenetic(tree_list[[1]], tree_list[[2]])
+
+
+test2 <- g_edge_df_temp %>%
+left_join(., test %>% rename(from = node1, to = node2))
+
+cor(test2$strain, test2$value)
+
+test2 %>%
+  ggplot(aes(x = de, y = tension)) + geom_point()
 
 ```
-
-
-```{r}
-
-total_time <- system.time(out<- auto_SETSe(g, max_iter = 1e5))
-```
-
 
 #package update
 This chunk is the code to quickly update the package
 ```{r}
 library(devtools)
 library(roxygen2)
-roxygenise( "/home/jonno/NetworkSpringEmbedding")
-detach("package:NetworkSpringEmbedding", unload = TRUE)
-install("~/NetworkSpringEmbedding")
-library(NetworkSpringEmbedding)
+roxygenise( "/home/jonno/rSETSe")
+detach("package:rSETSe", unload = TRUE)
+install("~/rSETSe")
+library(rSETSe)
 ```
 

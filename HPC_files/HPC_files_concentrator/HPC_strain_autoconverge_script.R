@@ -136,8 +136,8 @@ print("run sims")
                             output_graph = TRUE)
       
       common_time <- 0.01
-      common_Iter <- 200000
-      common_tol <- 2e-4
+      common_Iter <- 60000 #This works for networks of 49k nodes so should be fine for these small networks
+      common_tol <- 2e-4 #The force is normalised across the networks so the tolerance can also be normalised across networks
       common_mass <- 1
       
       #Sets up the graph so that all the embedding stuff can be calculated without problem
@@ -146,6 +146,8 @@ print("run sims")
         set.edge.attribute(., "Area", value = 1) %>%
         calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
         calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+        #This function makes the load across all the networks the same
+        #The resultant total absolute force is 2
         normalise_dc_load(.,  
                           generation = "generation", 
                           demand  = "demand",
@@ -155,7 +157,12 @@ print("run sims")
                           node_name = "name",
                           power_flow = "power_flow")
       
-     # print("Full graph complete")
+      #This allows the line load to be extracted and added in to the edge embeddings.
+      #This used to be part of the embeddings process but was removed 
+      #as it is specific to only capacity limited flow networks.
+      #This addon here means the rest of the code in the project doesn't need to be changed
+      line_load_df  <-   as_data_frame(current_graph) %>%
+        mutate(line_load =abs(power_flow)/edge_capacity)
 
       #autosets finds the correct drag coefficient to 
       embeddings_data <- SETSe_bicomp(current_graph, 
@@ -168,12 +175,15 @@ print("run sims")
                                       tol = common_tol,
                                       static_limit = sum(abs(vertex_attr(current_graph, "net_generation"))),
                                       sparse = FALSE,
-                                      hyper_iters = 200,
+                                      hyper_iters = 50,
                                       hyper_tol = 0.01,
-                                      step_size = 0.1,
-                                      hyper_max = 30000,
+                                      hyper_max = 10000, #This really doesn't need to be that big for these networks
                                       sample = 100,
                                       verbose = T)
+      
+      embeddings_data$edge_embeddings <- embeddings_data$edge_embeddings %>%
+        left_join(line_load_df %>% select(edge_name, line_load))
+      
       
       #The structure is generated as needed and so any new paths can just be created at this point.
       #There is very little overhead in doing it this way

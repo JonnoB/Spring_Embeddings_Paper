@@ -1065,8 +1065,9 @@ list.files("/home/jonno/HPC_jobs/attack/IEEE_300_igraph", pattern = ".tgz", full
 list.files("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage", pattern = ".tgz", full.names = F) %>% 
   walk(~{
   untar(tarfile = file.path("/home/jonno/HPC_jobs/tenkattack/UK_high_voltage", .x), 
+        verbose = TRUE,
         exdir = "/home/jonno/HPC_jobs/UK_high_voltage",#, 
-        extras = "--strip-components 4"  #take only the useful bits of the zip file
+        extras = "--strip-components 3"  #take only the useful bits of the zip file
       )
   
 })

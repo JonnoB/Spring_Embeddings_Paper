@@ -82,7 +82,7 @@ metric_performance <-1:nrow(metric_combos) %>%
    # print(.x)
     temp <- test_rc_metrics %>%
       filter(
-        static_force<0.002,
+        static_force<0.002, #only includes values that have converged
         !is.na(value),
         r == metric_combos$r[.x],
         c == metric_combos$c[.x],
