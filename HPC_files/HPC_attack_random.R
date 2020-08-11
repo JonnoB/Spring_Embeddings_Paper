@@ -162,7 +162,7 @@ for(i in (1:10000)[rep(1:10, 1000)==task_id]){
   
 }
 
-#The comined files are saved, this greatly reduces the amount of files saved an the subseuent processing time
+#The combined files are saved, this greatly reduces the amount of files saved an the subseuent processing time
 
 #The node co failure matrices recombined into lists
 co_failure_list_out <-list(node_co_failure = node_co_failure,

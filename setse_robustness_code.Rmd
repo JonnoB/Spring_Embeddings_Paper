@@ -309,11 +309,30 @@ network_summary_stats <- list.files("/home/jonno/Dropbox/IEEE_Networks/power_gri
   filter(Metric != "Components") %>%
   pivot_wider(names_from = "Metric", values_from = "value") %>%
   arrange(Nodes) %>%
-  mutate(Betweenness = round(Betweenness, 2),
+  mutate(
+    Nodes = as.integer(Nodes),
+    Edges =  as.integer(Edges),
+    Betweenness = round(Betweenness, 2),
          Degree = round(Degree, 2),
          Assortativity = round(Assortativity, 2),
          Clustering = round(Clustering, 2),
-         Distance = round(Distance, 2))
+         Distance = round(Distance, 2),
+         graph = str_remove(graph, "_igraph") %>% 
+           str_remove(., ".rds") %>%  
+           str_replace_all(., "_", " ") %>%
+           str_replace(., "UK high voltage", "UK HV")) %>%
+  rename(
+    Betw = Betweenness, 
+         Deg = Degree,
+         Assort = Assortativity,
+         Clust = Clustering,
+         Dist = Distance) %>%
+  select(Graph = graph, Nodes, Edges, everything())
+
+network_summary_stats %>%
+  xtable(caption = "Summary statisitics of the 6 power networks used in the study",
+         label = "tab:net_stats")
+
 ```
 
 
@@ -537,34 +556,6 @@ all_SETSe_emebeddings %>%
 #Get performance across all networks
 
 ```{r}
-loess_holdout_results <- function(splits, model_dat, metrics_out = TRUE ,...) {
-  
-  train_df = analysis(splits)
-  
-  # Save the 10%
-  holdout <- assessment(splits)
-  # Fit the model to the 90%
-  loess_mod <- loess(formula = model_dat,
-                       data = train_df)
-  
-  # `augment` will save the predictions with the holdout data set
-      model_comp <- holdout %>%
-    mutate(preds =  predict(loess_mod, holdout))
-  
-  #Output the accuracy of the model
-  metric_summary <- multi_metric(data = model_comp, truth = attack_round, estimate = preds) 
-  
-  if(metrics_out){
-    Out <- metric_summary
-  } else {
-    
-    Out <- model_comp
-    
-  }
-  
-  return(Out)
-  
-}
 
 #This looks at the metrics as a raw proxy for robustness
 #It takes a while so is loaded when possible
@@ -580,47 +571,12 @@ if(!file.exists(file.path(project_folder, "metric_performance_all.rds"))){
   
 }
 
-
-metric_performance_plot_df  <- metric_performance_all   %>%
-  group_by(eval_metric, metric, average_type, graph, combo) %>%
-  summarise(.estimate = mean(.estimate)) %>%
-  group_by(eval_metric, graph) %>%
-  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
-         graph_order  = factor(gsub("_igraph", "", graph), 
-                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
-  ungroup %>% mutate(error_type ="standard")
-
-
-metric_performance_plot_df %>%
-  group_by(eval_metric, metric, average_type, graph, combo, graph_order) %>%
-  summarise(.estimate = mean(.estimate)) %>%
-  group_by(eval_metric, graph) %>%
-  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
-         graph_order  = factor(gsub("_igraph", "", graph), 
-                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
-  filter(#error_type =="standard",
-        metric != "elev"
-         ) %>%
-    #filter(combo !="mean alpha", combo != "median tension") %>%
-  ggplot(aes(x = graph_order, y = rank, colour = combo, group = combo)) + geom_line() +
-  facet_wrap(~eval_metric) +
- # scale_color_brewer(type = "qual") +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
-  labs(title = "Rank of performance of robustness metrics across 4 different evaluation methods",
-       y = "Rank of  robustness method",
-       x = "Networks in order of complexity",
-       colour = "robustness metric") +
-  scale_color_brewer(palette = "Set1")
-ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
-
-
-
-
 #boxplot of resampled results
 error_df <- metric_performance_all %>%
-  mutate(rank = ifelse(eval_metric =="rsq", rank(-.estimate), rank(.estimate)),
-         graph_order  = factor(gsub("_igraph", "", graph), 
-                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300", "UK_high_voltage"))) %>%
+  mutate( graph_order  = factor(gsub("_igraph", "", graph), 
+                               levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300",
+                                          "UK_high_voltage")),
+          perf_diff = .estimate-.pl_estimate) %>%
   filter(#error_type =="standard",
         metric != "strain"
          ) %>%
@@ -628,11 +584,16 @@ error_df <- metric_performance_all %>%
 
 error_df  %>%
   filter(eval_metric %in% c("rsq", "smape")) %>%
-  ggplot(aes(x = graph_order, y = .pl_estimate, fill = combo)) + geom_boxplot() +
+  ggplot(aes(x = graph_order, y = .estimate, fill = combo)) + geom_boxplot() +
   facet_wrap(~eval_metric, scales = "free_y") +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))  +
+  labs(title = "Comparing loading and tension as robustness metrics",
+       y = "Evaluation metric score",
+       x = "Networks in order of nodes",
+       colour = "robustness metric") 
+ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
 
-
+#Tension has significantly lower error when accounting for graph type and evaluation metric
 error_aov_prep <- error_df %>%
   filter(eval_metric %in% c("rsq", "smape")) %>%
 #  group_by(eval_metric, graph_order) %>%
@@ -648,9 +609,9 @@ tukey_test
 
 plot(tukey_test)
 
-```
 
-The plot shows the rank performance of each robustness metric relative to the evaluation metric. Mean strain and tension are consistantly better that the other metrics with median loading outperforming mean tension only on IEEE-30. There are appears to be a link between model performance and the complexity of the network, as the networks get larger and more complex the robustness metrics consistantly change position. 
+
+```
 
 ##tension loading model
 
@@ -1053,7 +1014,7 @@ This chunk plots the UK high voltage network in geospace and shows how SETse pro
 ##Set up UK Graph and SETSe
 ```{r}
 
-UKg <- readRDS(file.path(power_grid_graphs_path,  paste0("UK_high_voltage.rds"))) %>%
+{UKg <- readRDS(file.path(power_grid_graphs_path,  paste0("UK_high_voltage.rds"))) %>%
             #    Proportional_Load(., 1, PowerFlow = "power_flow", Link.Limit = "edge_capacity") %>%
                 set.edge.attribute(. , "distance", value = 1) %>%
         set.edge.attribute(., "Area", value = 1) %>%
@@ -1072,6 +1033,9 @@ UKg <- readRDS(file.path(power_grid_graphs_path,  paste0("UK_high_voltage.rds"))
   set_edge_attr(., "edge_capacity", 
                 value = ifelse(is.finite(edge_attr(.,"edge_capacity")), edge_attr(.,"edge_capacity"), 0 ) ) 
 
+}
+
+
 #useful at various stages
 energy_types <- c("Coal", "Gas", "Renewable", "Nuclear")
 sim_names <- paste0("No_", energy_types)
@@ -1089,6 +1053,14 @@ UK_SETSe_data <- auto_SETSe(UKg,
            hyper_iters = 100,
            sample = 100,
            verbose = T)
+
+
+  line_load_df  <-   as_data_frame(UKg) %>%
+    mutate(line_load =abs(power_flow)/edge_capacity)
+  
+  UK_SETSe_data$edge_embeddings <- UK_SETSe_data$edge_embeddings %>%
+    left_join(line_load_df %>% select(edge_name, line_load)) %>%
+    mutate(alpha = 1/line_load)
 
 ```
 
@@ -1109,7 +1081,7 @@ spdf <- as(GB, "Spatial") %>% st_as_sf %>%
 
 kriged_height_strain_data <- krige_height_strain_maps(                                                      
   SETSe_list = UK_SETSe_data, 
-  coords = MakeMapDF(UKg, read_csv(file.path(basewd, "point.csv")))  %>%
+  coords = MakeMapDF(UKg, read_csv(file.path("/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder", "point.csv")))  %>%
     filter(PositionType=="Geo Space"), 
   spatial_df = spdf)
 
@@ -1139,27 +1111,7 @@ Optional! show the relationship between the clustering produced by SETS and fail
 compare with the hierarchically clustered based on topology and seperately wieghted with edge load.
 Ground truth is thr groups formed by probability of joint failure.
 
-This block calcualtes all the data, it is very slow and so advisable to run the sourced script on an HPC
-```{r}
-
-graph_task_combos <- expand_grid(graph = c( "IEEE_14_igraph", "IEEE_30_igraph", "IEEE_57_igraph", "IEEE_118_igraph"),
-         task_id = 1:10)
-
-for(i in 1:nrow(graph_task_combos)){
-  
-  task_id <- graph_task_combos$task_id[i] #this is the compute group to be used
-  
-  load_file <- graph_task_combos$graph[i]
-
-  source(file.path("/home/jonno/setse_and_network_robustness/HPC_files", "HPC_attack_random.R"), local = TRUE)
-  
-} 
-
-
-
-
-
-```
+It is advisable to run the simulations on the cloud or an HPC using the script "HPC_attack_random.R"
 
 ##Load the failure groups
 This chunk loads the co failures by graph into fully stacked o_failure matrices
@@ -1321,6 +1273,124 @@ test2 %>%
   ggplot(aes(x = de, y = tension)) + geom_point()
 
 ```
+
+
+probability of failure
+This looks at the failure statistics of each edge after 10k attacks to collapse
+
+
+```{r}
+
+target <-  "UK_high_voltage"#"IEEE_118_igraph"
+graph_path <- file.path("/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs",paste0(target, ".rds"))
+
+
+current_graph <- readRDS(file = graph_path) %>%
+  set.edge.attribute(. , "distance", value = 1) %>%
+  set.edge.attribute(., "Area", value = 1) %>%
+  calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = 100, stretch_range = 1000) %>%
+  calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
+  normalise_dc_load(.,  
+                    generation = "generation", 
+                    demand  = "demand",
+                    net_generation = "net_generation", 
+                    capacity = "edge_capacity",
+                    edge_name = "edge_name", 
+                    node_name = "name",
+                    power_flow = "power_flow")
+
+
+{embeddings_data <- SETSe_bicomp(current_graph, 
+                              force ="net_generation", 
+                              distance = "distance", 
+                              edge_name = "edge_name",
+                              tstep = 0.1, 
+                              mass = 1, 
+                              max_iter = 60000, 
+                              tol = 2e-4,
+                              sparse = FALSE,
+                              hyper_iters = 100,
+                              sample = 100,
+                            verbose = T)
+
+  line_load_df  <-   as_data_frame(current_graph) %>%
+    mutate(line_load =abs(power_flow)/edge_capacity)
+  
+  embeddings_data$edge_embeddings <- embeddings_data$edge_embeddings %>%
+    left_join(line_load_df %>% select(edge_name, line_load))
+
+  }
+  
+
+target_files_edge <- list.files(file.path("/home/jonno/Dropbox/IEEE_Networks/ten_k_attacks", target), 
+                            full.names = T, pattern = "edge_fa")
+
+temp_edge <- target_files_edge %>%
+  map_df(read_rds)
+
+edge_data <- temp_edge %>%
+  group_by(name, mode) %>%
+  summarise( probability= n()/1e4,
+             round_mean = mean(round),
+             round_sd = sd(round)) %>%
+  left_join(embeddings_data$edge_embeddings, by = c("name"="edge_name"))
+
+
+target_files_node <- list.files(file.path("/home/jonno/Dropbox/IEEE_Networks/ten_k_attacks", target), 
+                            full.names = T, pattern = "node_fa")
+
+temp_node <- target_files_node %>%
+  map_df(read_rds)
+
+node_data <- temp_node %>%
+  group_by(name, mode) %>%
+  summarise( probability= n(),
+             round_mean = mean(round, na.rm = T),
+             round_sd = sd(round, na.rm = T)) %>%
+  left_join(embeddings_data$node_embeddings, by = c("name"="node"))
+
+
+
+#edges that are islanded don't have a clear pattern apart from becoming earlier as they become more likely.
+#The edges that are most likely to be targeted tend to occur later. This suggests they are in a robust part of the network and are unlikely to overload
+#Edges that overload more likely to occur earler. This suggests they are in a part of the network sensitive to changes.
+test %>%
+  ggplot(aes(x = probability, y = round_mean, colour = mode)) + geom_point()
+
+
+
+test %>%
+  ggplot(aes(x = log(tension), y= probability, colour = mode)) + geom_point()
+
+
+test2 <- embeddings_data$edge_embeddings
+
+ embeddings_data$network_dynamics%>%
+   filter(component == 158) %>%
+  ggplot(aes(x = t, y = log10(static_force/2))) + geom_line()
+ 
+ 
+ 
+ GGmapData %>%
+   left_join(edge_data, by = c("edge_name"= "name")) %>%
+  mutate(PositionType = factor(PositionType),
+         PositionType = fct_relevel(PositionType, "Geo Space", after = 0)) %>%
+#   filter(mode == "Targeted") %>%
+  ggplot(aes(y = Latitude, x = Longitude)) + 
+  geom_line(aes(colour = percent_rank(tension), group = edge_name)) +
+   scale_color_viridis() +
+  # scale_colour_brewer(palette ="Set1")+
+  facet_grid(~PositionType) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  ggtitle("The UK power grid by voltage, plotted using geographic location and node space")
+
+```
+
 
 #package update
 This chunk is the code to quickly update the package

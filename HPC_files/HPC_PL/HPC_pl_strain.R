@@ -124,9 +124,6 @@ for(i in (1:nrow(parameter_df_temp))){
                       power_flow = "power_flow")
   
   
-  line_load_df  <-   as_data_frame(current_graph) %>%
-    mutate(line_load =abs(power_flow)/edge_capacity)
-  
   # print("Full graph complete")
   
   #autosets finds the correct drag coefficient to 
@@ -145,6 +142,9 @@ for(i in (1:nrow(parameter_df_temp))){
                                   hyper_max = 30000,
                                   sample = 100,
                                   verbose = T)
+  
+  line_load_df  <-   as_data_frame(current_graph) %>%
+    mutate(line_load =abs(power_flow)/edge_capacity)
   
   embeddings_data$edge_embeddings <- embeddings_data$edge_embeddings %>%
     left_join(line_load_df %>% select(edge_name, line_load))
