@@ -1,56 +1,23 @@
 #This is used to get the model performance across all metrics
 #It does this for both with and without error spikes
 
-
-loess_holdout_results <- function(splits, model_dat, metrics_out = TRUE ,...) {
-  
-  train_df = analysis(splits)
-  
-  # Save the 10%
-  holdout <- assessment(splits)
-  # Fit the model to the 90%
-  loess_mod <- loess(formula = model_dat,
-                     data = train_df)
-  
-  # `augment` will save the predictions with the holdout data set
-  model_comp <- holdout %>%
-    mutate(preds =  predict(loess_mod, holdout))
-  
-  #Output the accuracy of the model
-  metric_summary <- multi_metric(data = model_comp, truth = attack_round, estimate = preds) 
-  
-  if(metrics_out){
-    Out <- metric_summary
-  } else {
-    
-    Out <- model_comp
-    
-  }
-  
-  return(Out)
-  
-}
-
-
-
+#The metrics that will be tested
 multi_metric <- metric_set(rmse, rsq, mae, smape)
+
+#the dataframe that defines the network metric combinations to be analysed
 metric_combos <- expand_grid(
   metrics = unique(all_SETSe_emebeddings$metric),
   average_type =unique(all_SETSe_emebeddings$average_type),
   graph = unique(all_SETSe_emebeddings$graph)) %>%
-  filter(average_type =="mean",
-         metrics != "elev",
-        # metrics != "strain"
+  filter(average_type =="mean"
          )
 
-
+#The combinations used when the PL value is taken to be base case
 pl_metric_combos <- expand_grid(
   metrics = unique(PL_SETSe_emebeddings$metric),
   average_type =unique(PL_SETSe_emebeddings$average_type),
   graph = unique(PL_SETSe_emebeddings$graph)) %>%
-  filter(average_type =="mean",
-         metrics != "elev",
-         # metrics != "strain"
+  filter(average_type =="mean"
   )
 
 #This is to check that the UK high voltage is included

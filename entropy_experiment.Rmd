@@ -1,0 +1,111 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "04/08/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+
+
+```{r}
+
+files_to_load <- list.files("/home/jonno/Dropbox/IEEE_Networks/embeddings/UK_high_voltage", full.names = T)
+
+embedded_data_path  <- file.path( "/home/jonno/Dropbox/IEEE_Networks/embeddings/UK_high_voltage", "fract_0.25_ec_1.2_largest_0.3_smallest_0.3_robin_hood_TRUE.rds")
+
+
+entropy_df <- files_to_load %>%
+  map_df(~{
+    
+    embedded_data <- read_rds(.x)
+    
+    node_entropy <- embedded_data$edge_embeddings %>%
+      mutate(power_flow = abs(power_flow)) %>%
+      separate(., col = "edge_name", into = c("from", "to"), sep = "-") %>%
+      pivot_longer(cols = c(from, to), values_to = "node") %>%
+      group_by(node) %>%
+      mutate(strain_distrib = strain/sum(strain),
+             tension_distrib = tension/sum(tension)) %>%
+      summarise(tens_strain_entropy = -sum(tension*strain_distrib*log(strain_distrib)),
+                strain_tens_entropy = -sum(strain*tension_distrib*log(tension_distrib))) %>%
+      mutate(file_name = basename(.x))
+    
+    network_entropy <- node_entropy %>%
+      summarise(tens_strain_entropy = sum(tens_strain_entropy),
+                strain_tens_entropy = sum(strain_tens_entropy)) %>%
+      mutate(file_name = basename(.x))
+    
+    return(network_entropy)
+    
+  }) %>%
+  mutate(file_name = str_remove(file_name, ".rds")) %>%
+   separate(col =file_name, into = c("drop1", "fract", 
+                                     "drop2", "carrying_capacity", 
+                                     "drop3", "largest",
+                                     "drop4", "smallest",
+                                     "drop5", "drop6", "robin_hood_mode"), 
+            sep = "_",
+            convert = TRUE) %>% 
+  select(-contains("drop"))
+
+
+test <- entropy_df %>% select(-contains("drop")) %>%
+  rename(robin_hood_mode = robin_hood) %>%
+   mutate(robin_hood_mode = str_remove(robin_hood_mode, ".rds"))
+
+test2 <- all_SETSe_emebeddings %>%
+                    filter(graph == "UK_high_voltage") %>%
+  select(1:7) %>%
+    distinct()
+test2 <- left_join(test , test2 ) 
+
+
+test2 %>%
+  ggplot(aes(y = attack_round, x = (carrying_capacity)*tens_strain_entropy, colour = carrying_capacity)) + geom_point()
+ 
+```
+
+
+
+```{r}
+tension_df <- files_to_load %>%
+  map_df(~{
+    
+    embedded_data <- read_rds(.x)
+    
+    edge_importance <- embedded_data$edge_embeddings %>%
+      mutate(edge_importance = edge_capacity/sum(edge_capacity),
+             adjusted_tension = edge_importance*tension,
+             adjusted_strain = edge_importance*strain) %>%
+      summarise(tension = mean(tension),
+                adjusted_tension = mean(adjusted_tension),
+                adjusted_strain = mean(adjusted_strain),
+                med_adjusted_tension = median(adjusted_tension)) %>%
+      mutate(file_name = basename(.x))
+
+    
+    return(edge_importance)
+    
+  }) %>%
+  mutate(file_name = str_remove(file_name, ".rds")) %>%
+   separate(col =file_name, into = c("drop1", "fract", 
+                                     "drop2", "carrying_capacity", 
+                                     "drop3", "largest",
+                                     "drop4", "smallest",
+                                     "drop5", "drop6", "robin_hood_mode"), 
+            sep = "_",
+            convert = TRUE) %>% 
+  select(-contains("drop"))
+
+
+tension_df %>%
+  ggplot(aes(x = tension, y = adjusted_tension, colour = factor(carrying_capacity))) + geom_point()
+
+```
+
+
+

@@ -170,6 +170,7 @@ tibble(Var1 = "D", Var2 = "E")) %>%
 set_vertex_attr(., name = "net_generation", value = (betweenness(.) -mean(betweenness(.))))
 
 
+as_data_frame(test_g)
 
 test_g%>%
   plot()
