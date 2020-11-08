@@ -331,13 +331,37 @@ stellar_embeds <- c("DGI", "node2vec") %>%
     stellar_embeddings_loader(folder_path) %>%
       mutate(metric = .x)
     
-  }) %>% rename(robin_hood_mode = robin_hood, carrying_capacity = ec) %>%
+  }) %>% 
   left_join(. ,all_graph_agg %>%
   select(graph, carrying_capacity:robin_hood_mode, attack_round) %>%
   mutate(graph = str_remove(graph, "_igraph")) ) %>%
   mutate(average_type = "mean")
 
 
+stellar_embeds_pl <- c("DGI_pl", "node2vec_pl") %>%
+  map_df(~{
+    file.path(project_folder, "embeddings", .x) %>%
+      stellar_embeddings_loader_pl() %>%
+      mutate(metric = str_remove(.x, "_pl"))
+    
+  })
+
+#You can call this if you want but it is an ugly mess for the stellar pl embeds
+#They are all over the place
+# temp <- stellar_embeds %>% 
+#   select(value = edge_mean_length, fract:average_type) %>%
+#   mutate(type = "base") %>%
+#     bind_rows(stellar_embeds_pl %>% 
+#                 select(graph, carrying_capacity, value, metric) %>%
+#                 mutate(type = "pl")) %>%
+#      group_by(graph, metric) %>%
+#      mutate(
+#        value = kappa(value),
+#          robin_hood_mode = as.character(robin_hood_mode)) %>%
+#      ungroup 
+# 
+# stellar_embeds_pl <- temp %>% filter( type == "pl")
+# stellar_embeds <- temp %>% filter( type != "pl")
 ```
 
 
@@ -346,14 +370,26 @@ stellar_embeds <- c("DGI", "node2vec") %>%
 This is one of the key plots of the paper. It shows how well each of the metrics tracks the collapse point of the network
 ```{r}
 
-   stellar_embeds %>%
-     rename(value = edge_mean_length) %>% 
+
+pl_plot_df <- PL_SETSe_emebeddings %>%
+                 filter(graph == "IEEE_118_igraph",
+                        carrying_capacity !=1.010,
+                        average_type == "mean")
+
+# Add in the pl stellar if you want but yikes what a horror show. 
+# pl_plot_df <- pl_plot_df %>% select(graph, carrying_capacity, average_type, attack_round) %>%
+#   distinct() %>%
+#   mutate(graph = str_remove(graph, "_igraph")) %>%
+#   left_join(stellar_embeds_pl %>% select(graph, carrying_capacity , value, metric)) %>%
+#   bind_rows(pl_plot_df %>% select(graph, carrying_capacity , value, metric, average_type, attack_round))
+
+
+  stellar_embeds %>% 
      group_by(graph, metric) %>%
      mutate(
        value = kappa(value),
        average_type = "mean",
-         robin_hood_mode = as.character(robin_hood_mode)) %>%
-     ungroup %>%
+         robin_hood_mode = as.character(robin_hood_mode))%>%
      bind_rows(. ,
                all_SETSe_emebeddings %>%
                  mutate(graph = str_remove(graph, "_igraph"))
@@ -369,11 +405,8 @@ This is one of the key plots of the paper. It shows how well each of the metrics
             error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
      ggplot(aes(x = value, y = attack_round, group = metric)) + 
      geom_point(aes( colour =  as.factor(carrying_capacity))) +
-     geom_line(data = PL_SETSe_emebeddings %>%
-                 filter(graph == use_graph,
-                        carrying_capacity !=1.010,
-                        average_type == average_type2), size = 1) +
-     geom_smooth(method = "loess",se = FALSE) +
+     geom_line(data = pl_plot_df, size = 1) +
+     geom_smooth(method = "gam",se = FALSE) +
      facet_wrap(~metric) +
      #facet_wrap(~metric, scales = "free_x") +
      labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
@@ -441,7 +474,7 @@ if(!file.exists(file.path(project_folder, "steller_performance.rds"))){
   
 }
 
-
+#THe Stellar embeds were so bad it messes up the plot
 setse_performance_df  %>%
 #  bind_rows( steller_performance %>% mutate(graph_order = graph, combo = metric) ) %>%
   filter(eval_metric %in% c("rsq", "smape")) %>%

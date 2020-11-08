@@ -2,6 +2,7 @@
 #'
 #' This function loads the csvs that are created when the embeddings are made by the stellar python library.
 #' The function assumes that the graphs were created from graphml files. The scripts that created the embeddings
+#' This function is just for the proportionally loaded files
 #' 
 #' 
 #' @param folder_path
@@ -9,7 +10,7 @@
 #'
 #' @export
 
-stellar_embeddings_loader <- function(folder_path){
+stellar_embeddings_loader_pl <- function(folder_path){
   
   #regex pattern. Removes the last bit of the file name which is of the structure _2.csv, _54.csv etc
   pattern <- "_\\d+.csv"
@@ -20,14 +21,12 @@ stellar_embeddings_loader <- function(folder_path){
       
       out <- read_csv(.x) %>%
         mutate(file = file %>% str_remove(., ".graphml")) %>%
-        separate(., col = file, into = c("drop1", "fract",
-                                         "drop2", "ec",
-                                         "drop3", "largest",
-                                         "drop4", "smallest",
-                                         "drop5", "drop6", "robin_hood"),
-                 sep = "_", convert = TRUE) %>%
-        select(-contains("drop")) %>%
-        mutate(graph = basename(.x) %>% str_remove(., pattern))
+       separate(., col = file, into = c(
+                                        "drop2", "carrying_capacity"),
+                sep = "_", convert = TRUE) %>%
+       select(-contains("drop")) %>%
+       mutate(graph = basename(.x) %>% str_remove(., ".csv")) %>%
+        rename(value = edge_mean_length)
       
       names(out) <- make.names(names(out))
       

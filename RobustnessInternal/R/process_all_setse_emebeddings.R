@@ -9,9 +9,9 @@
 #'  @param folder_paths A character vector. The paths of each folder to load and process, each folder represents a graph
 #'  @param graph_agg A data frame of the summarised attack data that matches the strain data
 #'  @param PL_SETSe_emebeddings A dataframe the output of the pl equivalent of this function
+#'  
+#'  
 #'  @export
-#'  
-#'  
 #'  
 process_all_setse_emebeddings <- function(processed_path, folder_paths, graph_agg, PL_SETSe_emebeddings){
   if(file.exists(processed_path)){

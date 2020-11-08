@@ -13,4 +13,5 @@ cross_validated_setse_embeddings(all_SETSe_emebeddings, PL_SETSe_emebeddings)
 }
 \description{
 This is used so that the error can be plotted showing the performance differences between the methods
+elevation is excluded for now but can be re-included. This will require a change to the processing functions as well
 }

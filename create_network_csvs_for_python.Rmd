@@ -11,6 +11,8 @@ This markdown file is so that I can create graphml files of all the networks in 
 
 This is definitely inefficient as the networks can be generated. However, as I am not really able to program in python it is a good way to minimise the code as opposed to trying to construct the network from just the topology
 
+#The redistributions method
+
 ```{r}
 
 .x <- "/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/IEEE_118_igraph.rds"
@@ -72,6 +74,101 @@ if(!dir.exists(save_folder_csv)){
                             robin_hood_mode = Iter$robin_hood_mode,
                             output_graph = TRUE)
       
+      
+      names_are_char <-is.na(sum(as.numeric(get.vertex.attribute(g)$name)))
+      # if(names_are_char){
+      # g <- set_vertex_attr(g, "name", value = unclass(factor(get.vertex.attribute(g)$name)))
+      # }
+      # 
+
+      #This just ensures that the nodes names are 1:x not 1:x and x+1000
+      V(g)$name <- 1:vcount(g)
+      
+
+        g_edge <- as_data_frame(g, what = "edges") %>% 
+          select(from, to, weight = edge_capacity) %>%
+          mutate(weight = 1/weight,
+                 #make indexing from 0
+                 from = as.numeric(from )-1,
+                 to = as.numeric(to) -1
+          )
+        
+        
+        g_vertex <- as_data_frame(g, what = "vertices") %>% select(name, feature = net_generation) %>%
+          mutate(name = as.numeric(name)-1)
+          
+
+      
+      g_edge %>%
+        rename(source = from, target = to) %>%
+      write_csv(., file = Iter_embedding_path_csv)
+      
+      graph_from_data_frame(g_edge, directed = FALSE, vertices = g_vertex) %>%
+        write_graph(., file = Iter_embedding_path, format = "graphml")
+    }
+    
+  })
+
+})
+```
+
+
+
+
+#Proportional loadinig
+
+```{r}
+
+.x <- "/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/IEEE_118_igraph.rds"
+
+list.files(power_grid_graphs_path, pattern = ".rds", full.names = T)%>% walk(~{
+
+#get name of the network
+g_name <- basename(.x) %>% str_remove(., ".rds")
+g_name_graphml <-  g_name %>% str_remove("igraph") %>% paste0(., "graphml")
+save_folder <- file.path(power_grid_graphs_path, "pl_graphml" ,g_name_graphml)
+
+g_name_csv <-  g_name %>% str_remove("igraph") %>% paste0(., "csv")
+save_folder_csv <- file.path(power_grid_graphs_path, "pl_graphml" ,g_name_csv)
+#generate the network parameters
+#These will be used to set the edge weights of the network
+parameter_df_temp <- generate_pl_parameters(g_name) %>%
+  filter(simulation_id ==1)
+
+#load the graph itself
+g <- read_rds(.x)
+
+#create the folder for graphml files if necessary
+if(!dir.exists(save_folder)){
+  
+  dir.create(save_folder, recursive = TRUE)
+  
+}
+
+if(!dir.exists(save_folder_csv)){
+  
+  dir.create(save_folder_csv, recursive = TRUE)
+  
+}
+
+1:nrow(parameter_df_temp) %>%
+  walk(~{
+    loop_start <- Sys.time()
+
+    ##
+    ##
+    ## Check to see if the file already exists if it does skip this iteration. This allows easier restarts
+    ##
+    ##
+    Iter <- parameter_df_temp %>%
+      slice(.x)
+    Iter_embedding_path <- file.path(save_folder, paste0(Iter$parameter_summary, ".graphml"))
+    Iter_embedding_path_csv <- file.path(save_folder_csv, paste0(Iter$parameter_summary, ".csv"))
+    if(!file.exists(Iter_embedding_path)){
+
+      
+      #Proportionally load the network and redistribute that load according to the parameter settings
+      g <- g %>% Proportional_Load(., Iter$carrying_capacity, PowerFlow = "power_flow", "Link.Limit" = "edge_capacity")
       
       names_are_char <-is.na(sum(as.numeric(get.vertex.attribute(g)$name)))
       # if(names_are_char){

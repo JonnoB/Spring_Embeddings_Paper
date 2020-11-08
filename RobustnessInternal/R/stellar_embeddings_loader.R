@@ -21,13 +21,14 @@ stellar_embeddings_loader <- function(folder_path){
       out <- read_csv(.x) %>%
         mutate(file = file %>% str_remove(., ".graphml")) %>%
         separate(., col = file, into = c("drop1", "fract",
-                                         "drop2", "ec",
+                                         "drop2", "carrying_capacity",
                                          "drop3", "largest",
                                          "drop4", "smallest",
-                                         "drop5", "drop6", "robin_hood"),
+                                         "drop5", "drop6", "robin_hood_mode"),
                  sep = "_", convert = TRUE) %>%
         select(-contains("drop")) %>%
-        mutate(graph = basename(.x) %>% str_remove(., pattern))
+        mutate(graph = basename(.x) %>% str_remove(., pattern))%>%
+        rename(value = edge_mean_length)
       
       names(out) <- make.names(names(out))
       
