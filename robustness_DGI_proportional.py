@@ -47,7 +47,7 @@ for job_params in ["IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118", "IEEE_300", "UK_
         G = StellarGraph.from_networkx(G_graphml, node_features=nodefeatures)
         # The features aren't used by node2vec but it makes changing to DGI easier
 
-        fullbatch_generator = FullBatchNodeGenerator(G, sparse=False)
+        fullbatch_generator = FullBatchNodeGenerator(G, sparse=False, weighted=True)
         gcn_model = GCN(layer_sizes=[dims], activations=["relu"], generator=fullbatch_generator)
 
         corrupted_generator = CorruptedGenerator(fullbatch_generator)

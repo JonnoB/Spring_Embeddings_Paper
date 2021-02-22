@@ -58,6 +58,8 @@ for grid_instance in files_to_embed:
         n=100,  # number of random walks per root node
         p=0.5,  # Defines (unormalised) probability, 1/p, of returning to source node
         q=2.0,  # Defines (unormalised) probability, 1/q, for moving away from source node
+        weighted=True,
+        seed=423
     )
     print("Number of random walks: {}".format(len(walks)))
 

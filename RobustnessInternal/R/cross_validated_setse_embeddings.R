@@ -20,16 +20,14 @@ cross_validated_setse_embeddings <- function(all_SETSe_emebeddings, PL_SETSe_eme
   metric_combos <-all_SETSe_emebeddings %>%
     select(metric, average_type, graph)%>%
     distinct() %>%
-    filter(average_type =="mean",
-           metric != "elev"
+    filter(average_type =="mean"
     )
   
   #The combinations used when the PL value is taken to be base case
   pl_metric_combos <- PL_SETSe_emebeddings %>%
     select(metric, average_type, graph)%>%
     distinct() %>%
-    filter(average_type =="mean",
-           metric != "elev"
+    filter(average_type =="mean"
     )
   
   #This is to check that the UK high voltage is included
@@ -111,12 +109,12 @@ cross_validated_setse_embeddings <- function(all_SETSe_emebeddings, PL_SETSe_eme
     mutate( graph_order  = factor(gsub("_igraph", "", graph), 
                                   levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300",
                                              "UK_high_voltage")),
-            perf_diff = .estimate-.pl_estimate) %>%
-    filter(#error_type =="standard",
-      metric != "strain"
-    ) %>%
-    filter(metric !="alpha")
-  
+            perf_diff = .estimate-.pl_estimate) #%>%
+    # filter(#error_type =="standard",
+    #   metric != "strain"
+    # ) %>%
+    # filter(metric !="alpha")
+    # 
   
   return(error_df)
   

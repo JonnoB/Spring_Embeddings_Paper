@@ -58,5 +58,10 @@ other_metric_performance_all <- 1:nrow(metric_combos) %>%
   rename(eval_metric = .metric) %>%
   ungroup
 
+# other_metric_performance_all <- other_metric_performance_all %>%
+#   mutate( graph_order  = factor(gsub("_igraph", "", graph), 
+#                                 levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300",
+#                                            "UK_high_voltage")))
+
  return(other_metric_performance_all)
 }

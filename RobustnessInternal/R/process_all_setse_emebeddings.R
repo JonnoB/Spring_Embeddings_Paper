@@ -5,13 +5,13 @@
 #'  The function loads and processes the file output from the HPC script. It then saves the processed data
 #'  If the processed data is already saved this is loaded to save time.
 #'  
-#'  @param processed_path A character string. The location of the processed files
-#'  @param folder_paths A character vector. The paths of each folder to load and process, each folder represents a graph
-#'  @param graph_agg A data frame of the summarised attack data that matches the strain data
-#'  @param PL_SETSe_emebeddings A dataframe the output of the pl equivalent of this function
+#' @param processed_path A character string. The location of the processed files
+#' @param folder_paths A character vector. The paths of each folder to load and process, each folder represents a graph
+#' @param graph_agg A data frame of the summarised attack data that matches the strain data
+#' @param PL_SETSe_emebeddings A dataframe the output of the pl equivalent of this function
 #'  
 #'  
-#'  @export
+#' @export
 #'  
 process_all_setse_emebeddings <- function(processed_path, folder_paths, graph_agg, PL_SETSe_emebeddings){
   if(file.exists(processed_path)){
@@ -37,7 +37,8 @@ process_all_setse_emebeddings <- function(processed_path, folder_paths, graph_ag
              temp_node <- temp$node_embeddings %>%
                summarise(
                  mean_elev = mean(abs(elevation)),
-                 median_elev = median(abs(elevation))
+                 median_elev = median(abs(elevation)),
+                 static_force = sum(abs(static_force))
                                       )
                
              
@@ -80,7 +81,9 @@ process_all_setse_emebeddings <- function(processed_path, folder_paths, graph_ag
     #   summarise(converged = sum(converged),
     #             counts = n())
     
-    
+    PL_SETSe_emebeddings_extrema <- PL_SETSe_emebeddings %>%
+      filter(carrying_capacity==1 | carrying_capacity==Inf) %>%
+      select(graph, average_type, metric, min_val, max_val)
     
     all_SETSe_emebeddings2 <- left_join(graph_agg %>% 
                                           #The loading and alpha values in graph_agg are at the point of collapse not at initialiation. That is why they are removed and replaced with the values from the strain calc
@@ -104,8 +107,8 @@ process_all_setse_emebeddings <- function(processed_path, folder_paths, graph_ag
       separate(., col ="metric", into = c("average_type", "metric"), sep ="_") %>%
       ungroup %>%
       left_join(PL_SETSe_emebeddings_extrema) %>%
-      mutate(value_raw = value,
-             value =  (value-min_val)/(max_val-min_val))
+       mutate(value_raw = value,
+              value =  (value-min_val)/(max_val-min_val))
     
     saveRDS(all_SETSe_emebeddings2, processed_path)
     

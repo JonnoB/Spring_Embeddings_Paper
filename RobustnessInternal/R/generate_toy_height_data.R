@@ -97,10 +97,14 @@ generate_toy_height_data <- function(){
     select(groupID, edge, flow, alpha) %>%
     #add in the height data
     left_join(Edge_combos_delta_z %>% select(-groupID))  %>%
-    select(groupID, edge, strain) %>%
+    mutate(tension = k*strain) %>%
+    group_by(groupID) %>%
+    summarise(mean_strain = mean(strain),
+              mean_tension = mean(tension)) %>%
+#    select(groupID, edge, strain) %>%
     #Use spread to keep the delta values for each edge
-    spread(key = edge, value = strain) %>%
-    mutate(mean_strain = (A+B+C)/3) %>%
+ #   spread(key = edge, value = strain) %>%
+  #  mutate(mean_strain = (A+B+C)/3) %>%
     left_join(toy_theta_temp, by = "groupID")
   
   

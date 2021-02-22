@@ -48,6 +48,7 @@ for job_params in ["IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118", "IEEE_300", "UK_
             n=100,  # number of random walks per root node
             p=0.5,  # Defines (unormalised) probability, 1/p, of returning to source node
             q=2.0,  # Defines (unormalised) probability, 1/q, for moving away from source node
+            weighted=True,
         )
         print("Number of random walks: {}".format(len(walks)))
 
@@ -107,4 +108,3 @@ for job_params in ["IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118", "IEEE_300", "UK_
 
     # Save it all as a CSV to be loaded back into R
     out.to_csv(save_path)
-    

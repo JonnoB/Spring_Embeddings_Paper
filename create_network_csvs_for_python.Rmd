@@ -17,7 +17,7 @@ This is definitely inefficient as the networks can be generated. However, as I a
 
 .x <- "/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/IEEE_118_igraph.rds"
 
-list.files(power_grid_graphs_path, pattern = ".rds", full.names = T)[c(6)] %>% walk(~{
+list.files(power_grid_graphs_path, pattern = ".rds", full.names = T) %>% walk(~{
 
 #get name of the network
 g_name <- basename(.x) %>% str_remove(., ".rds")
@@ -28,7 +28,8 @@ g_name_csv <-  g_name %>% str_remove("igraph") %>% paste0(., "csv")
 save_folder_csv <- file.path(power_grid_graphs_path, "graphml" ,g_name_csv)
 #generate the network parameters
 #These will be used to set the edge weights of the network
-parameter_df_temp <-  generate_concentrator_parameters(g_name) %>%
+parameter_df_temp <-  generate_concentrator_parameters(g_name,
+                                                       fraction = seq(0.1, 1,0.1)) %>%
   filter(simulation_id ==1)
 
 #load the graph itself
@@ -88,6 +89,8 @@ if(!dir.exists(save_folder_csv)){
         g_edge <- as_data_frame(g, what = "edges") %>% 
           select(from, to, weight = edge_capacity) %>%
           mutate(weight = 1/weight,
+                 weight = ifelse(is.finite(weight), weight, -1),
+                 weight = ifelse(weight ==-1, max(weight), weight),
                  #make indexing from 0
                  from = as.numeric(from )-1,
                  to = as.numeric(to) -1
@@ -99,9 +102,9 @@ if(!dir.exists(save_folder_csv)){
           
 
       
-      g_edge %>%
-        rename(source = from, target = to) %>%
-      write_csv(., file = Iter_embedding_path_csv)
+      # g_edge %>%
+      #   rename(source = from, target = to) %>%
+      # write_csv(., file = Iter_embedding_path_csv)
       
       graph_from_data_frame(g_edge, directed = FALSE, vertices = g_vertex) %>%
         write_graph(., file = Iter_embedding_path, format = "graphml")
@@ -121,7 +124,7 @@ if(!dir.exists(save_folder_csv)){
 
 .x <- "/home/jonno/Dropbox/IEEE_Networks/power_grid_graphs/IEEE_118_igraph.rds"
 
-list.files(power_grid_graphs_path, pattern = ".rds", full.names = T)%>% walk(~{
+list.files(power_grid_graphs_path, pattern = ".rds", full.names = T) %>% walk(~{
 
 #get name of the network
 g_name <- basename(.x) %>% str_remove(., ".rds")
@@ -133,7 +136,8 @@ save_folder_csv <- file.path(power_grid_graphs_path, "pl_graphml" ,g_name_csv)
 #generate the network parameters
 #These will be used to set the edge weights of the network
 parameter_df_temp <- generate_pl_parameters(g_name) %>%
-  filter(simulation_id ==1)
+  filter(simulation_id ==1,
+         is.finite(carrying_capacity))
 
 #load the graph itself
 g <- read_rds(.x)
@@ -180,13 +184,13 @@ if(!dir.exists(save_folder_csv)){
       V(g)$name <- 1:vcount(g)
       
 
-        g_edge <- as_data_frame(g, what = "edges") %>% 
-          select(from, to, weight = edge_capacity) %>%
-          mutate(weight = 1/weight,
-                 #make indexing from 0
-                 from = as.numeric(from )-1,
-                 to = as.numeric(to) -1
-          )
+      g_edge <- as_data_frame(g, what = "edges") %>% 
+        select(from, to, weight = edge_capacity) %>%
+        mutate(weight = 1/weight,
+               #make indexing from 0
+               from = as.numeric(from )-1,
+               to = as.numeric(to) -1
+        )
         
         
         g_vertex <- as_data_frame(g, what = "vertices") %>% select(name, feature = net_generation) %>%
@@ -194,9 +198,9 @@ if(!dir.exists(save_folder_csv)){
           
 
       
-      g_edge %>%
-        rename(source = from, target = to) %>%
-      write_csv(., file = Iter_embedding_path_csv)
+      # g_edge %>%
+      #   rename(source = from, target = to) %>%
+      # write_csv(., file = Iter_embedding_path_csv)
       
       graph_from_data_frame(g_edge, directed = FALSE, vertices = g_vertex) %>%
         write_graph(., file = Iter_embedding_path, format = "graphml")

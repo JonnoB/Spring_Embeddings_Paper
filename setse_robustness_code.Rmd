@@ -12,6 +12,9 @@ Physica A
 Sustainable Energy, Grids and Networks
 International Journal of Critical Infrastructure Protection
 
+Bioinspired Mitigation Scheme for Cascading Failures in Farmland Wireless Sensor Networks
+https://www.hindawi.com/journals/complexity/2020/1065810/
+
 
 https://github.com/schochastics/graphlayouts
 
@@ -61,6 +64,7 @@ CodeFolder <- "/home/jonno/setse_and_network_robustness"
 datafile <- "/home/jonno/Dropbox/Jonathan_Bourne_Phd_Folder/ETYSAppendixB"
 LatexFolder <- "/home/jonno/Dropbox/Apps/ShareLaTeX/Sets Paper 2" 
 FiguresFolder <- file.path(LatexFolder, "Figures")
+FiguresFolderAppendix <- file.path(LatexFolder, "FiguresAppendix")
 TablesFolder <- file.path(LatexFolder, "Tables")
 MatricesFolder <- file.path(LatexFolder, "Matrices")
 Tariff <- file.path(basewd,"Tariff and Transport")
@@ -165,16 +169,19 @@ The code giveing the animation that shows convergence has been lost. The animati
 
 toy_height_data <- generate_toy_height_data()
 
-
   toy_height_data$toy_height_data %>%
     # some of the mean_alpha values are seperating on machine tolerance or something
-        mutate(mean_alpha = signif(mean_alpha,5)) %>% 
-    #filter(mean_alpha <=2.5) %>%
-    ggplot(aes(x = ratio, y = mean_strain, colour = mean_alpha, group = mean_alpha)) + 
+        mutate(mean_alpha = signif(mean_alpha,5),
+               mean_alpha = kappa(mean_alpha),
+               mean_load = kappa(mean_load)) %>% 
+  pivot_longer(cols = c(mean_tension, mean_load)) %>%
+    mutate(name = str_replace(name, "_", " ")) %>%
+    ggplot(aes(x = ratio, y = mean_alpha, colour = mean_alpha, group = mean_alpha)) + 
+    facet_wrap(~name, scales = "free") +
     geom_line(size = 1) +
     scale_colour_viridis_c() +
-    labs(title ="Strain and System Tolerance in terms of capacity fraction in edge B", 
-         y = "System Strain", 
+    labs(title ="Strain, Line Load and System Tolerance in terms of capacity fraction in edge B", 
+         y = "value", 
          x= latex2exp::TeX("$\\frac{\\tau_{B}}{\\tau_{B}+\\tau_{C}}$"),
          colour = "System \ntolerance") #latex2exp::TeX(paste("system", "$\\alpha$"))
   ggsave(file.path(FiguresFolder, "Constant_excess_capacity.pdf"))
@@ -191,6 +198,19 @@ toy_height_data <- generate_toy_height_data()
        y ="system strain", 
        colour =  "Sytem tolerance")
 ggsave(file.path(FiguresFolder, "entropy_theta.pdf"))
+
+
+  toy_height_data$toy_height_data %>%
+    # some of the mean_alpha values are seperating on machine tolerance or something
+        mutate(mean_alpha = signif(mean_alpha,5)) %>% 
+    #filter(mean_alpha <=2.5) %>%
+    ggplot(aes(x = ratio, y = mean_load, colour = mean_alpha, group = mean_alpha)) + 
+    geom_line(size = 1) +
+    scale_colour_viridis_c() +
+    labs(title ="Strain and System Tolerance in terms of capacity fraction in edge B", 
+         y = "System Strain", 
+         x= latex2exp::TeX("$\\frac{\\tau_{B}}{\\tau_{B}+\\tau_{C}}$"),
+         colour = "System \ntolerance") #latex2exp::TeX(paste("system", "$\\alpha$"))
 
 ```
 
@@ -235,7 +255,10 @@ ggsave(file.path(FiguresFolder, "all_networks.pdf"))
 Load all collapse data
 
 ```{r}
-all_graph_agg <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.names = T, recursive = T) %>%
+all_graph_agg <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", 
+                            full.names = T, 
+                            recursive = T,
+                            pattern = ".rds") %>%
   map_df(~{
     
     file_path <-.x
@@ -254,6 +277,8 @@ all_graph_agg <- list.files("/home/jonno/Dropbox/IEEE_Networks/attacks", full.na
 
 PL_SETSe_emebeddings <- process_all_pl_setse_emebeddings( strain_folders = file.path(embeddings_path, "PL"),
                                                           attack_folders = "/home/jonno/Dropbox/IEEE_Networks/PL_attacks")
+
+
 
 ```
 
@@ -313,12 +338,14 @@ After demonstrating the effectiveness on a single graph this chunk loads the dat
 
 ```{r}
 
-non_PL_folders <- list.files(embeddings_path, full.names = T)[!grepl("PL", list.files(embeddings_path))]
+non_PL_folders <- list.files(embeddings_path, full.names = T)[!grepl("(PL)|(DGI)|(2vec)|(autostr)|(fract)", list.files(embeddings_path))]
 
 all_SETSe_emebeddings <- process_all_setse_emebeddings(
   processed_path =  file.path(project_folder, "all_setse_embeddings_standard.rds"), 
   folder_paths = non_PL_folders, 
-  graph_agg= all_graph_agg)
+  graph_agg= all_graph_agg,
+  PL_SETSe_emebeddings)
+
 
 ```
 
@@ -327,9 +354,23 @@ all_SETSe_emebeddings <- process_all_setse_emebeddings(
 ```{r}
 stellar_embeds <- c("DGI", "node2vec") %>%
   map_df(~{
-     folder_path <- file.path(project_folder, "embeddings", .x, "dimensions_32")
-    stellar_embeddings_loader(folder_path) %>%
+    if(!file.exists(file.path(project_folder, "embeddings", paste(.x, ".rds")))){
+      
+         folder_path <- file.path(project_folder, "embeddings", .x, "dimensions_32")
+    
+         out <- stellar_embeddings_loader(folder_path) %>%
       mutate(metric = .x)
+         
+         write_rds(out, file.path(project_folder, "embeddings", paste(.x, ".rds")))
+         
+         return(out)
+        
+    } else{
+      
+      read_rds(file.path(project_folder, "embeddings", paste(.x, ".rds")))
+      
+    }
+
     
   }) %>% 
   left_join(. ,all_graph_agg %>%
@@ -337,6 +378,8 @@ stellar_embeds <- c("DGI", "node2vec") %>%
   mutate(graph = str_remove(graph, "_igraph")) ) %>%
   mutate(average_type = "mean")
 
+
+table(stellar_embeds$metric)
 
 stellar_embeds_pl <- c("DGI_pl", "node2vec_pl") %>%
   map_df(~{
@@ -370,49 +413,7 @@ stellar_embeds_pl <- c("DGI_pl", "node2vec_pl") %>%
 This is one of the key plots of the paper. It shows how well each of the metrics tracks the collapse point of the network
 ```{r}
 
-
-pl_plot_df <- PL_SETSe_emebeddings %>%
-                 filter(graph == "IEEE_118_igraph",
-                        carrying_capacity !=1.010,
-                        average_type == "mean")
-
-# Add in the pl stellar if you want but yikes what a horror show. 
-# pl_plot_df <- pl_plot_df %>% select(graph, carrying_capacity, average_type, attack_round) %>%
-#   distinct() %>%
-#   mutate(graph = str_remove(graph, "_igraph")) %>%
-#   left_join(stellar_embeds_pl %>% select(graph, carrying_capacity , value, metric)) %>%
-#   bind_rows(pl_plot_df %>% select(graph, carrying_capacity , value, metric, average_type, attack_round))
-
-
-  stellar_embeds %>% 
-     group_by(graph, metric) %>%
-     mutate(
-       value = kappa(value),
-       average_type = "mean",
-         robin_hood_mode = as.character(robin_hood_mode))%>%
-     bind_rows(. ,
-               all_SETSe_emebeddings %>%
-                 mutate(graph = str_remove(graph, "_igraph"))
-     ) %>%
-     filter(
-       graph == "IEEE_118",
-       grepl("mean", average_type),
-       metric !="elev"
-       #average_type == average_type2
-     ) %>%
-     #select(metric, value, attack_round, metric, carrying_capacity)
-     mutate(metric = str_replace(metric, "_", " "),
-            error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
-     ggplot(aes(x = value, y = attack_round, group = metric)) + 
-     geom_point(aes( colour =  as.factor(carrying_capacity))) +
-     geom_line(data = pl_plot_df, size = 1) +
-     geom_smooth(method = "gam",se = FALSE) +
-     facet_wrap(~metric) +
-     #facet_wrap(~metric, scales = "free_x") +
-     labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
-     labs(title = "The relationship between robustness metrics and number of attacks until failure",
-          y = "Number of rounds until loss of giant component") 
-ggsave(file.path(FiguresFolder, "robustness_and_attacks_118.pdf"))
+generate_robustness_plots(PL_SETSe_emebeddings, stellar_embeds, all_SETSe_emebeddings )
 
 ```
 
@@ -428,8 +429,10 @@ more detailed information on error spikes can be found in the non-core markdown 
 
 
 ```{r}
-#The error spikes are responsible for only 6% of the total number of cases
+#The error spikes are responsible for only 2.5% of the total number of cases
+#Error spikes are max %25 of fract =1 and so as they do not occur for any value less than fract =0.99 only take up %0.25 of the total distirbution
 all_SETSe_emebeddings %>%
+  filter(fract == 1) %>%
   mutate( error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
   group_by(error_spike) %>%
   summarise(count = n()) %>%
@@ -453,6 +456,7 @@ multi_metric <- metric_set(rmse, rsq, mae, smape)
 if(!file.exists(file.path(project_folder, "setse_performance_df.rds"))){
   
  setse_performance_df <- cross_validated_setse_embeddings(all_SETSe_emebeddings, PL_SETSe_emebeddings)
+
   
   saveRDS(setse_performance_df, file = file.path(project_folder, "setse_performance_df.rds")) 
   
@@ -476,15 +480,34 @@ if(!file.exists(file.path(project_folder, "steller_performance.rds"))){
 
 #THe Stellar embeds were so bad it messes up the plot
 setse_performance_df  %>%
+  bind_rows(steller_performance %>%
+  mutate( graph_order  = factor(gsub("_igraph", "", graph), 
+                                levels = c("IEEE_14", "IEEE_30", "IEEE_57", "IEEE_118","IEEE_300",
+                                           "UK_high_voltage"))))  %>%
 #  bind_rows( steller_performance %>% mutate(graph_order = graph, combo = metric) ) %>%
   filter(eval_metric %in% c("rsq", "smape")) %>%
+  ggplot(aes(x = graph_order, y = .estimate, fill = metric)) + geom_boxplot() +
+  facet_wrap(~eval_metric, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))  +
+  labs(title = "Comparing performance of all metrics",
+       y = "Evaluation metric score",
+       x = "Networks in order of nodes",
+       colour = "robustness metric") 
+ggsave(filename = file.path(FiguresFolderAppendix, "performance_across_networks_allmetrics.pdf"))
+
+#The Stellar embeds were so bad it messes up the plot
+setse_performance_df  %>%
+#  bind_rows( steller_performance %>% mutate(graph_order = graph, combo = metric) ) %>%
+  filter(eval_metric %in% c("rsq", "smape"),
+         metric %in% c("loading", "tension")) %>%
   ggplot(aes(x = graph_order, y = .estimate, fill = metric)) + geom_boxplot() +
   facet_wrap(~eval_metric, scales = "free_y") +
   theme(axis.text.x = element_text(angle = 15, hjust = 1))  +
   labs(title = "Comparing loading and tension as robustness metrics",
        y = "Evaluation metric score",
        x = "Networks in order of nodes",
-       colour = "robustness metric") 
+       colour = "robustness metric")# +
+  #coord_cartesian(ylim = c(0.7,1))
 ggsave(filename = file.path(FiguresFolder, "performance_across_networks.pdf"))
 
 ```
@@ -501,7 +524,7 @@ error_aov_prep <- setse_performance_df %>%
   ) %>%
   rename(estimate = .pl_estimate)
 
-aov_res <-aov(estimate ~  metric + graph_order+ eval_metric, data = error_aov_prep )
+aov_res <-aov(estimate ~  metric*graph_order*eval_metric, data = error_aov_prep )
 summary(aov_res)
 
 setse_performance_df %>%
@@ -527,7 +550,7 @@ GB <- st_read(shapefile) %>%
 
 spdf <- as(GB, "Spatial") %>% st_as_sf %>%
   st_crop(c(xmin = -7.5, ymin = 50, xmax = 2, ymax = 59)) %>%
-  as_Spatial()
+  as_Spatial(.)
 
 kriged_height_strain_data <- krige_SETSe_maps(                                                      
   SETSe_list = UK_SETSe_data, 
@@ -581,5 +604,17 @@ roxygenise( "~/setse_and_network_robustness/RobustnessInternal")
 detach("package:RobustnessInternal", unload = TRUE)
 install("~/setse_and_network_robustness/RobustnessInternal")
 library(RobustnessInternal)
+```
+
+
+
+```{r}
+  param_df <- expand_grid(largest = seq(0.0, 0.5, 0.1), 
+                          smallest = seq(0.0, 0.5, 0.1), 
+                          fraction = c(1, 0.5, 0.75, 0.25),
+                          carrying_capacity = c(1.005, 1.025, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20) , 
+                          robin_hood_mode = c(TRUE, FALSE)#,
+                         # simulation_id = 1:100
+                          ) 
 ```
 

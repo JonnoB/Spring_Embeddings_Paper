@@ -1,0 +1,271 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "05/01/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+
+tibble(alpha = c(1,1.05, 1.1, 1.2, 1.5, 2, 3:20)) %>%
+  mutate(inverse = 1/(alpha)) %>%
+  ggplot(aes(x = alpha, y = inverse)) + geom_line()
+
+```
+
+
+UNzipping everything
+```{r}
+list.files("/home/jonno/Dropbox/IEEE_Networks/IEEE_118_igraph_adapt", pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/Dropbox/IEEE_Networks/adapt",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+
+adapt_files <- list.files("/home/jonno/Dropbox/IEEE_Networks/adapt", full.names = T)
+
+all_SETSe_emebeddings_adapt <- process_all_setse_emebeddings(
+  processed_path =  file.path(project_folder, "all_setse_embeddings_adapt.rds"), 
+  folder_paths = adapt_files , 
+  graph_agg= all_graph_agg,
+  PL_SETSe_emebeddings)
+
+
+
+pl_plot_df <- PL_SETSe_emebeddings %>%
+  filter(graph == "IEEE_118_igraph",
+         carrying_capacity !=1.010,
+         average_type == "mean")
+
+
+all_SETSe_emebeddings %>%
+  filter(graph =="IEEE_118_igraph" ) %>%
+              mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+    graph == "IEEE_118",
+    grepl("mean", average_type),
+    metric !="elev",
+  #  fract !=1
+    #(fract ==1 & carrying_capacity>2)
+    #average_type == average_type2
+  ) %>%
+  #select(metric, value, attack_round, metric, carrying_capacity)
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = value, y = attack_round, group = metric)) + 
+  geom_point(aes( colour =  as.factor(smallest))) +
+  geom_line(data = pl_plot_df %>% filter(metric != "elev"), size = 1) +
+  geom_smooth(method = "gam",se = FALSE) +
+  facet_wrap(~metric) +
+  #facet_wrap(~metric, scales = "free_x") +
+  labs(y = "Attack round", x = "Fraction of total range")+
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+       y = "Number of rounds until loss of giant component") 
+
+```
+
+
+```{r}
+test <- generate_concentrator_parameters("test") 
+
+c(1, 0.5, 0.75, 0.25)
+
+  param_df <- expand.grid(largest = seq(0.0, 0.5, 0.1), 
+                          smallest = seq(0.0, 0.5, 0.1), 
+                          fraction = seq(0.15, 1, 0.15),
+                          carrying_capacity = c(1.005, 1.025, 1.05, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20) , 
+                          robin_hood_mode = c(TRUE, FALSE),
+                          simulation_id = 1:100) %>%
+    as_tibble() 
+  
+  
+  
+  test <- generate_concentrator_parameters("boo",
+                                             fraction = seq(0.1, 1, 0.1))
+
+  
+test <-  list.files("/home/jonno/Dropbox/IEEE_Networks/IEEE_118_igraph", full.names = T) %>%
+    map_df(~read_rds(.x))
+  
+```
+
+#Load the new simulation data
+
+```{r}
+
+embeds <- list.files("/home/jonno/Dropbox/IEEE_Networks/test_fractions/autostraincompress/IEEE_118_igraph/IEEE_118_igraph", 
+           full.names = TRUE) %>%
+  map_df(read_rds)
+
+test1 <- read_rds("/home/jonno/Dropbox/IEEE_Networks/test_fractions/autostraincompress/IEEE_118_igraph/IEEE_118_igraph/task_id_1.rds" )
+test10 <- read_rds("/home/jonno/Dropbox/IEEE_Networks/test_fractions/autostraincompress/IEEE_118_igraph/IEEE_118_igraph/task_id_10.rds" )
+
+all.equal(test1, test10)
+
+list.files("/home/jonno/Dropbox/IEEE_Networks/test_fractions/attack/IEEE_118_igraph_comp", pattern = ".tgz", full.names = T) %>% 
+  walk(~{
+  untar(tarfile =.x, 
+        exdir = "/home/jonno/Dropbox/IEEE_Networks/test_fractions/attack/IEEE_118_igraph",#, 
+        extras = "--strip-components 4"  #take only the useful bits of the zip file
+      )
+  
+})
+
+
+attacks <- list.files("/home/jonno/Dropbox/IEEE_Networks/test_fractions/attack/IEEE_118_igraph/collapse_summaries/IEEE_118_igraph",
+                      full.names = T)  %>%
+  map_df(read_rds)
+
+
+all_graph_agg <- attacks %>% 
+  group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
+  summarise_all(mean) %>%
+  ungroup %>%
+  mutate(mean_alpha = 1/mean_alpha,
+         median_alpha = 1/median_alpha) %>%
+  select(-median_alpha) %>%
+  mutate(carrying_capacity = signif(carrying_capacity),
+         smallest = signif(smallest),
+         largest = signif(largest),
+         fract = signif(fract))
+
+
+table(all_SETSe_emebeddings$graph)
+
+all_SETSe_emebeddings <- process_all_setse_emebeddings2(
+  processed_path =  file.path("/home/jonno/Dropbox/IEEE_Networks/test_fractions", "all_setse_embeddings_standard.rds"), 
+  folder_paths = "/home/jonno/Dropbox/IEEE_Networks/test_fractions/autostraincompress", 
+  graph_agg= all_graph_agg,
+  PL_SETSe_emebeddings)
+
+
+pl_plot_df <- PL_SETSe_emebeddings %>%
+  filter(graph == "IEEE_118_igraph",
+         carrying_capacity !=1.010,
+         average_type == "mean")
+
+test <- all_SETSe_emebeddings %>% 
+  mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+    graph == "IEEE_118",
+    grepl("mean", average_type),
+    metric !="elev"
+    #average_type == average_type2
+  )
+
+table(all_SETSe_emebeddings$graph)
+
+all_SETSe_emebeddings %>%
+  mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+    graph == "IEEE_118",
+    grepl("mean", average_type),
+  #  fract ==0.9,
+    metric !="elev"
+    #average_type == average_type2
+  ) %>%
+  #select(metric, value, attack_round, metric, carrying_capacity)
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>2 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = value, y = attack_round, group = metric)) + 
+  geom_point(aes( colour =  as.factor(fract))) +
+  geom_line(data = pl_plot_df %>% filter(metric != "elev"), size = 1) +
+  geom_smooth(method = "gam",se = FALSE) +
+  facet_wrap(~metric) +
+  #facet_wrap(~metric, scales = "free_x") +
+  labs(colour = "Capacity", y = "Attack round", x = "Fraction of total range")+
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+       y = "Number of rounds until loss of giant component") 
+
+
+
+all_SETSe_emebeddings %>%
+  mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+    graph == "UK_high_voltage",
+    grepl("mean", average_type),
+    #metric =="strain"
+    #average_type == average_type2
+  ) %>%
+  #select(metric, value, attack_round, metric, carrying_capacity)
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = value, y = attack_round, group = metric)) + 
+  geom_point(aes( colour =  as.factor(fract)==1)) +
+  #geom_line(data = pl_plot_df %>% filter(metric != "elev"), size = 1) +
+  geom_smooth(method = "gam",se = FALSE) +
+  facet_wrap(~metric) +
+  #facet_wrap(~metric, scales = "free_x") +
+  labs(colour = "fraction = 1", y = "Attack round", x = "total range")+
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+       y = "Number of rounds until loss of giant component") 
+
+```
+
+#High end fraction data
+
+```{r}
+
+all_SETSe_emebeddings_high <- process_all_setse_emebeddings2(
+  processed_path =  file.path("/home/jonno/Dropbox/IEEE_Networks/test_fractions_high", "all_setse_embeddings_standard.rds"), 
+  folder_paths = "/home/jonno/Dropbox/IEEE_Networks/test_fractions_high/autostraincompress", 
+  graph_agg= all_graph_agg_high,
+  PL_SETSe_emebeddings %>% mutate(graph = str_replace(graph, "118", "118b")))
+
+attacks_high <- list.files("/home/jonno/Dropbox/IEEE_Networks/test_fractions_high/attack/IEEE_118b_igraph/collapse_summaries/IEEE_118b_igraph",
+                      full.names = T)  %>%
+  map_df(read_rds)
+
+
+all_graph_agg_high <- attacks_high %>% 
+  group_by(carrying_capacity, smallest, largest, fract, robin_hood_mode, graph) %>%
+  summarise_all(mean) %>%
+  ungroup %>%
+  mutate(mean_alpha = 1/mean_alpha,
+         median_alpha = 1/median_alpha) %>%
+  select(-median_alpha) %>%
+  mutate(carrying_capacity = signif(carrying_capacity),
+         smallest = signif(smallest),
+         largest = signif(largest),
+         fract = signif(fract))
+
+
+all_SETSe_emebeddings_high %>%
+  mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+ #  fract==0.97,
+    grepl("mean", average_type),
+    #metric =="strain"
+    #average_type == average_type2
+  ) %>%
+  #select(metric, value, attack_round, metric, carrying_capacity)
+  mutate(metric = str_replace(metric, "_", " "),
+         error_spike = carrying_capacity>1.5 & as.logical(robin_hood_mode) & fract == 1) %>%
+  ggplot(aes(x = value, y = attack_round, group = metric)) + 
+  geom_point(aes( colour =  as.factor(fract))) +
+  #geom_line(data = pl_plot_df %>% filter(metric != "elev"), size = 1) +
+  geom_smooth(method = "gam",se = FALSE) +
+  facet_wrap(~metric) +
+  #facet_wrap(~metric, scales = "free_x") +
+  labs(colour = "fraction = 1", y = "Attack round", x = "total range")+
+  labs(title = "The relationship between robustness metrics and number of attacks until failure",
+       y = "Number of rounds until loss of giant component") 
+
+
+test <- all_SETSe_emebeddings_high %>%
+  mutate(graph = str_remove(graph, "_igraph")) %>%
+  filter(
+   fract>0.97,
+    grepl("mean", average_type),
+    #metric =="strain"
+    #average_type == average_type2
+  )
+```
+

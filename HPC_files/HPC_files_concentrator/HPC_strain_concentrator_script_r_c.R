@@ -150,7 +150,7 @@ print(paste("pararmeters loaded. Task number", task_id))
       #if the below is ative then it allows unlimited spring resistance
       #set.edge.attribute(., "k", value = common_c + (edge_attr(g, "edge_capacity")/abs(edge_attr(g, "power_flow"))-1)*common_r ) %>%
       #the below code is the normal approach to spring resistance... that doesn't mean it is right though
-       calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = sqrt(common_c), stretch_range = sqrt(common_r)) %>%
+       calc_spring_youngs_modulus(., "power_flow", "edge_capacity", minimum_value = common_c, stretch_range = common_r) %>%
        calc_spring_constant(., E ="E", A = "Area", distance = "distance") %>%
       normalise_dc_load(.,  
                         generation = "generation", 

@@ -38,6 +38,12 @@ process_all_pl_setse_emebeddings <- function( strain_folders, attack_folders){
           
           parts <- str_split(basename(file_name), pattern = "_", simplify = T)
           
+          temp_node <- temp$node_embeddings %>%
+            summarise(
+              mean_elev = mean(abs(elevation)),
+              median_elev = median(abs(elevation))
+            )
+          
           temp_edge %>%
             summarise(mean_loading =mean(line_load, na.rm = T),
                       median_loading = median(line_load, na.rm = T),
@@ -48,6 +54,7 @@ process_all_pl_setse_emebeddings <- function( strain_folders, attack_folders){
                       mean_tension = mean(tension, na.rm = T),
                       median_tension = median(tension, na.rm = T)
             ) %>%
+            bind_cols(temp_node) %>%
             mutate(
               static_force = sum(abs(temp$node_embeddings$static_force)),
               carrying_capacity =str_remove(parts[2], pattern = ".rds"))
@@ -68,7 +75,7 @@ process_all_pl_setse_emebeddings <- function( strain_folders, attack_folders){
   #These values are also used to normalise the redistributed results
   PL_SETSe_emebeddings_extrema <- PL_SETSe_emebeddings_raw %>%
     filter(carrying_capacity %in% c(1, Inf)) %>%
-    pivot_longer(.,cols = mean_loading:median_tension, names_to = "metric") %>%
+    pivot_longer(.,cols = mean_loading:median_elev, names_to = "metric") %>%
     separate(., col ="metric", into = c("average_type", "metric"), sep ="_") %>%
     select(carrying_capacity, graph, average_type:value) %>%
     group_by(graph,average_type, metric) %>%
@@ -77,7 +84,7 @@ process_all_pl_setse_emebeddings <- function( strain_folders, attack_folders){
     ungroup
   
   PL_SETSe_emebeddings <-PL_SETSe_emebeddings_raw %>%
-    pivot_longer(.,cols = mean_loading:median_tension, names_to = "metric") %>%
+    pivot_longer(.,cols = mean_loading:median_elev, names_to = "metric") %>%
     separate(., col ="metric", into = c("average_type", "metric"), sep ="_") %>%
     left_join(PL_SETSe_emebeddings_extrema) %>%
     mutate(value_raw = value,
